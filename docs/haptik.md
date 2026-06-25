@@ -20,9 +20,11 @@ two things a normal oscillator fuses together:
 
 - **A dynamical system** — here, a closed ring of `N` masses. Each mass is pulled
   toward its neighbours (the **COUPLE** stiffness) and toward its rest position
-  (the **RATE**/centering force), and loses energy over time (**DAMP**). This is
-  integrated once per sample with a symplectic (semi-implicit) Euler step, which
-  is cheap and — with the coupling capped — unconditionally stable.
+  (the **RATE**/centering force), and loses energy over time (**DAMP**). In Fast
+  mode it is stepped once per audio sample with a symplectic (semi-implicit) Euler
+  update (in Slow mode, every 256 samples and interpolated — see below); the step
+  is cheap and, with the coupling capped at 0.9, the homogeneous lattice stays
+  bounded (forced/lossless runaway is caught separately by a state clamp).
 - **A scanning function** — a phase pointer that runs around the ring at the pitch
   frequency, linearly interpolating between adjacent masses to read out a sample.
 

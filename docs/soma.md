@@ -71,6 +71,27 @@ of spikes climbing along `z` and the silent gap as the slow return. In the chaot
 window the trail never quite repeats. The faint diagonal is the `z`-nullcline
 `z = s·(x − x_R)`, where the slow drift reverses.
 
+## CPU & polyphony
+
+Polyphony works exactly as in [Axon](axon.md#polyphony) (up to 16 voices, count
+from V/OCT or TRIG), and voices **keep their state** when the channel count drops
+and rises — silent voices resume rather than restarting from rest (gate SYNC if
+you want each note clean).
+
+The integrator dominates CPU: per voice, `oversample × K` RK4 substeps per sample
+(`K` 4…64, rising with pitch), so the worst case scales as **voices × oversample
+× substeps**. Soma is a touch heavier than Axon — Hindmarsh–Rose is a
+three-variable system vs FHN's two.
+
+| Voices | Anti-aliasing | Cost |
+| --- | --- | --- |
+| 1 | Off / ×4 | light |
+| 8–16 | ×4 (default) | moderate |
+| 16 | ×8 | very heavy, patch-dependent |
+
+Leave anti-aliasing at ×4 (or Off) for large polyphonic patches; reach for ×8
+only when aliasing is audible on high notes.
+
 ## Patches
 
 `tools/make_patches_neuron.py` also writes six Soma patches:

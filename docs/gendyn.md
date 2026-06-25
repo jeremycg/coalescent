@@ -115,6 +115,11 @@ per-sample playhead and the individual random draws are deliberately not shown.
 - **SuperCollider Gendy mode:** PERSIST 0%, SCALE ≈ 0.1, DIST Cauchy,
   B DUR CTR ≈ 520 Hz with B DUR WID ≈ 0.2 lands close to `Gendy1.ar()`
   at its defaults.
+- **Aliasing is intended character, not a defect.** The output is a piecewise-
+  linear waveform with randomised breakpoints — it is *not* a band-limited
+  oscillator. At high B DUR CTR or extreme duration/amplitude settings the sharp
+  corners produce audible aliasing. That raw digital edge is part of the GENDY3
+  sound; tame it with a downstream low-pass if you want it cleaner.
 
 ## Compositional technique
 

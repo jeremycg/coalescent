@@ -102,6 +102,31 @@ Axon, amber for Soma), with a small `Nv` voice-count badge in the corner.
 Feed them from a polyphonic source (a poly MIDI→CV, or `VCV Split`/`Merge`) and
 sum the poly OUT with any mixer.
 
+Polyphonic voices **keep their internal state** when the channel count drops and
+rises again — a voice that goes silent isn't cleared, so it resumes its orbit
+where it left off rather than restarting from rest. That's deliberate (continuity
+across held chords), but if you want each new note to start clean, gate it with
+the SYNC input.
+
+## CPU
+
+The integrator is the cost: per voice, Axon runs `oversample × K` RK4 substeps
+per audio sample, where `K` (4…64) rises with pitch. So the worst case scales as
+**voices × oversample × substeps** — at 16 voices, ×8 anti-aliasing, and the top
+octave that's `16 × 8 × 64 ≈ 8000` steps/sample. That's a ceiling, not the normal
+case (at moderate pitch `K` sits near its floor of 4), but it means a big
+polyphonic patch at ×8 is genuinely heavy.
+
+| Voices | Anti-aliasing | Cost |
+| --- | --- | --- |
+| 1 | Off / ×4 | light |
+| 8–16 | ×4 (default) | moderate |
+| 16 | ×8 | heavy, patch-dependent |
+
+Rule of thumb: leave anti-aliasing at ×4 (or Off), and only reach for ×8 if you
+hear aliasing on high notes. [Soma](soma.md) is a touch heavier still (a
+three-variable system vs Axon's two).
+
 ## Patches
 
 `tools/make_patches_neuron.py` writes seven Axon smoke-test patches into `patches/`

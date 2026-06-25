@@ -15,12 +15,20 @@ panels, not a separate brand); the same plugin has room for other series later.
 
 ![Coalescent neuron pair](docs/img/neuron.png)
 
+## Which module should I use?
+
+- **Evolving digital noise / stochastic textures and glissandi?** → **GENDYN**
+- **Plucked, struck, or resonant string-like bodies you can freeze?** → **Haptik**
+- **Pingable spikes and rubbery, excitable neuron percussion or drones?** → **Axon**
+- **Bursting, slow-fast, chaotic motion?** → **Soma**
+
 ## The neuron pair
 
 **Axon** and **Soma** are conceptual twins — the FitzHugh–Nagumo and Hindmarsh–Rose
 spiking-neuron models — and they're built that way: both live in `src/neuron/` over
 a shared `integrator.hpp` (a generic `neuron::rk4<N>` step + pitch-adaptive
-substepping, where the HR model is just the FHN one with a third equation). They
+substepping, where the HR model extends the FHN one with a third, slow adaptation
+equation). They
 share a name prefix so they sort together in the browser, an accent/panel language,
 and a **Synth Voice** tag the other two modules don't carry. Both are polyphonic
 up to 16 voices.
@@ -47,6 +55,13 @@ python3 tools/make_patch_gendyn_2voice.py
 python3 tools/make_patch_gendyn_cluster.py
 ```
 
+## Install
+
+Download the `.vcvplugin` bundle for your platform from the
+[latest GitHub Release](https://github.com/jeremycg/coalescent/releases/latest),
+drop it into your Rack user folder's `plugins/` directory (Rack → *Library →
+Open user folder*), and restart Rack.
+
 ## Build
 
 Download the [VCV Rack 2 Plugin SDK](https://vcvrack.com/downloads) and point
@@ -68,14 +83,36 @@ bundles to a GitHub Release on a `v*` tag.
 
 ### Tests
 
-Each module has a standalone kernel replica that asserts stability/calibration
-without launching Rack:
+`make check` validates the manifest and runs every module's standalone kernel
+replica (stability/calibration) plus the RK4 equivalence proof — no Rack SDK
+needed. It's the same guardrail CI gates releases on:
+
+```bash
+make check
+```
+
+Each replica can also be built and run on its own:
 
 ```bash
 g++ -O2 -o /tmp/t tools/stability/axon.cpp   && /tmp/t   # FitzHugh–Nagumo
 g++ -O2 -o /tmp/t tools/stability/soma.cpp   && /tmp/t   # Hindmarsh–Rose
 g++ -O2 -o /tmp/t tools/stability/haptik.cpp && /tmp/t   # scanned-synthesis ring
 ```
+
+## Known character, not bugs
+
+These are intended behaviours, called out so they don't read as defects:
+
+- **GENDYN aliases** at high center frequencies / extreme settings — it's a raw
+  piecewise-linear oscillator, not band-limited. Part of the GENDY3 sound.
+- **Haptik Slow mode steps** the lattice every 256 samples by design (tactile,
+  haptic-rate morphing); the readout is interpolated so it doesn't sound stepped.
+- **Axon/Soma are excitable systems** — they click and spike on purpose, and
+  their pitch is open-loop (CURRENT/EPS/BURST/ADAPT pull it a little).
+- **Soma's chaotic region** sits *around* the documented CURRENT; nearby values
+  shift with rate, drive, and modulation — chaos isn't a fixed point on the dial.
+- **Module state isn't saved** with the patch (oscillators re-seed at rest on
+  load); knob/menu settings persist.
 
 ## License
 
