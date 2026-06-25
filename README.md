@@ -29,9 +29,9 @@ spiking-neuron models — and they're built that way: both live in `src/neuron/`
 a shared `integrator.hpp` (a generic `neuron::rk4<N>` step + pitch-adaptive
 substepping, where the HR model extends the FHN one with a third, slow adaptation
 equation). They
-share a name prefix so they sort together in the browser, an accent/panel language,
-and a **Synth Voice** tag the other two modules don't carry. Both are polyphonic
-up to 16 voices.
+share a name prefix so they sort together in the browser and an accent/panel
+language so the kinship reads visually; they're also the only two modules tagged
+**Polyphonic** (up to 16 voices), so a browser filter narrows to exactly the pair.
 
 ## Modules — full documentation
 

@@ -49,12 +49,12 @@
       "tags": [
         "Oscillator",
         "Physical Modeling",
-        "Polyphonic",
-        "Synth Voice"
+        "Polyphonic"
       ],
       "keywords": [
         "FitzHugh", "Nagumo", "FHN", "neuron", "spike", "excitable",
-        "relaxation", "oscillator", "phase portrait", "polyphonic", "sync"
+        "relaxation", "oscillator", "phase portrait", "polyphonic", "sync",
+        "voice", "percussion"
       ]
     },
     {
@@ -65,12 +65,12 @@
       "tags": [
         "Oscillator",
         "Physical Modeling",
-        "Polyphonic",
-        "Synth Voice"
+        "Polyphonic"
       ],
       "keywords": [
         "Hindmarsh", "Rose", "HR", "neuron", "burst", "bursting",
-        "chaos", "adaptation", "oscillator", "phase portrait", "polyphonic", "sync"
+        "chaos", "adaptation", "oscillator", "phase portrait", "polyphonic", "sync",
+        "voice", "percussion"
       ]
     }
   ]

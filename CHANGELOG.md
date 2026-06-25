@@ -9,8 +9,8 @@ this release is the unification:
 - Single plugin slug/brand `Coalescent`, one manifest, one Makefile.
 - Four modules under one brand: **GENDYN**, **Haptik**, and the **Neuron** pair
   **Axon** (FitzHugh–Nagumo) and **Soma** (Hindmarsh–Rose), grouped by a shared
-  name prefix, accent/panel language, and the `Synth Voice` tag.
-- Axon and Soma share an RK4 integrator under `src/neuron/`.
+  name prefix and accent/panel language (and both tagged `Polyphonic`).
+- Axon and Soma share an RK4 integrator (`src/neuron/integrator.hpp`).
 - Demo patches regenerated against the `Coalescent` plugin slug.
 - Per-module documentation under `docs/`; new top-level README.
 
