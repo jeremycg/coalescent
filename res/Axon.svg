@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="60.96mm" height="128.5mm"
+     viewBox="0 0 60.96 128.5">
+
+  <!-- Panel background -->
+  <rect width="60.96" height="128.5" fill="#1a1a2e"/>
+
+  <!-- Top and bottom rails -->
+  <rect y="0"     width="60.96" height="3" fill="#111122"/>
+  <rect y="125.5" width="60.96" height="3" fill="#111122"/>
+
+  <!-- Screw holes -->
+  <circle cx="3.5"   cy="3.5"   r="1.5" fill="#0d0d1a"/>
+  <circle cx="57.46" cy="3.5"   r="1.5" fill="#0d0d1a"/>
+  <circle cx="3.5"   cy="124.5" r="1.5" fill="#0d0d1a"/>
+  <circle cx="57.46" cy="124.5" r="1.5" fill="#0d0d1a"/>
+
+</svg>

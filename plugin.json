@@ -1,0 +1,73 @@
+{
+  "slug": "Coalescent",
+  "name": "Coalescent",
+  "version": "2.0.0",
+  "license": "GPL-3.0-only",
+  "brand": "Coalescent",
+  "author": "Jeremy Gray",
+  "authorEmail": "jeremycgray@gmail.com",
+  "authorUrl": "https://github.com/jeremycg",
+  "pluginUrl": "https://github.com/jeremycg/coalescent",
+  "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/README.md",
+  "sourceUrl": "https://github.com/jeremycg/coalescent",
+  "changelogUrl": "https://github.com/jeremycg/coalescent/blob/main/CHANGELOG.md",
+  "modules": [
+    {
+      "slug": "GENDYN",
+      "name": "GENDYN",
+      "description": "Dynamic stochastic synthesis oscillator based on Xenakis GENDY3",
+      "tags": [
+        "Oscillator",
+        "Random",
+        "Noise"
+      ],
+      "keywords": [
+        "Xenakis", "GENDY", "GENDY3", "stochastic", "random walk",
+        "dynamic stochastic synthesis", "oscillator"
+      ]
+    },
+    {
+      "slug": "Haptik",
+      "name": "Haptik",
+      "description": "Scanned-synthesis oscillator: a mass-spring ring scanned at audio rate",
+      "tags": [
+        "Oscillator",
+        "Physical Modeling"
+      ],
+      "keywords": [
+        "scanned synthesis", "mass-spring", "ring", "physical modeling",
+        "string", "oscillator"
+      ]
+    },
+    {
+      "slug": "Axon",
+      "name": "Neuron · Axon",
+      "description": "Spiking-neuron oscillator on the FitzHugh-Nagumo system: relaxation oscillator + excitable (trigger-fired) voice",
+      "tags": [
+        "Oscillator",
+        "Physical Modeling",
+        "Polyphonic",
+        "Synth Voice"
+      ],
+      "keywords": [
+        "FitzHugh", "Nagumo", "FHN", "neuron", "spike", "excitable",
+        "relaxation", "oscillator", "phase portrait", "polyphonic", "sync"
+      ]
+    },
+    {
+      "slug": "Soma",
+      "name": "Neuron · Soma",
+      "description": "Bursting/chaotic neuron oscillator on the Hindmarsh-Rose system: spike trains, bursts, and chaos from one current control",
+      "tags": [
+        "Oscillator",
+        "Physical Modeling",
+        "Polyphonic",
+        "Synth Voice"
+      ],
+      "keywords": [
+        "Hindmarsh", "Rose", "HR", "neuron", "burst", "bursting",
+        "chaos", "adaptation", "oscillator", "phase portrait", "polyphonic", "sync"
+      ]
+    }
+  ]
+}

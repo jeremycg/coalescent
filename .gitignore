@@ -1,0 +1,23 @@
+# Build output
+/build/
+/dist/
+/dep/
+plugin.so
+plugin.dll
+plugin.dylib
+
+# Rack SDK fetched by CI / local builds
+/Rack-SDK/
+
+# WSL "downloaded from the internet" marker files
+*Zone.Identifier
+
+# Claude Code local settings
+.claude/
+
+# Internal design/build notes (not published)
+*_implementation_plan.md
+COALESCENT_unification_plan.md
+
+# Output of tools/panel_diagram_*.py
+*_panel.png

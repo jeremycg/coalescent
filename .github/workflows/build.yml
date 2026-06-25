@@ -1,0 +1,136 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Rack SDK to build against. Bump together with the Rack version you target.
+  RACK_SDK_VERSION: "2.6.6"
+
+jobs:
+  # Reliable, release-gating platforms: Linux x64 and macOS arm64 (native clang).
+  # mac-arm64 is the clang validation; Intel macOS is handled best-effort below
+  # because GitHub's macos-13 runners are scarce and being phased out.
+  unix:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, platform: lin-x64 }
+          - { runner: macos-14,     platform: mac-arm64 } # Apple Silicon → arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential jq zstd unzip libgl-dev
+
+      - name: Install build deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install jq zstd
+
+      - name: Download Rack SDK
+        run: |
+          curl -fsSL -o rack-sdk.zip \
+            "https://vcvrack.com/downloads/Rack-SDK-${RACK_SDK_VERSION}-${{ matrix.platform }}.zip"
+          unzip -q rack-sdk.zip
+
+      - name: Build
+        run: make -j"$(getconf _NPROCESSORS_ONLN)" RACK_DIR="$PWD/Rack-SDK" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/*.vcvplugin
+          if-no-files-found: error
+
+  # Windows builds natively under MSYS2 / MinGW-w64 (matches the win-x64 SDK).
+  windows:
+    name: win-x64
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make tar unzip curl
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-jq
+            mingw-w64-x86_64-zstd
+
+      - name: Download Rack SDK
+        run: |
+          curl -fsSL -o rack-sdk.zip \
+            "https://vcvrack.com/downloads/Rack-SDK-${RACK_SDK_VERSION}-win-x64.zip"
+          unzip -q rack-sdk.zip
+
+      - name: Build
+        run: make -j"$(nproc)" RACK_DIR="$PWD/Rack-SDK" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-x64
+          path: dist/*.vcvplugin
+          if-no-files-found: error
+
+  # Intel macOS: best-effort and NON-gating. GitHub's macos-13 runners often
+  # queue for a long time; this job must never block the release. It uses the
+  # same native clang as mac-arm64, so it's only an extra x86_64 artifact — not
+  # the clang validation (that's mac-arm64). The VCV Library build farm also
+  # produces mac-x64 itself, so a missed run here is harmless.
+  macos-x64:
+    name: mac-x64 (best-effort)
+    runs-on: macos-13
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install jq zstd
+      - name: Download Rack SDK
+        run: |
+          curl -fsSL -o rack-sdk.zip \
+            "https://vcvrack.com/downloads/Rack-SDK-${RACK_SDK_VERSION}-mac-x64.zip"
+          unzip -q rack-sdk.zip
+      - name: Build
+        run: make -j"$(getconf _NPROCESSORS_ONLN)" RACK_DIR="$PWD/Rack-SDK" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-x64
+          path: dist/*.vcvplugin
+          if-no-files-found: warn
+
+  # On a version tag (vX.Y.Z), gather the gating platforms' bundles into a
+  # Release. (mac-x64 is best-effort and not required here.)
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [unix, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.vcvplugin
+          fail_on_unmatched_files: true
