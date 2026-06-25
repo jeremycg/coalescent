@@ -460,12 +460,13 @@ struct GENDYScope : Widget {
 // ─── Widget ───────────────────────────────────────────────────────────────────
 
 struct GENDYWidget : ModuleWidget {
+    std::shared_ptr<Font> font;   // cached once (loaded lazily in draw)
 
     void draw(const DrawArgs& args) override {
         ModuleWidget::draw(args);
 
-        std::shared_ptr<Font> font = APP->window->loadFont(
-            asset::system("res/fonts/DejaVuSans.ttf"));
+        if (!font)
+            font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
         if (!font) return;
 
         nvgSave(args.vg);

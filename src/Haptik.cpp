@@ -235,7 +235,6 @@ struct Haptik : Module {
         // ── dynamics: symplectic Euler, two passes (skip if frozen) ──
         // Pass 1 reads only y[] (one snapshot) to form all accelerations;
         // pass 2 reads only v[]. The ordering is required for correctness.
-        // ── dynamics: symplectic Euler, two passes ──
         // Fast mode steps every sample; Slow mode steps every D samples (divCounter==0)
         // and keeps yPrev so the readout can interpolate between frames (no stepping).
         bool stepNow = !freeze && (!slow || divCounter == 0);

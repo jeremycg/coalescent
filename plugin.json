@@ -16,6 +16,7 @@
       "slug": "GENDYN",
       "name": "GENDYN",
       "description": "Dynamic stochastic synthesis oscillator based on Xenakis GENDY3",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/gendyn.md",
       "tags": [
         "Oscillator",
         "Random",
@@ -30,6 +31,7 @@
       "slug": "Haptik",
       "name": "Haptik",
       "description": "Scanned-synthesis oscillator: a mass-spring ring scanned at audio rate",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/haptik.md",
       "tags": [
         "Oscillator",
         "Physical Modeling"
@@ -43,6 +45,7 @@
       "slug": "Axon",
       "name": "Neuron · Axon",
       "description": "Spiking-neuron oscillator on the FitzHugh-Nagumo system: relaxation oscillator + excitable (trigger-fired) voice",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/axon.md",
       "tags": [
         "Oscillator",
         "Physical Modeling",
@@ -58,6 +61,7 @@
       "slug": "Soma",
       "name": "Neuron · Soma",
       "description": "Bursting/chaotic neuron oscillator on the Hindmarsh-Rose system: spike trains, bursts, and chaos from one current control",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/soma.md",
       "tags": [
         "Oscillator",
         "Physical Modeling",

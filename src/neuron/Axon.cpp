@@ -138,6 +138,7 @@ struct Axon : Module {
     }
 
     void onReset() override {
+        oversampleMode = 1;   // restore default anti-aliasing (×4) on Initialize
         for (int c = 0; c < MAX_POLY; c++) {
             vv[c] = -1.2f; ww[c] = -0.6f; trigPulse[c] = 0.f;
             trigIn[c].reset(); syncIn[c].reset(); spikeDet[c].reset(); spikeGen[c].reset();

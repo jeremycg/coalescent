@@ -18,8 +18,8 @@ panels, not a separate brand); the same plugin has room for other series later.
 ## The neuron pair
 
 **Axon** and **Soma** are conceptual twins — the FitzHugh–Nagumo and Hindmarsh–Rose
-spiking-neuron models — and they're built that way: both live in `src/neuron/` and
-share the same RK4 integration strategy (a factored derivative + pitch-adaptive
+spiking-neuron models — and they're built that way: both live in `src/neuron/` over
+a shared `integrator.hpp` (a generic `neuron::rk4<N>` step + pitch-adaptive
 substepping, where the HR model is just the FHN one with a third equation). They
 share a name prefix so they sort together in the browser, an accent/panel language,
 and a **Synth Voice** tag the other two modules don't carry. Both are polyphonic

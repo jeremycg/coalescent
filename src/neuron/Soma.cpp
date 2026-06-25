@@ -140,6 +140,7 @@ struct Soma : Module {
     }
 
     void onReset() override {
+        oversampleMode = 1;   // restore default anti-aliasing (×4) on Initialize
         for (int c = 0; c < MAX_POLY; c++) {
             xx[c] = -1.6f; yy[c] = -11.8f; zz[c] = 2.f; trigPulse[c] = 0.f;
             trigIn[c].reset(); syncIn[c].reset(); spikeDet[c].reset(); spikeGen[c].reset();
