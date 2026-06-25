@@ -16,6 +16,19 @@ env:
   RACK_SDK_VERSION: "2.6.6"
 
 jobs:
+  # Fast, SDK-free guardrail: validate the manifest and run the standalone DSP
+  # stability replicas + the RK4 equivalence proof (`make check`). Gates the
+  # release so a DSP regression can't ship even if it still compiles.
+  tests:
+    name: tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Run stability + equivalence checks
+        run: make check
+
   # Reliable, release-gating platforms: Linux x64 and macOS arm64 (native clang).
   # mac-arm64 is the clang validation; Intel macOS is handled best-effort below
   # because GitHub's macos-13 runners are scarce and being phased out.
@@ -121,7 +134,7 @@ jobs:
   # Release. (mac-x64 is best-effort and not required here.)
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [unix, windows]
+    needs: [tests, unix, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
