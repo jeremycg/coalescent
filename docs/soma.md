@@ -8,7 +8,7 @@ see the [main README](../README.md).
 Both neuron modules are **polyphonic** (up to 16 voices) — see [Axon's Polyphony
 section](axon.md#polyphony), which applies identically here.
 
-![Coalescent neuron pair](img/neuron.png)
+![Coalescent neuron pair](img/soma.png)
 
 Soma is Axon's sibling, built on the **Hindmarsh–Rose** (HR) model. HR adds a
 third, *slow* state variable `z` (adaptation) to the two fast variables, and that
