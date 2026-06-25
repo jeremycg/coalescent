@@ -1,4 +1,5 @@
 #include "plugin.hpp"
+#include "integrator.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -163,15 +164,16 @@ struct Axon : Module {
         dw = eps * (v + a - B_FIXED * w);
     }
 
-    // One RK4 substep of size h (updates v,w in place).
+    // One RK4 substep of size h (updates v,w in place), via the shared
+    // neuron::rk4 stepper — arithmetic identical to the original hand-written
+    // step (see src/neuron/integrator.hpp).
     static inline void rk4(float& v, float& w, float h, float Itot, float eps, float a) {
-        float k1v, k1w, k2v, k2w, k3v, k3w, k4v, k4w;
-        f(v,                  w,                  Itot, eps, a, k1v, k1w);
-        f(v + 0.5f * h * k1v, w + 0.5f * h * k1w, Itot, eps, a, k2v, k2w);
-        f(v + 0.5f * h * k2v, w + 0.5f * h * k2w, Itot, eps, a, k3v, k3w);
-        f(v + h * k3v,        w + h * k3w,        Itot, eps, a, k4v, k4w);
-        v += h / 6.f * (k1v + 2.f * k2v + 2.f * k3v + k4v);
-        w += h / 6.f * (k1w + 2.f * k2w + 2.f * k3w + k4w);
+        float s[2] = {v, w};
+        neuron::rk4<2>(s, h, [&](const float* y, float* d) {
+            f(y[0], y[1], Itot, eps, a, d[0], d[1]);
+        });
+        v = s[0];
+        w = s[1];
     }
 
     void process(const ProcessArgs& args) override {

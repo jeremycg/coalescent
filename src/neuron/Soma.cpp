@@ -1,4 +1,5 @@
 #include "plugin.hpp"
+#include "integrator.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -166,16 +167,17 @@ struct Soma : Module {
         dz = r * (s * (x - XR) - z);
     }
 
+    // Shared neuron::rk4 stepper over the three HR variables — arithmetic
+    // identical to the original hand-written step (see integrator.hpp).
     static inline void rk4(float& x, float& y, float& z, float h,
                            float Itot, float r, float s) {
-        float ax,ay,az, bx,by,bz, cx,cy,cz, dx,dy,dz;
-        f(x,           y,           z,           Itot, r, s, ax,ay,az);
-        f(x+.5f*h*ax,  y+.5f*h*ay,  z+.5f*h*az,  Itot, r, s, bx,by,bz);
-        f(x+.5f*h*bx,  y+.5f*h*by,  z+.5f*h*bz,  Itot, r, s, cx,cy,cz);
-        f(x+h*cx,      y+h*cy,      z+h*cz,      Itot, r, s, dx,dy,dz);
-        x += h/6.f*(ax + 2*bx + 2*cx + dx);
-        y += h/6.f*(ay + 2*by + 2*cy + dy);
-        z += h/6.f*(az + 2*bz + 2*cz + dz);
+        float st[3] = {x, y, z};
+        neuron::rk4<3>(st, h, [&](const float* Y, float* d) {
+            f(Y[0], Y[1], Y[2], Itot, r, s, d[0], d[1], d[2]);
+        });
+        x = st[0];
+        y = st[1];
+        z = st[2];
     }
 
     void process(const ProcessArgs& args) override {
