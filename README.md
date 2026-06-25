@@ -1,7 +1,9 @@
 # Coalescent
 
-A collection of oscillators for **VCV Rack 2**, built around one idea: let a small
-dynamical system run, and listen to it. Each module is a different system —
+Coalescent is a set of strange oscillators for **VCV Rack 2**: gliding stochastic tones,
+scanned physical bodies, and spiking neuron voices. 
+Built around one idea: let a small dynamical system run, and listen to it.
+Each module is a different system —
 stochastic, physical, or neural — driven hard enough to make sound. They're
 grouped as the **Fluctuations** series (a label used throughout the docs and
 panels, not a separate brand); the same plugin has room for other series later.
