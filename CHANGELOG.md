@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1
+
+Panel legibility (reported by a user): the control labels were small and
+low-contrast (~4:1) against the dark panels. Brightened the label colour to
+`#c8c8e4` (~11.5:1) and scaled all panel labels ~22% larger, across all four
+modules. No DSP or behaviour change.
+
 ## 2.0.0
 
 Initial release of **Coalescent** — the merge of four previously separate plugins

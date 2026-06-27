@@ -475,11 +475,11 @@ struct AxonWidget : ModuleWidget {
         nvgFontFaceId(args.vg, font->handle);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
 
-        const NVGcolor dim    = nvgRGB(0x77, 0x77, 0x99);
+        const NVGcolor dim    = nvgRGB(0xc8, 0xc8, 0xe4);  // ~11.5:1 on the dark panel (was 0x777799, ~4:1)
         const NVGcolor outclr = nvgRGB(0xcc, 0xcc, 0xee);
 
         auto lbl = [&](float x, float y, float sz, NVGcolor col, const char* s) {
-            nvgFontSize(args.vg, mm2px(sz));
+            nvgFontSize(args.vg, mm2px(sz * 1.22f));   // ~18% larger labels for legibility
             nvgFillColor(args.vg, col);
             nvgText(args.vg, mm2px(x), mm2px(y), s, nullptr);
         };
