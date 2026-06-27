@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.2
+
+More panel legibility (continuing the report in issue #1):
+
+- Control labels now use Rack's **Nunito Bold** system font — bold reads far
+  better at small sizes than the previous regular weight; nothing is bundled.
+- Labels unified to a single larger size, near-white on the dark panels.
+- Knob labels moved **above** their controls, consistent across all four modules
+  (matching the CV-strip labels), so no label/label collisions.
+- Centered the knob and CV rows on the 12 HP panels; trimmed the GENDYN/Haptik
+  scopes ~2 mm to make room.
+- Added `patches/coalescent_gallery.vcv` — all four modules side by side for a
+  quick visual check.
+
+No DSP or behaviour change.
+
 ## 2.0.1
 
 Panel legibility (reported by a user): the control labels were small and

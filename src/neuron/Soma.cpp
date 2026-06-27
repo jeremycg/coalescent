@@ -439,36 +439,36 @@ struct SomaWidget : ModuleWidget {
     void draw(const DrawArgs& args) override {
         ModuleWidget::draw(args);
         if (!font)
-            font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+            font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
         nvgSave(args.vg);
         nvgFontFaceId(args.vg, font->handle);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
 
-        const NVGcolor dim    = nvgRGB(0xc8, 0xc8, 0xe4);  // ~11.5:1 on the dark panel (was 0x777799, ~4:1)
-        const NVGcolor outclr = nvgRGB(0xcc, 0xcc, 0xee);
+        const NVGcolor dim    = nvgRGB(0xe6, 0xe6, 0xf2);  // near-white for low-vision legibility (~13:1)
+        const NVGcolor outclr = nvgRGB(0xf4, 0xf4, 0xfe);
 
         auto lbl = [&](float x, float y, float sz, NVGcolor col, const char* s) {
-            nvgFontSize(args.vg, mm2px(sz * 1.22f));   // ~18% larger labels for legibility
+            nvgFontSize(args.vg, mm2px(sz * 1.72f));   // Nunito Bold, sized up for legibility
             nvgFillColor(args.vg, col);
             nvgText(args.vg, mm2px(x), mm2px(y), s, nullptr);
         };
 
-        lbl( 9.f,   61.f, 1.8f, dim, "PITCH");
-        lbl(24.32f, 61.f, 1.8f, dim, "CURRENT");
-        lbl(39.64f, 61.f, 1.8f, dim, "BURST");
-        lbl(54.96f, 61.f, 1.8f, dim, "ADAPT");
+        lbl( 7.5f,   46.f, 2.1f, dim, "PITCH");
+        lbl(22.82f, 46.f, 2.1f, dim, "CURRENT");
+        lbl(38.14f, 46.f, 2.1f, dim, "BURST");
+        lbl(53.46f, 46.f, 2.1f, dim, "ADAPT");
 
-        lbl(24.32f, 90.f, 1.7f, dim, "I CV");
-        lbl(39.64f, 90.f, 1.7f, dim, "r CV");
+        lbl(22.82f, 90.f, 2.1f, dim, "I CV");
+        lbl(38.14f, 90.f, 2.1f, dim, "r CV");
 
-        lbl( 6.5f, 118.5f, 1.6f, dim,    "V/OCT");
-        lbl(15.5f, 118.5f, 1.7f, dim,    "TRIG");
-        lbl(24.5f, 118.5f, 1.7f, dim,    "SYNC");
-        lbl(36.5f, 118.5f, 1.8f, outclr, "OUT");
-        lbl(45.5f, 118.5f, 1.6f, outclr, "SPIKE");
-        lbl(54.5f, 118.5f, 1.8f, outclr, "Z");
+        lbl( 6.5f, 118.5f, 2.1f, dim,    "V/OCT");
+        lbl(15.5f, 118.5f, 2.1f, dim,    "TRIG");
+        lbl(24.5f, 118.5f, 2.1f, dim,    "SYNC");
+        lbl(36.5f, 118.5f, 2.1f, outclr, "OUT");
+        lbl(45.5f, 118.5f, 2.1f, outclr, "SPIKE");
+        lbl(54.5f, 118.5f, 2.1f, outclr, "Z");
 
         nvgRestore(args.vg);
     }
@@ -488,15 +488,15 @@ struct SomaWidget : ModuleWidget {
         disp->box.size = mm2px(Vec(50.f, 34.f));
         addChild(disp);
 
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec( 9.f,   54.f)), module, Soma::PITCH_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(24.32f, 54.f)), module, Soma::CURRENT_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(39.64f, 54.f)), module, Soma::BURST_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(54.96f, 54.f)), module, Soma::ADAPT_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec( 7.5f,   54.f)), module, Soma::PITCH_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(22.82f, 54.f)), module, Soma::CURRENT_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(38.14f, 54.f)), module, Soma::BURST_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(53.46f, 54.f)), module, Soma::ADAPT_PARAM));
 
-        addParam(createParamCentered<Trimpot>(    mm2px(Vec(24.32f, 72.f)), module, Soma::CURRENT_ATT_PARAM));
-        addParam(createParamCentered<Trimpot>(    mm2px(Vec(39.64f, 72.f)), module, Soma::BURST_ATT_PARAM));
-        addInput(createInputCentered<PJ301MPort>( mm2px(Vec(24.32f, 84.f)), module, Soma::CURRENT_INPUT));
-        addInput(createInputCentered<PJ301MPort>( mm2px(Vec(39.64f, 84.f)), module, Soma::BURST_INPUT));
+        addParam(createParamCentered<Trimpot>(    mm2px(Vec(22.82f, 72.f)), module, Soma::CURRENT_ATT_PARAM));
+        addParam(createParamCentered<Trimpot>(    mm2px(Vec(38.14f, 72.f)), module, Soma::BURST_ATT_PARAM));
+        addInput(createInputCentered<PJ301MPort>( mm2px(Vec(22.82f, 84.f)), module, Soma::CURRENT_INPUT));
+        addInput(createInputCentered<PJ301MPort>( mm2px(Vec(38.14f, 84.f)), module, Soma::BURST_INPUT));
 
         addInput(createInputCentered<PJ301MPort>(  mm2px(Vec( 6.5f, 112.f)), module, Soma::VOCT_INPUT));
         addInput(createInputCentered<PJ301MPort>(  mm2px(Vec(15.5f, 112.f)), module, Soma::TRIG_INPUT));

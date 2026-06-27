@@ -499,42 +499,42 @@ struct HaptikWidget : ModuleWidget {
         ModuleWidget::draw(args);
 
         if (!font)
-            font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+            font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
         nvgSave(args.vg);
         nvgFontFaceId(args.vg, font->handle);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
 
-        const NVGcolor dim    = nvgRGB(0xc8, 0xc8, 0xe4);  // ~11.5:1 on the dark panel (was 0x777799, ~4:1)
-        const NVGcolor outclr = nvgRGB(0xcc, 0xcc, 0xee);
+        const NVGcolor dim    = nvgRGB(0xe6, 0xe6, 0xf2);  // near-white for low-vision legibility (~13:1)
+        const NVGcolor outclr = nvgRGB(0xf4, 0xf4, 0xfe);
 
         auto lbl = [&](float x, float y, float sz, NVGcolor col, const char* s) {
-            nvgFontSize(args.vg, mm2px(sz * 1.22f));   // ~18% larger labels for legibility
+            nvgFontSize(args.vg, mm2px(sz * 1.72f));   // Nunito Bold, sized up for legibility
             nvgFillColor(args.vg, col);
             nvgText(args.vg, mm2px(x), mm2px(y), s, nullptr);
         };
 
         // Voice row labels (below each knob/switch at y=64)
-        lbl(11.f, 70.f, 1.7f, dim, "N");
-        lbl(26.f, 70.f, 1.7f, dim, "PITCH");
-        lbl(41.f, 70.f, 1.7f, dim, "EXCITE");
-        lbl(56.f, 70.f, 1.7f, dim, "DRIVER");
-        lbl(70.f, 70.f, 1.7f, dim, "FREEZE");
-        lbl(81.f, 70.f, 1.7f, dim, "MODE");
+        lbl(11.f, 56.f, 2.1f, dim, "N");
+        lbl(26.f, 56.f, 2.1f, dim, "PITCH");
+        lbl(41.f, 56.f, 2.1f, dim, "EXCITE");
+        lbl(56.f, 56.f, 2.1f, dim, "DRIVER");
+        lbl(70.f, 56.f, 2.1f, dim, "FREEZE");
+        lbl(81.f, 56.f, 2.1f, dim, "MODE");
 
         // CV channel-strip labels (above each knob at y=82)
-        lbl(13.f, 76.f, 1.9f, dim, "RATE");
-        lbl(32.f, 76.f, 1.9f, dim, "COUPLE");
-        lbl(51.f, 76.f, 1.9f, dim, "DAMP");
-        lbl(70.f, 76.f, 1.9f, dim, "INJECT");
+        lbl(13.f, 74.f, 2.1f, dim, "RATE");
+        lbl(32.f, 74.f, 2.1f, dim, "COUPLE");
+        lbl(51.f, 74.f, 2.1f, dim, "DAMP");
+        lbl(70.f, 74.f, 2.1f, dim, "INJECT");
 
         // I/O labels (below each jack at y=113)
-        lbl(13.f, 119.f, 1.8f, dim, "V/OCT");
-        lbl(27.f, 119.f, 1.8f, dim, "TRIG");
-        lbl(41.f, 119.f, 1.8f, dim, "EXT");
-        lbl(64.f, 119.f, 1.9f, outclr, "OUT");
-        lbl(78.f, 119.f, 1.9f, outclr, "MOTION");
+        lbl(13.f, 119.f, 2.1f, dim, "V/OCT");
+        lbl(27.f, 119.f, 2.1f, dim, "TRIG");
+        lbl(41.f, 119.f, 2.1f, dim, "EXT");
+        lbl(64.f, 119.f, 2.1f, outclr, "OUT");
+        lbl(78.f, 119.f, 2.1f, outclr, "MOTION");
 
         nvgRestore(args.vg);
     }
@@ -552,7 +552,7 @@ struct HaptikWidget : ModuleWidget {
         RingDisplay* ring = new RingDisplay();
         ring->module = module;
         ring->box.pos  = mm2px(Vec(6.5f, 8.f));
-        ring->box.size = mm2px(Vec(78.f, 46.f));
+        ring->box.size = mm2px(Vec(78.f, 44.f));
         addChild(ring);
 
         // Voice row (y=64): N | PITCH | EXCITE | DRIVER | FREEZE | MODE

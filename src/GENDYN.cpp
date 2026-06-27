@@ -466,39 +466,39 @@ struct GENDYWidget : ModuleWidget {
         ModuleWidget::draw(args);
 
         if (!font)
-            font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+            font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
         nvgSave(args.vg);
         nvgFontFaceId(args.vg, font->handle);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
 
-        const NVGcolor dim    = nvgRGB(0xc8, 0xc8, 0xe4);  // ~11.5:1 on the dark panel (was 0x777799, ~4:1)
-        const NVGcolor outclr = nvgRGB(0xcc, 0xcc, 0xee);
+        const NVGcolor dim    = nvgRGB(0xe6, 0xe6, 0xf2);  // near-white for low-vision legibility (~13:1)
+        const NVGcolor outclr = nvgRGB(0xf4, 0xf4, 0xfe);
 
         auto lbl = [&](float x, float y, float sz, NVGcolor col, const char* s) {
-            nvgFontSize(args.vg, mm2px(sz * 1.22f));   // ~18% larger labels for legibility
+            nvgFontSize(args.vg, mm2px(sz * 1.72f));   // Nunito Bold, sized up for legibility
             nvgFillColor(args.vg, col);
             nvgText(args.vg, mm2px(x), mm2px(y), s, nullptr);
         };
 
         // Top control row labels (knobs at y=54)
-        lbl( 8.0f, 61.f, 1.8f, dim, "N");
-        lbl(20.5f, 61.f, 1.8f, dim, "FREQ");
-        lbl(30.5f, 61.f, 1.6f, dim, "LOCK");
-        lbl(41.0f, 61.f, 1.8f, dim, "DIST");
-        lbl(53.0f, 61.f, 1.7f, dim, "PERSIST");
+        lbl( 8.0f, 46.f, 2.1f, dim, "N");
+        lbl(20.5f, 46.f, 2.1f, dim, "FREQ");
+        lbl(30.5f, 46.f, 2.1f, dim, "LOCK");
+        lbl(41.0f, 46.f, 2.1f, dim, "DIST");
+        lbl(53.0f, 46.f, 2.1f, dim, "PERSIST");
 
         // CV channel-strip labels (above each knob at y=74)
-        lbl( 9.00f, 68.f, 1.8f, dim, "S AMP");
-        lbl(24.32f, 68.f, 1.8f, dim, "S DUR");
-        lbl(39.64f, 68.f, 1.8f, dim, "B AMP");
-        lbl(54.96f, 68.f, 1.8f, dim, "B WID");
+        lbl( 7.5f, 66.f, 2.1f, dim, "S AMP");
+        lbl(22.82f, 66.f, 2.1f, dim, "S DUR");
+        lbl(38.14f, 66.f, 2.1f, dim, "B AMP");
+        lbl(53.46f, 66.f, 2.1f, dim, "B WID");
 
         // Output labels (jacks at y=112)
-        lbl(15.0f, 118.5f, 1.9f, outclr, "OUT");
-        lbl(30.5f, 118.5f, 1.9f, outclr, "TRIG");
-        lbl(46.0f, 118.5f, 1.9f, outclr, "FREQ");
+        lbl(15.0f, 118.5f, 2.1f, outclr, "OUT");
+        lbl(30.5f, 118.5f, 2.1f, outclr, "TRIG");
+        lbl(46.0f, 118.5f, 2.1f, outclr, "FREQ");
 
         nvgRestore(args.vg);
     }
@@ -516,7 +516,7 @@ struct GENDYWidget : ModuleWidget {
         GENDYScope* scope = new GENDYScope();
         scope->module = module;
         scope->box.pos  = mm2px(Vec(5.5f, 8.f));
-        scope->box.size = mm2px(Vec(50.f, 36.f));
+        scope->box.size = mm2px(Vec(50.f, 34.f));
         addChild(scope);
 
         // Top control row (y=54): N | FREQ | LOCK | DIST | PERSIST
@@ -529,10 +529,10 @@ struct GENDYWidget : ModuleWidget {
         // CV channel strips (knob y=74 / attenuverter y=86 / jack y=96)
         struct Strip { float x; int knob, att, in; };
         const Strip strips[] = {
-            { 9.00f, GENDYN::SCALE_AMP_PARAM,  GENDYN::SCALE_AMP_ATT_PARAM, GENDYN::SCALE_AMP_INPUT},
-            {24.32f, GENDYN::SCALE_DUR_PARAM,  GENDYN::SCALE_DUR_ATT_PARAM, GENDYN::SCALE_DUR_INPUT},
-            {39.64f, GENDYN::B_AMP_PARAM,      GENDYN::B_AMP_ATT_PARAM,     GENDYN::B_AMP_INPUT},
-            {54.96f, GENDYN::B_DUR_WIDTH_PARAM,GENDYN::B_DUR_ATT_PARAM,     GENDYN::B_DUR_INPUT},
+            { 7.5f, GENDYN::SCALE_AMP_PARAM,  GENDYN::SCALE_AMP_ATT_PARAM, GENDYN::SCALE_AMP_INPUT},
+            {22.82f, GENDYN::SCALE_DUR_PARAM,  GENDYN::SCALE_DUR_ATT_PARAM, GENDYN::SCALE_DUR_INPUT},
+            {38.14f, GENDYN::B_AMP_PARAM,      GENDYN::B_AMP_ATT_PARAM,     GENDYN::B_AMP_INPUT},
+            {53.46f, GENDYN::B_DUR_WIDTH_PARAM,GENDYN::B_DUR_ATT_PARAM,     GENDYN::B_DUR_INPUT},
         };
         for (const Strip& s : strips) {
             addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(s.x, 74.f)), module, s.knob));
