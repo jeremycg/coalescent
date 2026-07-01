@@ -104,7 +104,7 @@ struct Axon : Module {
     static constexpr float RATE_CAL    = 37.899004f; // dimensionless period at default → C4 at 0 V
     static constexpr float B_FIXED     = 0.8f;       // recovery linear coefficient b
     static constexpr float HSUB_MAX    = 0.05f;      // max dimensionless substep size
-    static constexpr int   MIN_SUB     = 4;
+    static constexpr int   MIN_SUB     = 2;   // substep floor: profiled, halves RK4 CPU vs 4 with 0-cent, ~-74dB change
     static constexpr int   MAX_SUB     = 64;
     static constexpr float TRIG_AMP    = 0.6f;       // injected current pulse height
     static constexpr float TRIG_TAU_MS = 3.f;        // pulse decay time constant (ms)

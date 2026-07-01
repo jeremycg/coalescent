@@ -102,7 +102,7 @@ struct Soma : Module {
     // ─── Tunable constants (RATE_CAL from tools/soma_stability_test.cpp) ─────
     static constexpr float RATE_CAL    = 14.925501f; // within-burst spike period at default → C4 at 0 V
     static constexpr float HSUB_MAX    = 0.05f;
-    static constexpr int   MIN_SUB     = 4;
+    static constexpr int   MIN_SUB     = 2;   // substep floor: profiled, halves RK4 CPU vs 4 with 0-cent, ~-74dB change
     static constexpr int   MAX_SUB     = 64;
     static constexpr float TRIG_AMP    = 1.0f;        // injected current pulse (kicks a burst from rest)
     static constexpr float TRIG_TAU_MS = 5.f;

@@ -24,7 +24,7 @@
 
 static constexpr float A = 1.f, B = 3.f, C = 1.f, D = 5.f, XR = -1.6f;
 static constexpr float HSUB_MAX = 0.05f;
-static constexpr int   MIN_SUB = 4, MAX_SUB = 64;
+static constexpr int   MIN_SUB = 2, MAX_SUB = 64;
 static constexpr float STATE_MAX = 25.f;     // backstop; normal |y| peaks ~12 at rest
 static constexpr float FREQ_C4 = 261.6256f;
 

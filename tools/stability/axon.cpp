@@ -24,7 +24,7 @@
 // ── kernel constants (mirror src/Axon.cpp) ──
 static constexpr float B_FIXED   = 0.8f;
 static constexpr float HSUB_MAX  = 0.05f;
-static constexpr int   MIN_SUB   = 4;
+static constexpr int   MIN_SUB   = 2;
 static constexpr int   MAX_SUB   = 64;
 static constexpr float STATE_MAX = 10.f;
 static constexpr float FREQ_C4   = 261.6256f;   // rack dsp::FREQ_C4
