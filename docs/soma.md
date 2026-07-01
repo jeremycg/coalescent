@@ -37,11 +37,12 @@ just with the third equation added.
 
 ### Pitch tracks the spike rate
 
-HR's period varies enormously between regimes (a tonic spike train is ~3× faster
-than the within-burst spikes at the default voicing), so pitch is calibrated to
-the **within-burst spike rate**: `RATE_CAL` makes the default bursting voicing buzz
-at C4. Switching to tonic spiking therefore reads about an octave-and-a-half higher,
-and CURRENT/BURST/ADAPT pull the pitch — open-loop and deliberate, like Axon.
+HR's period varies enormously between regimes, so pitch is calibrated to the
+spike rate at the **default voicing**, which is now **tonic spiking** (CURRENT 2.0,
+BURST rate r ≈ 0.03): `RATE_CAL` makes that tonic buzz read C4 at 0 V. Turning
+**BURST down** into the bursting/chaotic regimes changes the emergent rate, so the
+pitch shifts — CURRENT/BURST/ADAPT all pull it. That coupling is open-loop and
+deliberate, like Axon: Soma is a voice you tune by ear, not a precision VCO.
 
 ## Controls
 
@@ -79,17 +80,17 @@ and rises — silent voices resume rather than restarting from rest (gate SYNC i
 you want each note clean).
 
 The integrator dominates CPU: per voice, `oversample × K` RK4 substeps per sample
-(`K` 4…64, rising with pitch), so the worst case scales as **voices × oversample
+(`K` 2…64, rising with pitch), so the worst case scales as **voices × oversample
 × substeps**. Soma is a touch heavier than Axon — Hindmarsh–Rose is a
 three-variable system vs FHN's two.
 
 | Voices | Anti-aliasing | Cost |
 | --- | --- | --- |
-| 1 | Off / ×4 | light |
+| 1 | Off / ×2 / ×4 | light |
 | 8–16 | ×4 (default) | moderate |
 | 16 | ×8 | very heavy, patch-dependent |
 
-Leave anti-aliasing at ×4 (or Off) for large polyphonic patches; reach for ×8
+Leave anti-aliasing at ×4, or drop to ×2 / Off for large polyphonic patches; reach for ×8
 only when aliasing is audible on high notes.
 
 ## Patches

@@ -53,7 +53,7 @@ all N breakpoints.
 | SCALE AMP | Step scale for amplitude random walk (0–1) |
 | SCALE DUR | Step scale for duration random walk (0–1) |
 | B AMP | Amplitude barrier half-width (0=frozen, 1=full ±5V range) |
-| B DUR CTR | Center frequency for duration barriers (20–5000 Hz) |
+| B DUR CTR | Center frequency for duration barriers (20–5000 Hz; default C4 = 261.6) |
 | B DUR WID | Duration barrier half-width around center (0=fixed pitch, 1=wide) |
 | DIST | Distribution: 0=Cauchy, 1=Gaussian, 2=Uniform, 3=Logistic (default) |
 | PERSIST | Glide persistence: how many cycles a step keeps its direction. 0% ≈ uncorrelated jitter (first-order / SC Gendy feel), 30% (default) ≈ 16 cycles, 100% = very long steady glides |
@@ -90,6 +90,26 @@ eases at a watchable pace — the walk actually updates every cycle (audio rate)
 which is ~an order of magnitude too fast to follow, so the smoothing removes the
 per-cycle shimmer while leaving the slow morph (and the audio) untouched. The
 per-sample playhead and the individual random draws are deliberately not shown.
+
+## Seeding the waveform
+
+GENDYN's timbre is set by the breakpoints, and the stochastic walk only nudges
+them slowly — so the **initial** waveform matters a lot. By default GENDYN seeds a
+clean **sine** at the centre frequency and lets the walk evolve it, so it boots as
+a recognisable pitched tone that gradually grows into GENDYN's characteristic
+polygons (turn **SCALE DUR / SCALE AMP** up to wander away from the sine faster).
+
+Right-click the module to change this:
+
+- **Initial waveform** — Sine (default) / Triangle / Saw / Square / Random.
+  The deterministic shapes seed equal segment durations, so they start on the exact
+  centre pitch; **Random** reproduces the classic noisy seed (random amplitudes
+  *and* durations). Selecting a shape re-seeds immediately.
+- **Re-seed waveform** — re-roll the seed on demand.
+
+The centre-frequency default is **C4** (261.6 Hz), and the seed choice is saved
+with the patch. (OUT is also DC-blocked internally at ~5 Hz, so the walk's mean
+drift can't offset the signal.)
 
 ## Tuning notes
 

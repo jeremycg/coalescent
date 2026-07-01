@@ -91,9 +91,14 @@ Two deliberate fudges, both for legibility:
 
 ## Playing it
 
-Haptik has **no built-in amplitude envelope** — a struck note rings and decays
-according to DAMP, not according to how long you hold a key. A typical playable
-patch:
+**Out of the box** Haptik defaults to **EXCITE = drive** (continuous excitation),
+so patching `V/OCT` + `OUT → audio` gives an immediate, sustaining, evolving tone —
+no trigger needed. Switch EXCITE to **impulse / bump / noise** (0–2) for the
+struck/plucked behaviour instead.
+
+In the pluck modes Haptik has **no built-in amplitude envelope** — a struck note
+rings and decays according to DAMP, not according to how long you hold a key. A
+typical playable patch:
 
 ```
 MIDI→CV ─ V/OCT ─→ Haptik V/OCT

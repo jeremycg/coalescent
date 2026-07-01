@@ -111,19 +111,19 @@ the SYNC input.
 ## CPU
 
 The integrator is the cost: per voice, Axon runs `oversample × K` RK4 substeps
-per audio sample, where `K` (4…64) rises with pitch. So the worst case scales as
+per audio sample, where `K` (2…64) rises with pitch. So the worst case scales as
 **voices × oversample × substeps** — at 16 voices, ×8 anti-aliasing, and the top
 octave that's `16 × 8 × 64 ≈ 8000` steps/sample. That's a ceiling, not the normal
-case (at moderate pitch `K` sits near its floor of 4), but it means a big
+case (at moderate pitch `K` sits near its floor of 2), but it means a big
 polyphonic patch at ×8 is genuinely heavy.
 
 | Voices | Anti-aliasing | Cost |
 | --- | --- | --- |
-| 1 | Off / ×4 | light |
+| 1 | Off / ×2 / ×4 | light |
 | 8–16 | ×4 (default) | moderate |
 | 16 | ×8 | heavy, patch-dependent |
 
-Rule of thumb: leave anti-aliasing at ×4 (or Off), and only reach for ×8 if you
+Rule of thumb: leave anti-aliasing at ×4 (or drop to ×2 / Off), and only reach for ×8 if you
 hear aliasing on high notes. [Soma](soma.md) is a touch heavier still (a
 three-variable system vs Axon's two).
 
@@ -155,7 +155,7 @@ three-variable system vs Axon's two).
   little (see above) — deliberate, not a bug. Calibration targets C4 at the
   default voicing.
 - **Aliasing.** Spikes are sharp and the `tanh` soft-clip adds harmonics, so high
-  notes can alias. The right-click **Anti-aliasing** option (Off / ×4 / ×8,
+  notes can alias. The right-click **Anti-aliasing** option (Off / ×2 / ×4 / ×8,
   default ×4) oversamples the whole output chain — DC-block + tanh — and decimates
   with a windowed-sinc FIR, which band-limits both the spike and the nonlinearity.
   Higher factors cost more CPU (scaling with voice count); turn it Off if you're

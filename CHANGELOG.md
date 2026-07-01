@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.0.3
+
+Performance and discoverability pass, prompted by user feedback (issue #2).
+
+**Performance** (Axon/Soma especially — no audible change):
+- Lower the RK4 substep floor `MIN_SUB` 4 → 2: the adaptive stepper was pinned at
+  the floor across most of the normal range (worst with oversampling), doing ~2×
+  the needed integration. Profiled at 0-cent / −74 dB, ~50% less RK4 CPU.
+- Replace `std::tanh` in the output soft-clip with a Padé[7/6] approximation
+  (~14× faster, −64 dB error, inaudible).
+- Use `dsp::approxExp2_taylor5` for the per-sample V/OCT pitch (and Soma BURST /
+  Haptik evolution-rate) conversions; compute Haptik's damping coefficient with
+  the fast exp too.
+
+**Defaults & discoverability:**
+- **GENDYN** now seeds a clean **sine** (not random noise), so it boots as a
+  pitched tone that the stochastic walk evolves. Right-click **Initial waveform**
+  (Sine/Triangle/Saw/Square/Random) + **Re-seed waveform**; centre default → C4;
+  internal ~5 Hz DC blocker on OUT.
+- **Soma** default is now **tonic spiking** (a clear C4 tone) rather than bursting;
+  turn BURST down for bursting/chaos.
+- **Haptik** default **sustains** (EXCITE = drive) instead of decaying after one
+  pluck.
+
+**Anti-aliasing:** the Axon/Soma menu adds a **×2** option (Off / ×2 / ×4 / ×8,
+default ×4) for lower CPU. (Reordering shifts the stored index, so a pre-2.0.3
+patch that had chosen ×8 reloads as ×4.)
+
 ## 2.0.2
 
 More panel legibility (continuing the report in issue #1):
