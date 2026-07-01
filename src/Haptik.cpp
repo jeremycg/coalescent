@@ -194,7 +194,7 @@ struct Haptik : Module {
         bool  slow = params[MODE_PARAM].getValue() > 0.5f;
         int   D    = slow ? SLOW_DIV : 1;   // lattice steps every D samples
 
-        float fEvo = clamp(std::exp2(rateLog), 0.05f, 30.f);
+        float fEvo = clamp(dsp::approxExp2_taylor5(rateLog), 0.05f, 30.f);
         // Effective timestep is D samples. In Fast mode (D=1) this is the original
         // behaviour: kCtr stays tiny so RATE is subtle. In Slow mode the D factor
         // makes RATE/centering meaningful; the clamp keeps per-update ω_max < 2.
@@ -211,7 +211,7 @@ struct Haptik : Module {
         float damp = clamp(params[DAMP_PARAM].getValue()
                          + inputs[DAMP_INPUT].getVoltage() * params[DAMP_ATT_PARAM].getValue() * CV_DEPTH,
                          0.f, 1.f);
-        float gamma = std::exp(-damp * DAMP_MAX_HZ * D / fs);   // velocity multiplier ≤ 1; D-scaled so
+        float gamma = dsp::approxExp2_taylor5(-damp * DAMP_MAX_HZ * D / fs * 1.44269504f);   // velocity multiplier ≤ 1; D-scaled so
                                                                 // wall-clock decay is divider-independent
 
         float amt = clamp(params[INJECT_PARAM].getValue()
@@ -269,7 +269,7 @@ struct Haptik : Module {
         }
 
         // ── scan readout (always) ──
-        float pitchHz = dsp::FREQ_C4 * std::exp2(
+        float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
                             params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage());
         scanPhase += pitchHz / fs;
         scanPhase -= std::floor(scanPhase);

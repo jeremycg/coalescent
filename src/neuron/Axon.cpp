@@ -243,7 +243,7 @@ struct Axon : Module {
             if (std::fabs(trigPulse[c]) < 1e-30f) trigPulse[c] = 0.f;
 
             // ── pitch = simulation speed (open-loop) ──
-            float pitchHz = dsp::FREQ_C4 * std::exp2(
+            float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
                                 pitchKnob + inputs[VOCT_INPUT].getPolyVoltage(c));
             float dtau = RATE_CAL * pitchHz / fs;                 // dimensionless advance / sample
             float subTau = dtau / os;                             // advance per oversampled sample

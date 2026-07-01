@@ -198,7 +198,7 @@ struct GENDYN : Module {
             amp[i] = a * bAmp;
             dur[i] = (initShape == 4)
                    ? bDurMin + rack::random::uniform() * (bDurMax - bDurMin)  // random pitch jitter
-                   : durCenter;                                              // equal → stable pitch
+                   : std::max(1.f, durCenter);                                              // equal → stable pitch
             step_amp[i] = 0.f;
             step_dur[i] = 0.f;
             sum_dur += dur[i];

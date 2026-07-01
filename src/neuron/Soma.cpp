@@ -227,7 +227,7 @@ struct Soma : Module {
             // BURST is log₂(r); CV adds in the log domain (a multiplicative nudge on r).
             float rLog = rLogBase
                        + inputs[BURST_INPUT].getPolyVoltage(c) * rAtt * CV_DEPTH;
-            float r = clamp(std::exp2(rLog), R_MIN, R_MAX);
+            float r = clamp(dsp::approxExp2_taylor5(rLog), R_MIN, R_MAX);
 
             // ── hard sync: a rising edge re-seeds the voice at the rest fixed
             // point (all three state variables). The discontinuity is the sync. ──
@@ -243,7 +243,7 @@ struct Soma : Module {
             if (std::fabs(trigPulse[c]) < 1e-30f) trigPulse[c] = 0.f;
 
             // ── pitch = simulation speed (open-loop; tracks within-burst spike rate) ──
-            float pitchHz = dsp::FREQ_C4 * std::exp2(
+            float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
                                 pitchKnob + inputs[VOCT_INPUT].getPolyVoltage(c));
             float dtau = RATE_CAL * pitchHz / fs;
             float subTau = dtau / os;                             // advance per oversampled sample
