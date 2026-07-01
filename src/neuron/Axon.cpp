@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 #include "integrator.hpp"
+#include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -268,7 +269,7 @@ struct Axon : Module {
                     spikeGen[c].trigger(1e-3f);
 
                 dcBlock[c].process(v + antiDenorm);
-                osBuf[o] = 5.f * std::tanh(dcBlock[c].highpass() * OUT_GAIN);
+                osBuf[o] = 5.f * coalescent::fastTanh(dcBlock[c].highpass() * OUT_GAIN);
             }
             vv[c] = v; ww[c] = w;
 

@@ -1,4 +1,5 @@
 #include "plugin.hpp"
+#include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -94,7 +95,7 @@ struct Haptik : Module {
         configParam(DAMP_PARAM, 0.f, 1.f, 0.35f, "Damping");
         configParam(INJECT_PARAM, 0.f, 1.f, 0.6f, "Inject");
 
-        configParam(EXCITE_PARAM, 0.f, 3.f, 1.f, "Excitation")->snapEnabled = true;
+        configParam(EXCITE_PARAM, 0.f, 3.f, 3.f, "Excitation")->snapEnabled = true;
 
         configSwitch(FREEZE_PARAM, 0.f, 1.f, 0.f, "Freeze", {"Run", "Freeze"});
         configSwitch(MODE_PARAM, 0.f, 1.f, 0.f, "Mode",
@@ -297,7 +298,7 @@ struct Haptik : Module {
             lastFs = fs;
         }
         dcBlock.process(s);                      // ~20 Hz high-pass; scanned mean wanders
-        outputs[OUT_OUTPUT].setVoltage(5.f * std::tanh(dcBlock.highpass() * OUT_GAIN));
+        outputs[OUT_OUTPUT].setVoltage(5.f * coalescent::fastTanh(dcBlock.highpass() * OUT_GAIN));
         // MOTION taps mass 0 directly (audio-rate in this design); not high-passed.
         outputs[MOTION_OUTPUT].setVoltage(clamp(y[0] * MOTION_GAIN, -5.f, 5.f));
 

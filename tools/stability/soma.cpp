@@ -29,7 +29,7 @@ static constexpr float STATE_MAX = 25.f;     // backstop; normal |y| peaks ~12 a
 static constexpr float FREQ_C4 = 261.6256f;
 
 // default voicing
-static constexpr float DEF_I = 2.0f, DEF_R = 0.006f, DEF_S = 4.0f;
+static constexpr float DEF_I = 2.0f, DEF_R = 0.03f, DEF_S = 4.0f;
 
 static inline int clampi(int x, int lo, int hi) { return x < lo ? lo : (x > hi ? hi : x); }
 static inline float clampf(float x, float lo, float hi) { return x < lo ? lo : (x > hi ? hi : x); }

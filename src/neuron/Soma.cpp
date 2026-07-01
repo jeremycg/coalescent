@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 #include "integrator.hpp"
+#include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -100,7 +101,7 @@ struct Soma : Module {
     static constexpr float A = 1.f, B = 3.f, C = 1.f, D = 5.f, XR = -1.6f;
 
     // ─── Tunable constants (RATE_CAL from tools/soma_stability_test.cpp) ─────
-    static constexpr float RATE_CAL    = 14.925501f; // within-burst spike period at default → C4 at 0 V
+    static constexpr float RATE_CAL    = 55.364003f; // tonic spike period (I=2.0, r=0.03) → C4 at 0 V
     static constexpr float HSUB_MAX    = 0.05f;
     static constexpr int   MIN_SUB     = 2;   // substep floor: profiled, halves RK4 CPU vs 4 with 0-cent, ~-74dB change
     static constexpr int   MAX_SUB     = 64;
@@ -120,7 +121,7 @@ struct Soma : Module {
         configParam(PITCH_PARAM, -4.f, 4.f, 0.f, "Pitch", " Hz", 2.f, dsp::FREQ_C4);
         configParam(CURRENT_PARAM, 0.4f, 4.0f, 2.0f, "Current (excitability)");
         // BURST stores log₂(r); display base 2 shows the adaptation rate r directly.
-        configParam(BURST_PARAM, std::log2(R_MIN), std::log2(R_MAX), std::log2(0.006f),
+        configParam(BURST_PARAM, std::log2(R_MIN), std::log2(R_MAX), std::log2(0.03f),
                     "Burst / adaptation rate r", "", 2.f);
         configParam(ADAPT_PARAM, 1.0f, 5.0f, 4.0f, "Adaptation strength s");
         configParam(CURRENT_ATT_PARAM, -1.f, 1.f, 0.f, "Current CV");
@@ -267,7 +268,7 @@ struct Soma : Module {
                     spikeGen[c].trigger(1e-3f);
 
                 dcBlock[c].process(x + antiDenorm);
-                osBuf[o] = 5.f * std::tanh(dcBlock[c].highpass() * OUT_GAIN);
+                osBuf[o] = 5.f * coalescent::fastTanh(dcBlock[c].highpass() * OUT_GAIN);
             }
             xx[c] = x; yy[c] = y; zz[c] = z;
 
