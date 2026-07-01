@@ -75,9 +75,10 @@ struct Soma : Module {
     // The whole output chain — DC-block then tanh soft-clip — runs oversampled
     // and is decimated here, so the sharp spikes and the tanh nonlinearity are
     // band-limited before reaching the output sample.
+    dsp::Decimator<2, 8> decim2[MAX_POLY];
     dsp::Decimator<4, 8> decim4[MAX_POLY];
     dsp::Decimator<8, 8> decim8[MAX_POLY];
-    int   oversampleMode = 1;         // 0 = off, 1 = ×4, 2 = ×8 (right-click menu)
+    int   oversampleMode = 2;         // 0=off, 1=×2, 2=×4, 3=×8
     int   channels = 1;               // active voice count
     float lastFs = 0.f;
     int   lastOs = 0;                 // detects oversample change to refresh coefficients
@@ -141,11 +142,11 @@ struct Soma : Module {
     }
 
     void onReset() override {
-        oversampleMode = 1;   // restore default anti-aliasing (×4) on Initialize
+        oversampleMode = 2;   // restore default anti-aliasing (×4) on Initialize
         for (int c = 0; c < MAX_POLY; c++) {
             xx[c] = -1.6f; yy[c] = -11.8f; zz[c] = 2.f; trigPulse[c] = 0.f;
             trigIn[c].reset(); syncIn[c].reset(); spikeDet[c].reset(); spikeGen[c].reset();
-            dcBlock[c].reset(); decim4[c].reset(); decim8[c].reset();
+            dcBlock[c].reset(); decim2[c].reset(); decim4[c].reset(); decim8[c].reset();
         }
     }
 
@@ -184,7 +185,7 @@ struct Soma : Module {
 
     void process(const ProcessArgs& args) override {
         const float fs = args.sampleRate;
-        const int os = oversampleMode == 0 ? 1 : (oversampleMode == 1 ? 4 : 8);
+        const int os = oversampleMode == 0 ? 1 : (oversampleMode == 1 ? 2 : (oversampleMode == 2 ? 4 : 8));
 
         // SR/oversample-derived coefficients, recomputed only when fs or the
         // oversample factor changes. The DC-blocker runs in the oversampled
@@ -195,7 +196,7 @@ struct Soma : Module {
             for (int c = 0; c < MAX_POLY; c++) dcBlock[c].setCutoffFreq(20.f / (fs * os));
             trigDecay = std::exp(-1.f / (TRIG_TAU_MS * 1e-3f * fs));
             if (os != lastOs)
-                for (int c = 0; c < MAX_POLY; c++) { decim4[c].reset(); decim8[c].reset(); }
+                for (int c = 0; c < MAX_POLY; c++) { decim2[c].reset(); decim4[c].reset(); decim8[c].reset(); }
             lastFs = fs;
             lastOs = os;
         }
@@ -273,7 +274,7 @@ struct Soma : Module {
             xx[c] = x; yy[c] = y; zz[c] = z;
 
             float audio = os == 1 ? osBuf[0]
-                        : (os == 4 ? decim4[c].process(osBuf) : decim8[c].process(osBuf));
+                        : (os == 2 ? decim2[c].process(osBuf) : os == 4 ? decim4[c].process(osBuf) : decim8[c].process(osBuf));
 
             // ── outputs ──
             outputs[OUT_OUTPUT].setVoltage(audio, c);
@@ -512,7 +513,7 @@ struct SomaWidget : ModuleWidget {
         if (!m) return;
         menu->addChild(new MenuSeparator);
         menu->addChild(createIndexPtrSubmenuItem("Anti-aliasing",
-            {"Off", "×4 oversampling", "×8 oversampling"}, &m->oversampleMode));
+            {"Off", "×2 oversampling", "×4 oversampling", "×8 oversampling"}, &m->oversampleMode));
     }
 };
 

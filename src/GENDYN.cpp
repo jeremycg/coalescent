@@ -62,6 +62,15 @@ struct GENDYN : Module {
 
     dsp::PulseGenerator cycleTrigger;
 
+    // Seed shape (0=Sine 1=Triangle 2=Saw 3=Square 4=Random) + a menu re-seed
+    // request. Sine default: the oscillator boots as a clean pitched tone that the
+    // stochastic walk then evolves — far more discoverable than a random noise seed.
+    int   initShape = 0;
+    int   lastInitShape = -1;        // forces a reseed when the shape changes
+    bool  reseedPending = false;
+    dsp::TRCFilter<float> dcBlock;   // gentle ~5 Hz DC blocker on OUT (walk mean drifts)
+    float lastFs = 0.f;
+
     // Display snapshot: ~45 Hz the audio thread publishes the breakpoints into a
     // lock-free double buffer (fill the back buffer, flip dispBuf with a release
     // store); the UI reads the front buffer after an acquire load. The walk drifts
@@ -86,7 +95,7 @@ struct GENDYN : Module {
         configParam(SCALE_AMP_PARAM,    0.f,   1.f,    0.002f, "Amplitude step scale");
         configParam(SCALE_DUR_PARAM,    0.f,   1.f,    0.0035f,"Duration step scale");
         configParam(B_AMP_PARAM,        0.f,   1.f,    0.8f,  "Amplitude barrier");
-        configParam(B_DUR_CENTER_PARAM, 20.f,  5000.f, 220.f, "Center frequency", " Hz");
+        configParam(B_DUR_CENTER_PARAM, 20.f,  5000.f, 261.626f, "Center frequency", " Hz");
         configParam(B_DUR_WIDTH_PARAM,  0.f,   1.f,    0.4f,  "Frequency barrier width");
 
         configParam(DISTRIBUTION_PARAM, 0.f,   3.f,    3.f,
@@ -111,6 +120,16 @@ struct GENDYN : Module {
         configOutput(AUDIO_OUTPUT,      "Audio");
         configOutput(CYCLE_TRIG_OUTPUT, "Cycle trigger");
         configOutput(FREQ_CV_OUTPUT,    "Frequency 1V/oct");
+    }
+
+    json_t* dataToJson() override {
+        json_t* root = json_object();
+        json_object_set_new(root, "initShape", json_integer(initShape));
+        return root;
+    }
+    void dataFromJson(json_t* root) override {
+        if (json_t* j = json_object_get(root, "initShape"))
+            initShape = (int) json_integer_value(j);
     }
 
     // ── DSP helpers ───────────────────────────────────────────────────────────
@@ -160,13 +179,26 @@ struct GENDYN : Module {
 
     // ── Oscillator helpers ────────────────────────────────────────────────────
 
-    // Randomise all breakpoints across the full barrier range and reset the
-    // oscillator to breakpoint 0. Called on N change and at startup.
-    void initBreakpoints(int N, float bAmp, float bDurMin, float bDurMax) {
+    // Seed all breakpoints and reset the oscillator to breakpoint 0. Deterministic
+    // shapes (sine/triangle/saw/square) start from a clean waveform with equal
+    // segment durations (durCenter) so the tone is pitched and recognisable; the
+    // stochastic walk then evolves it. "Random" reproduces the classic noisy seed.
+    void initBreakpoints(int N, float bAmp, float durCenter, float bDurMin, float bDurMax) {
         sum_dur = 0.f;
         for (int i = 0; i < N; i++) {
-            amp[i] = (2.f * rack::random::uniform() - 1.f) * bAmp;
-            dur[i] = bDurMin + rack::random::uniform() * (bDurMax - bDurMin);
+            const float ph = (float) i / (float) N;   // 0..1 over one cycle
+            float a;
+            switch (initShape) {
+                case 1:  a = 1.f - 4.f * std::fabs(ph - 0.5f); break;    // triangle
+                case 2:  a = 2.f * ph - 1.f; break;                      // saw
+                case 3:  a = ph < 0.5f ? 1.f : -1.f; break;              // square
+                case 4:  a = 2.f * rack::random::uniform() - 1.f; break; // random
+                default: a = std::sin(2.f * (float) M_PI * ph); break;   // sine
+            }
+            amp[i] = a * bAmp;
+            dur[i] = (initShape == 4)
+                   ? bDurMin + rack::random::uniform() * (bDurMax - bDurMin)  // random pitch jitter
+                   : durCenter;                                              // equal → stable pitch
             step_amp[i] = 0.f;
             step_dur[i] = 0.f;
             sum_dur += dur[i];
@@ -270,18 +302,23 @@ struct GENDYN : Module {
 
         const bool lockPitch = params[LOCK_PARAM].getValue() > 0.5f;
 
-        // ── Reinit on N change ────────────────────────────────────────────────
-        if (N != last_N) {
-            initBreakpoints(N, bAmp, bDurMin, bDurMax);
+        // ── Reinit on N change, seed-shape change, or a menu re-seed ───────────
+        if (N != last_N || initShape != lastInitShape || reseedPending) {
+            initBreakpoints(N, bAmp, durCenter, bDurMin, bDurMax);
             updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
-            last_N = N;
+            last_N = N; lastInitShape = initShape; reseedPending = false;
         }
 
         // ── Generate output sample ────────────────────────────────────────────
         const float t      = (float)current_sample / (float)current_dur;
         const float output = current_amp + t * (target_amp - current_amp);
-        outputs[AUDIO_OUTPUT].setVoltage(output * 5.f);
+        if (args.sampleRate != lastFs) {          // refresh DC-block cutoff on SR change
+            dcBlock.setCutoffFreq(5.f / args.sampleRate);
+            lastFs = args.sampleRate;
+        }
+        dcBlock.process(output);                  // strip the walk's slow DC drift
+        outputs[AUDIO_OUTPUT].setVoltage(dcBlock.highpass() * 5.f);
 
         // ── Auxiliary outputs ─────────────────────────────────────────────────
         outputs[CYCLE_TRIG_OUTPUT].setVoltage(
@@ -544,6 +581,16 @@ struct GENDYWidget : ModuleWidget {
         addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(15.0f, 112.f)), module, GENDYN::AUDIO_OUTPUT));
         addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30.5f, 112.f)), module, GENDYN::CYCLE_TRIG_OUTPUT));
         addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(46.0f, 112.f)), module, GENDYN::FREQ_CV_OUTPUT));
+    }
+
+    void appendContextMenu(Menu* menu) override {
+        GENDYN* m = dynamic_cast<GENDYN*>(module);
+        if (!m) return;
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createIndexPtrSubmenuItem("Initial waveform",
+            {"Sine", "Triangle", "Saw", "Square", "Random"}, &m->initShape));
+        menu->addChild(createMenuItem("Re-seed waveform", "",
+            [m]() { m->reseedPending = true; }));
     }
 };
 
