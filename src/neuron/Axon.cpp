@@ -90,9 +90,10 @@ struct Axon : Module {
     // The audio thread appends decimated (v,w) points to a per-voice ring, then
     // ~45 Hz publishes a coherent snapshot into a double buffer: it fills the
     // back buffer and flips dispBuf with a release store; the UI reads the front
-    // buffer after an acquire load. Lock-free and race-free, and the head index,
-    // active-channel count and effective CURRENT travel *with* the arrays, so the
-    // trails, head dots and nullcline stay mutually consistent.
+    // buffer after an acquire load. Lock-free; a draw that spans two publishes can
+    // tear one frame (acceptable for a display). The head index, active-channel
+    // count and effective CURRENT travel *with* the arrays, so the trails, head
+    // dots and nullcline stay mutually consistent.
     float trailV[MAX_POLY][TRAIL] = {}, trailW[MAX_POLY][TRAIL] = {};
     int   trailIdx = 0, trailDecim = 0;
     float dispV[2][MAX_POLY][TRAIL] = {}, dispW[2][MAX_POLY][TRAIL] = {};
@@ -101,6 +102,7 @@ struct Axon : Module {
     float dispCurr[2] = {0.6f, 0.6f};   // voice-0 effective CURRENT for the v-nullcline
     std::atomic<int> dispBuf{0};
     int   dispClock = 0;
+    int   dispPeriod = 980;           // samples between snapshots (~45 Hz; refreshed on SR change)
 
     // ─── Tunable constants (set by ear/scope at M7; RATE_CAL from tools/) ────
     static constexpr float RATE_CAL    = 37.899004f; // dimensionless period at default → C4 at 0 V
@@ -150,13 +152,31 @@ struct Axon : Module {
 
     json_t* dataToJson() override {
         json_t* root = json_object();
+        // Save the actual factor (1/2/4/8) — immune to menu reordering. Keep the
+        // legacy index key too so a 2.0.3 patch opened in 2.0.2 lands close.
+        static const int factors[4] = {1, 2, 4, 8};
+        json_object_set_new(root, "osFactor",
+                            json_integer(factors[clamp(oversampleMode, 0, 3)]));
         json_object_set_new(root, "oversample", json_integer(oversampleMode));
         return root;
     }
 
     void dataFromJson(json_t* root) override {
-        if (json_t* j = json_object_get(root, "oversample"))
-            oversampleMode = (int) json_integer_value(j);
+        if (json_t* j = json_object_get(root, "osFactor")) {
+            // 2.0.3+ patch: the factor is authoritative.
+            switch ((int) json_integer_value(j)) {
+                case 1:  oversampleMode = 0; break;
+                case 2:  oversampleMode = 1; break;
+                case 8:  oversampleMode = 3; break;
+                default: oversampleMode = 2; break;   // ×4 (and anything unexpected)
+            }
+        }
+        else if (json_t* j = json_object_get(root, "oversample")) {
+            // Pre-2.0.3 patch: index meant 0=Off, 1=×4, 2=×8 — remap into the
+            // new Off/×2/×4/×8 menu so old patches keep their anti-aliasing.
+            int v = (int) json_integer_value(j);
+            oversampleMode = v <= 0 ? 0 : (v == 1 ? 2 : 3);
+        }
     }
 
     // FHN derivatives in dimensionless time. Factored so a Hindmarsh-Rose
@@ -191,6 +211,7 @@ struct Axon : Module {
         if (fs != lastFs || os != lastOs) {
             for (int c = 0; c < MAX_POLY; c++) dcBlock[c].setCutoffFreq(20.f / (fs * os));
             trigDecay = std::exp(-1.f / (TRIG_TAU_MS * 1e-3f * fs));
+            dispPeriod = (int) (fs / 45.f);
             if (os != lastOs)
                 for (int c = 0; c < MAX_POLY; c++) { decim2[c].reset(); decim4[c].reset(); decim8[c].reset(); }
             lastFs = fs;
@@ -219,6 +240,20 @@ struct Axon : Module {
 
         float I0 = Ibase;   // voice-0 effective current, for the display nullcline
 
+        // With V/OCT mono or unpatched every voice runs at the same pitch (the
+        // poly-percussion case: poly TRIG, no pitch cable), so hoist the exp2 and
+        // the two real divisions out of the voice loop. Bit-identical output —
+        // getPolyVoltage(c) returns channel 0 for all c on a mono cable.
+        const bool monoPitch = inputs[VOCT_INPUT].getChannels() <= 1;
+        int K0 = MIN_SUB; float h0 = 0.f;
+        if (monoPitch) {
+            float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
+                                pitchKnob + inputs[VOCT_INPUT].getVoltage());
+            float subTau = RATE_CAL * pitchHz / fs / os;
+            K0 = clamp((int) std::ceil(subTau / HSUB_MAX), MIN_SUB, MAX_SUB);
+            h0 = subTau / K0;
+        }
+
         for (int c = 0; c < channels; c++) {
             // ── params → physics (per voice) ──
             float eps = clamp(epsBase
@@ -243,12 +278,14 @@ struct Axon : Module {
             if (std::fabs(trigPulse[c]) < 1e-30f) trigPulse[c] = 0.f;
 
             // ── pitch = simulation speed (open-loop) ──
-            float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
-                                pitchKnob + inputs[VOCT_INPUT].getPolyVoltage(c));
-            float dtau = RATE_CAL * pitchHz / fs;                 // dimensionless advance / sample
-            float subTau = dtau / os;                             // advance per oversampled sample
-            int   K = clamp((int) std::ceil(subTau / HSUB_MAX), MIN_SUB, MAX_SUB);
-            float h = subTau / K;
+            int K = K0; float h = h0;
+            if (!monoPitch) {
+                float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
+                                    pitchKnob + inputs[VOCT_INPUT].getPolyVoltage(c));
+                float subTau = RATE_CAL * pitchHz / fs / os;      // dimensionless advance per oversampled sample
+                K = clamp((int) std::ceil(subTau / HSUB_MAX), MIN_SUB, MAX_SUB);
+                h = subTau / K;
+            }
 
             // ── render os oversampled samples, full output chain each, then
             // decimate. K RK4 substeps per oversampled sample hold the stiff
@@ -293,7 +330,7 @@ struct Axon : Module {
             }
             trailIdx = (trailIdx + 1) % TRAIL;
         }
-        if (++dispClock >= (int)(fs / 45.f)) {       // publish display snapshot ~45 Hz
+        if (++dispClock >= dispPeriod) {                 // publish display snapshot ~45 Hz
             dispClock = 0;
             int next = 1 - dispBuf.load(std::memory_order_relaxed);
             for (int c = 0; c < channels; c++) {

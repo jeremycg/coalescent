@@ -70,6 +70,7 @@ struct Haptik : Module {
     int   dispN[2] = {64, 64}, dispDriver[2] = {0, 0};
     std::atomic<int> dispBuf{0};
     int   dispClock = 0;
+    int   dispPeriod = 980;         // samples between snapshots (~45 Hz; refreshed on SR change)
 
     // ─── Tunable constants ──────────────────────────────────────────────────
     static constexpr float DAMP_MAX_HZ = 800.f;
@@ -272,9 +273,12 @@ struct Haptik : Module {
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
                             params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage());
         scanPhase += pitchHz / fs;
+        // A NaN on V/OCT (from a misbehaving upstream module) would otherwise
+        // stick scanPhase at NaN forever and make (int)p an out-of-bounds index.
+        if (!std::isfinite(scanPhase)) scanPhase = 0.f;
         scanPhase -= std::floor(scanPhase);
         float p   = scanPhase * N;
-        int   i0  = std::min((int) p, N - 1);    // guard against p == N at phase rounding
+        int   i0  = clamp((int) p, 0, N - 1);    // guard p==N (phase rounding) and any stray value
         int   i1  = (i0 + 1) % N;
         float f   = p - i0;
         float s;
@@ -295,6 +299,7 @@ struct Haptik : Module {
         // ── outputs ──
         if (fs != lastFs) {                      // recompute only on SR change (still
             dcBlock.setCutoffFreq(20.f / fs);    // graceful without onSampleRateChange)
+            dispPeriod = (int) (fs / 45.f);
             lastFs = fs;
         }
         dcBlock.process(s);                      // ~20 Hz high-pass; scanned mean wanders
@@ -303,7 +308,7 @@ struct Haptik : Module {
         outputs[MOTION_OUTPUT].setVoltage(clamp(y[0] * MOTION_GAIN, -5.f, 5.f));
 
         // ── refresh display snapshot (~45 Hz) ──
-        if (++dispClock >= (int)(fs / 45.f)) {
+        if (++dispClock >= dispPeriod) {
             dispClock = 0;
             int next = 1 - dispBuf.load(std::memory_order_relaxed);
             std::copy(y, y + N, dispY[next]);

@@ -6,7 +6,8 @@ also wires a Fundamental VCO SAW output into Haptik's EXT IN.
 
 Haptik positional ids (must match enum order in src/Haptik.cpp):
   ParamId : 0 N, 1 PITCH, 2 RATE(log2 Hz), 3 COUPLE, 4 DAMP, 5 INJECT,
-            6 EXCITE, 7 FREEZE, 8 RATE_ATT, 9 COUPLE_ATT, 10 DAMP_ATT, 11 INJECT_ATT
+            6 EXCITE, 7 FREEZE, 8 RATE_ATT, 9 COUPLE_ATT, 10 DAMP_ATT, 11 INJECT_ATT,
+            12 DRIVER, 13 MODE
   InputId : 0 VOCT, 1 RATE, 2 COUPLE, 3 DAMP, 4 INJECT, 5 TRIG, 6 EXT
   OutputId: 0 OUT, 1 MOTION
 Fundamental VCO (from source): FREQ_PARAM=2, PITCH_INPUT=0, SAW_OUTPUT=2.

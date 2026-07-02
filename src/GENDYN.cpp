@@ -82,6 +82,7 @@ struct GENDYN : Module {
     float dispBAmp[2] = {0.8f, 0.8f};
     std::atomic<int> dispBuf{0};
     int   dispClock = 0;
+    int   dispPeriod = 980;         // samples between snapshots (~45 Hz; refreshed on SR change)
 
     GENDYN() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -129,7 +130,15 @@ struct GENDYN : Module {
     }
     void dataFromJson(json_t* root) override {
         if (json_t* j = json_object_get(root, "initShape"))
-            initShape = (int) json_integer_value(j);
+            initShape = clamp((int) json_integer_value(j), 0, 4);
+    }
+
+    void onReset() override {
+        // Restore factory menu state and force a clean, unconditional re-seed on
+        // the next process() (covers the case where N didn't change).
+        initShape = 0;
+        reseedPending = true;
+        dcBlock.reset();
     }
 
     // ── DSP helpers ───────────────────────────────────────────────────────────
@@ -205,7 +214,7 @@ struct GENDYN : Module {
         }
         current_breakpoint = 0;
         current_sample     = 0;
-        current_amp        = 0.f;
+        current_amp        = amp[N - 1];   // wrap value → the first cycle is exactly periodic
         target_amp         = amp[0];
         current_dur        = std::max(1, (int)dur[0]);
         dur_err            = 0.f;
@@ -249,10 +258,15 @@ struct GENDYN : Module {
     // sums to exactly sampleRate/centerFreq. The duration *walk* stays in
     // its barriers untouched — relative durations keep evolving (timbre)
     // while pitch holds — so toggling LOCK is clean and stateless.
-    void updateNormAndFreq(bool lockPitch, float sampleRate, float centerFreq) {
+    void updateNormAndFreq(int N, bool lockPitch, float sampleRate, float centerFreq) {
         norm_k = 1.f;
-        if (lockPitch && sum_dur > 0.f)
+        if (lockPitch && sum_dur > 0.f) {
             norm_k = (sampleRate / centerFreq) / sum_dur;
+            // Playback floors each segment at 1 sample, so a cycle can't be
+            // shorter than N samples. Clamp norm_k to keep the FREQ CV honest
+            // when the LOCK target (fs/centerFreq) is below that reachable floor.
+            norm_k = std::max(norm_k, (float) N / sum_dur);
+        }
         freq_cv = computeFreqCV(sampleRate, sum_dur * norm_k);
     }
 
@@ -305,7 +319,7 @@ struct GENDYN : Module {
         // ── Reinit on N change, seed-shape change, or a menu re-seed ───────────
         if (N != last_N || initShape != lastInitShape || reseedPending) {
             initBreakpoints(N, bAmp, durCenter, bDurMin, bDurMax);
-            updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
+            updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
             last_N = N; lastInitShape = initShape; reseedPending = false;
         }
@@ -313,8 +327,9 @@ struct GENDYN : Module {
         // ── Generate output sample ────────────────────────────────────────────
         const float t      = (float)current_sample / (float)current_dur;
         const float output = current_amp + t * (target_amp - current_amp);
-        if (args.sampleRate != lastFs) {          // refresh DC-block cutoff on SR change
+        if (args.sampleRate != lastFs) {          // refresh SR-derived caches on SR change
             dcBlock.setCutoffFreq(5.f / args.sampleRate);
+            dispPeriod = (int) (args.sampleRate / 45.f);
             lastFs = args.sampleRate;
         }
         dcBlock.process(output);                  // strip the walk's slow DC drift
@@ -344,7 +359,7 @@ struct GENDYN : Module {
                     std::pow(10.f, -2.f * params[PERSIST_PARAM].getValue());
                 runCycleUpdate(N, scaleAmp, scaleDur, bAmp, bDurMin, bDurMax,
                                dist, persistSpread);
-                updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
+                updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
                 // Continuity at the cycle boundary is inherent: every segment
                 // starts from current_amp (the value just reached), so the
                 // wrap segment interpolates from the old amp[N-1] to the
@@ -364,7 +379,7 @@ struct GENDYN : Module {
         }
 
         // ── Refresh display snapshot (~45 Hz) ─────────────────────────────────
-        if (++dispClock >= (int)(args.sampleRate / 45.f)) {       // publish snapshot ~45 Hz
+        if (++dispClock >= dispPeriod) {                          // publish snapshot ~45 Hz
             dispClock = 0;
             int next = 1 - dispBuf.load(std::memory_order_relaxed);
             std::copy(amp, amp + N, dispAmp[next]);

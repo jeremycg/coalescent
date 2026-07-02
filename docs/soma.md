@@ -97,7 +97,7 @@ only when aliasing is audible on high notes.
 
 `tools/make_patches_neuron.py` also writes six Soma patches:
 
-- **soma_1_bursting** — the default bursting voicing → audio
+- **soma_1_bursting** — a bursting voicing (BURST turned down, r ≈ 0.006) → audio
 - **soma_2_chaos** — CURRENT = 3.25, the classic HR chaotic regime
 - **soma_3_blips** — sub-threshold CURRENT, an LFO clocking TRIG to fire bursts
 - **soma_4_zmod** — Z self-patched into CURRENT CV: a self-evolving burst texture

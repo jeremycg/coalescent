@@ -223,7 +223,7 @@ def patch_midipoly():
 # ── Soma (Hindmarsh-Rose) ─────────────────────────────────────────────────────
 # Soma positional ids (match enum order in src/Soma.cpp):
 #   ParamId : 0 PITCH, 1 CURRENT, 2 BURST(=log2 r), 3 ADAPT, 4 CURRENT_ATT, 5 BURST_ATT
-#   InputId : 0 VOCT, 1 CURRENT, 2 BURST, 3 TRIG
+#   InputId : 0 VOCT, 1 CURRENT, 2 BURST, 3 TRIG, 4 SYNC
 #   OutputId: 0 OUT, 1 SPIKE, 2 Z
 import math
 
