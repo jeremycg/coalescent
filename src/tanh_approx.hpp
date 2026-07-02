@@ -17,4 +17,14 @@ inline float fastTanh(float x) {
     return n / d;
 }
 
+// Four-lane version (poly path). Clamp the domain to ±4 as above (Padé at ±4 is
+// 0.9993 vs the scalar's exact ±1 — a -72 dB difference, inaudible).
+inline simd::float_4 fastTanh(simd::float_4 x) {
+    x = simd::fmin(simd::fmax(x, -4.f), 4.f);
+    const simd::float_4 x2 = x * x;
+    const simd::float_4 n = x * (135135.f + x2 * (17325.f + x2 * (378.f + x2)));
+    const simd::float_4 d = 135135.f + x2 * (62370.f + x2 * (3150.f + x2 * 28.f));
+    return n / d;
+}
+
 } // namespace coalescent

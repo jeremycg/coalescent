@@ -13,14 +13,20 @@
 // the two hand-written steppers used before extraction (k1..k4 with weights
 // 1, 2, 2, 1 over 6), so audio/calibration are unchanged; see
 // tools/integrator_equiv.cpp for the numeric proof.
+//
+// Templated on the scalar type T so the same code serves scalar float (the
+// per-voice path) and rack::simd::float_4 (four poly voices at once). For float_4
+// the step size h is a per-lane vector: a voice group runs at the group's max
+// substep count K, so each lane's h = subTau_lane / K — never larger than its own
+// scalar h, i.e. accuracy is preserved lane-by-lane.
 
 namespace neuron {
 
 // One RK4 step of size h over the N-dimensional state y, in place.
-// deriv(const float* y, float* out) writes the time-derivative of state y.
-template <int N, typename Deriv>
-inline void rk4(float (&y)[N], float h, Deriv&& deriv) {
-    float k1[N], k2[N], k3[N], k4[N], t[N];
+// deriv(const T* y, T* out) writes the time-derivative of state y.
+template <int N, typename T, typename Deriv>
+inline void rk4(T (&y)[N], T h, Deriv&& deriv) {
+    T k1[N], k2[N], k3[N], k4[N], t[N];
     deriv(y, k1);
     for (int i = 0; i < N; ++i) t[i] = y[i] + 0.5f * h * k1[i];
     deriv(t, k2);

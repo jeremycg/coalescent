@@ -65,20 +65,21 @@ struct Axon : Module {
     // stateful DSP helpers (TRIG edge detect, spike detect/shaper, DC blocker)
     // are one-per-voice. The voice count is driven by V/OCT (or TRIG).
     static const int MAX_POLY = 16;
-    float vv[MAX_POLY], ww[MAX_POLY];          // FHN state per voice
-    float trigPulse[MAX_POLY] = {};            // decaying injected current from TRIG
-    dsp::SchmittTrigger trigIn[MAX_POLY];      // TRIG edge detector (hysteresis window)
-    dsp::SchmittTrigger syncIn[MAX_POLY];      // SYNC edge detector (hard reset to rest)
-    dsp::SchmittTrigger spikeDet[MAX_POLY];    // detects v crossing SPIKE_THRESH upward
-    dsp::PulseGenerator spikeGen[MAX_POLY];    // shapes the SPIKE output pulse
-    dsp::TRCFilter<float> dcBlock[MAX_POLY];   // DC blocker on OUT (limit-cycle mean ≠ 0)
-    // Anti-aliasing decimators (one per voice; only the active factor is used).
-    // The whole output chain — DC-block then tanh soft-clip — runs in the
-    // oversampled domain and is decimated here, so both the sharp spike and the
-    // tanh nonlinearity are band-limited before they reach the output sample.
-    dsp::Decimator<2, 8> decim2[MAX_POLY];
-    dsp::Decimator<4, 8> decim4[MAX_POLY];
-    dsp::Decimator<8, 8> decim8[MAX_POLY];
+    static const int GROUPS   = MAX_POLY / 4;   // voices processed 4-wide (simd::float_4)
+    // Poly voices run four at a time. Each group's integration state and stateful
+    // DSP helpers hold one lane per voice; the whole oversampled output chain
+    // (RK4 → clamp → spike detect → DC block → tanh → decimate) is vectorised.
+    simd::float_4 vv4[GROUPS], ww4[GROUPS];      // FHN state per voice
+    simd::float_4 trigPulse4[GROUPS] = {};       // decaying injected current from TRIG
+    dsp::TSchmittTrigger<simd::float_4> trigIn4[GROUPS];   // TRIG edge detector (per lane)
+    dsp::TSchmittTrigger<simd::float_4> syncIn4[GROUPS];   // SYNC edge detector (per lane)
+    dsp::TSchmittTrigger<simd::float_4> spikeDet4[GROUPS]; // v crossing SPIKE_THRESH upward
+    dsp::PulseGenerator spikeGen[MAX_POLY];      // SPIKE pulse shaper (scalar, one per voice)
+    dsp::TRCFilter<simd::float_4> dcBlock4[GROUPS]; // DC blocker on OUT (limit-cycle mean ≠ 0)
+    // Anti-aliasing decimators (one per group; only the active factor is used).
+    dsp::Decimator<2, 8, simd::float_4> decim2_4[GROUPS];
+    dsp::Decimator<4, 8, simd::float_4> decim4_4[GROUPS];
+    dsp::Decimator<8, 8, simd::float_4> decim8_4[GROUPS];
     int   oversampleMode = 2;         // 0=off, 1=×2, 2=×4, 3=×8
     int   channels = 1;               // active voice count
     float lastFs = 0.f;               // detects SR change to refresh coefficients
@@ -138,16 +139,17 @@ struct Axon : Module {
         configOutput(SPIKE_OUTPUT, "Spike (trigger on each spike)");
         configOutput(W_OUTPUT, "Recovery w (slow CV)");
 
-        for (int c = 0; c < MAX_POLY; c++) { vv[c] = -1.2f; ww[c] = -0.6f; }
+        for (int g = 0; g < GROUPS; g++) { vv4[g] = -1.2f; ww4[g] = -0.6f; }
     }
 
     void onReset() override {
         oversampleMode = 2;   // restore default anti-aliasing (×4) on Initialize
-        for (int c = 0; c < MAX_POLY; c++) {
-            vv[c] = -1.2f; ww[c] = -0.6f; trigPulse[c] = 0.f;
-            trigIn[c].reset(); syncIn[c].reset(); spikeDet[c].reset(); spikeGen[c].reset();
-            dcBlock[c].reset(); decim2[c].reset(); decim4[c].reset(); decim8[c].reset();
+        for (int g = 0; g < GROUPS; g++) {
+            vv4[g] = -1.2f; ww4[g] = -0.6f; trigPulse4[g] = 0.f;
+            trigIn4[g].reset(); syncIn4[g].reset(); spikeDet4[g].reset();
+            dcBlock4[g].reset(); decim2_4[g].reset(); decim4_4[g].reset(); decim8_4[g].reset();
         }
+        for (int c = 0; c < MAX_POLY; c++) spikeGen[c].reset();
     }
 
     json_t* dataToJson() override {
@@ -179,24 +181,13 @@ struct Axon : Module {
         }
     }
 
-    // FHN derivatives in dimensionless time. Factored so a Hindmarsh-Rose
-    // sibling can add a third (dz) line and reuse the RK4 step below.
-    static inline void f(float v, float w, float Itot, float eps, float a,
-                         float& dv, float& dw) {
+    // FHN derivatives in dimensionless time, generic over the scalar type T so the
+    // one expression serves scalar float and simd::float_4 (four poly voices at
+    // once); the shared neuron::rk4 step (integrator.hpp) is likewise templated.
+    template <typename T>
+    static inline void f(T v, T w, T Itot, T eps, T a, T& dv, T& dw) {
         dv = v - v * v * v / 3.f - w + Itot;
         dw = eps * (v + a - B_FIXED * w);
-    }
-
-    // One RK4 substep of size h (updates v,w in place), via the shared
-    // neuron::rk4 stepper — arithmetic identical to the original hand-written
-    // step (see src/neuron/integrator.hpp).
-    static inline void rk4(float& v, float& w, float h, float Itot, float eps, float a) {
-        float s[2] = {v, w};
-        neuron::rk4<2>(s, h, [&](const float* y, float* d) {
-            f(y[0], y[1], Itot, eps, a, d[0], d[1]);
-        });
-        v = s[0];
-        w = s[1];
     }
 
     void process(const ProcessArgs& args) override {
@@ -209,11 +200,11 @@ struct Axon : Module {
         // keep the real-time corner at ~20 Hz. Caching trigDecay keeps a
         // transcendental off the per-sample path.
         if (fs != lastFs || os != lastOs) {
-            for (int c = 0; c < MAX_POLY; c++) dcBlock[c].setCutoffFreq(20.f / (fs * os));
+            for (int g = 0; g < GROUPS; g++) dcBlock4[g].setCutoffFreq(20.f / (fs * os));
             trigDecay = std::exp(-1.f / (TRIG_TAU_MS * 1e-3f * fs));
             dispPeriod = (int) (fs / 45.f);
             if (os != lastOs)
-                for (int c = 0; c < MAX_POLY; c++) { decim2[c].reset(); decim4[c].reset(); decim8[c].reset(); }
+                for (int g = 0; g < GROUPS; g++) { decim2_4[g].reset(); decim4_4[g].reset(); decim8_4[g].reset(); }
             lastFs = fs;
             lastOs = os;
         }
@@ -238,95 +229,96 @@ struct Axon : Module {
         // applied to every voice's DC blocker so a parked rest can't denormalise.
         antiDenorm = -antiDenorm;
 
-        float I0 = Ibase;   // voice-0 effective current, for the display nullcline
+        float I0 = Ibase;               // voice-0 effective current, for the display nullcline
+        const simd::float_4 aVec(a);    // SHAPE has no CV → same for every lane
+        const int nGroups = (channels + 3) / 4;
 
-        // With V/OCT mono or unpatched every voice runs at the same pitch (the
-        // poly-percussion case: poly TRIG, no pitch cable), so hoist the exp2 and
-        // the two real divisions out of the voice loop. Bit-identical output —
-        // getPolyVoltage(c) returns channel 0 for all c on a mono cable.
-        const bool monoPitch = inputs[VOCT_INPUT].getChannels() <= 1;
-        int K0 = MIN_SUB; float h0 = 0.f;
-        if (monoPitch) {
-            float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
-                                pitchKnob + inputs[VOCT_INPUT].getVoltage());
-            float subTau = RATE_CAL * pitchHz / fs / os;
-            K0 = clamp((int) std::ceil(subTau / HSUB_MAX), MIN_SUB, MAX_SUB);
-            h0 = subTau / K0;
-        }
+        for (int g = 0; g < nGroups; g++) {
+            const int base = g * 4;
 
-        for (int c = 0; c < channels; c++) {
-            // ── params → physics (per voice) ──
-            float eps = clamp(epsBase
-                            + inputs[EPS_INPUT].getPolyVoltage(c) * epsAtt * CV_DEPTH,
-                              0.01f, 0.30f);
-            float I   = Ibase
-                      + inputs[CURRENT_INPUT].getPolyVoltage(c) * Iatt * CV_DEPTH;
-            if (c == 0) I0 = I;
+            // ── params → physics (4 lanes) ──
+            simd::float_4 eps = simd::clamp(epsBase
+                + inputs[EPS_INPUT].getPolyVoltageSimd<simd::float_4>(base) * epsAtt * CV_DEPTH,
+                0.01f, 0.30f);
+            simd::float_4 I = Ibase
+                + inputs[CURRENT_INPUT].getPolyVoltageSimd<simd::float_4>(base) * Iatt * CV_DEPTH;
+            if (g == 0) I0 = I[0];
 
-            // ── hard sync: a rising edge re-seeds the voice at the rest fixed
-            // point. The resulting state discontinuity is the sync sound. ──
-            if (syncIn[c].process(inputs[SYNC_INPUT].getPolyVoltage(c), 0.1f, 1.f)) {
-                vv[c] = -1.2f; ww[c] = -0.6f;
-            }
+            simd::float_4 v = vv4[g], w = ww4[g];
+
+            // ── hard sync: a rising edge re-seeds those lanes at the rest point ──
+            simd::float_4 syncMask = syncIn4[g].process(
+                inputs[SYNC_INPUT].getPolyVoltageSimd<simd::float_4>(base), 0.1f, 1.f);
+            v = simd::ifelse(syncMask, -1.2f, v);
+            w = simd::ifelse(syncMask, -0.6f, w);
 
             // ── excitable trigger: rising edge injects a decaying current pulse ──
-            // Hysteresis window (0.1..1V) so a DC-coupled / offset trigger can't latch.
-            if (trigIn[c].process(inputs[TRIG_INPUT].getPolyVoltage(c), 0.1f, 1.f))
-                trigPulse[c] = TRIG_AMP;
-            float Itot = I + trigPulse[c];
-            trigPulse[c] *= trigDecay;
-            if (std::fabs(trigPulse[c]) < 1e-30f) trigPulse[c] = 0.f;
+            simd::float_4 trigMask = trigIn4[g].process(
+                inputs[TRIG_INPUT].getPolyVoltageSimd<simd::float_4>(base), 0.1f, 1.f);
+            trigPulse4[g] = simd::ifelse(trigMask, TRIG_AMP, trigPulse4[g]);
+            simd::float_4 Itot = I + trigPulse4[g];
+            trigPulse4[g] *= trigDecay;
+            trigPulse4[g] = simd::ifelse(simd::abs(trigPulse4[g]) < 1e-30f, 0.f, trigPulse4[g]);
 
-            // ── pitch = simulation speed (open-loop) ──
-            int K = K0; float h = h0;
-            if (!monoPitch) {
-                float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
-                                    pitchKnob + inputs[VOCT_INPUT].getPolyVoltage(c));
-                float subTau = RATE_CAL * pitchHz / fs / os;      // dimensionless advance per oversampled sample
-                K = clamp((int) std::ceil(subTau / HSUB_MAX), MIN_SUB, MAX_SUB);
-                h = subTau / K;
-            }
+            // ── pitch = simulation speed (open-loop). Run the group at its max
+            // substep count K: a slower lane just gets a smaller-than-needed h,
+            // so accuracy is preserved lane-by-lane (same reasoning as MIN_SUB). ──
+            simd::float_4 pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
+                pitchKnob + inputs[VOCT_INPUT].getPolyVoltageSimd<simd::float_4>(base));
+            simd::float_4 subTau = RATE_CAL * pitchHz / fs / (float) os;
+            simd::float_4 Kf = simd::ceil(subTau / HSUB_MAX);
+            int K = MIN_SUB;
+            for (int l = 0; l < 4; l++) K = std::max(K, (int) Kf[l]);
+            K = std::min(K, MAX_SUB);
+            simd::float_4 h = subTau / (float) K;
 
-            // ── render os oversampled samples, full output chain each, then
-            // decimate. K RK4 substeps per oversampled sample hold the stiff
-            // spike accurate; DC-block + tanh band-limited before decimation. ──
-            float v = vv[c], w = ww[c];
-            float osBuf[8];
+            // ── render os oversampled samples, full chain each, then decimate ──
+            simd::float_4 s[2] = {v, w};
+            simd::float_4 osBuf[8];
             for (int o = 0; o < os; o++) {
                 for (int k = 0; k < K; k++)
-                    rk4(v, w, h, Itot, eps, a);
+                    neuron::rk4<2>(s, h, [&](const simd::float_4* y, simd::float_4* d) {
+                        f(y[0], y[1], Itot, eps, aVec, d[0], d[1]);
+                    });
 
-                // Backstop: nonlinear systems can run away if pushed.
-                if (!std::isfinite(v) || !std::isfinite(w)) { v = -1.2f; w = -0.6f; }
-                v = clamp(v, -STATE_MAX, STATE_MAX);
-                w = clamp(w, -STATE_MAX, STATE_MAX);
+                // Backstop: reset any non-finite / runaway lane to rest, then clamp.
+                simd::float_4 finite = (s[0] == s[0]) & (s[1] == s[1])
+                                     & (simd::abs(s[0]) < 1e6f) & (simd::abs(s[1]) < 1e6f);
+                s[0] = simd::ifelse(finite, s[0], -1.2f);
+                s[1] = simd::ifelse(finite, s[1], -0.6f);
+                s[0] = simd::clamp(s[0], -STATE_MAX, STATE_MAX);
+                s[1] = simd::clamp(s[1], -STATE_MAX, STATE_MAX);
 
-                // Spike detect on the oversampled stream so fast spikes aren't
-                // missed; hysteresis (two-arg) keeps it to one pulse per spike.
-                if (spikeDet[c].process(v, 0.f, SPIKE_THRESH))
-                    spikeGen[c].trigger(1e-3f);
+                // Spike detect per lane; fire the matching scalar pulse generators.
+                simd::float_4 spikeMask = spikeDet4[g].process(s[0], 0.f, SPIKE_THRESH);
+                int sm = simd::movemask(spikeMask);
+                for (int l = 0; l < 4; l++)
+                    if (sm & (1 << l)) spikeGen[base + l].trigger(1e-3f);
 
-                dcBlock[c].process(v + antiDenorm);
-                osBuf[o] = 5.f * coalescent::fastTanh(dcBlock[c].highpass() * OUT_GAIN);
+                dcBlock4[g].process(s[0] + antiDenorm);
+                osBuf[o] = 5.f * coalescent::fastTanh(dcBlock4[g].highpass() * OUT_GAIN);
             }
-            vv[c] = v; ww[c] = w;
+            vv4[g] = s[0]; ww4[g] = s[1];
 
-            float audio = os == 1 ? osBuf[0]
-                        : (os == 2 ? decim2[c].process(osBuf) : os == 4 ? decim4[c].process(osBuf) : decim8[c].process(osBuf));
+            simd::float_4 audio = os == 1 ? osBuf[0]
+                : (os == 2 ? decim2_4[g].process(osBuf)
+                :  os == 4 ? decim4_4[g].process(osBuf) : decim8_4[g].process(osBuf));
 
-            // ── outputs ──
-            outputs[OUT_OUTPUT].setVoltage(audio, c);
-            outputs[SPIKE_OUTPUT].setVoltage(spikeGen[c].process(args.sampleTime) ? 10.f : 0.f, c);
-            // W is a slow correlated CV — intentionally not high-passed.
-            outputs[W_OUTPUT].setVoltage(clamp(w * W_GAIN, -5.f, 5.f), c);
+            // ── outputs (4 channels at once) ──
+            outputs[OUT_OUTPUT].setVoltageSimd(audio, base);
+            outputs[W_OUTPUT].setVoltageSimd(simd::clamp(s[1] * W_GAIN, -5.f, 5.f), base);
+            simd::float_4 spikeOut;
+            for (int l = 0; l < 4; l++)
+                spikeOut[l] = spikeGen[base + l].process(args.sampleTime) ? 10.f : 0.f;
+            outputs[SPIKE_OUTPUT].setVoltageSimd(spikeOut, base);
         }
 
         // ── feed the phase-portrait trails (all active voices, decimated) ──
         if (++trailDecim >= 4) {
             trailDecim = 0;
             for (int c = 0; c < channels; c++) {
-                trailV[c][trailIdx] = vv[c];
-                trailW[c][trailIdx] = ww[c];
+                trailV[c][trailIdx] = vv4[c / 4][c % 4];
+                trailW[c][trailIdx] = ww4[c / 4][c % 4];
             }
             trailIdx = (trailIdx + 1) % TRAIL;
         }

@@ -64,20 +64,18 @@ struct Soma : Module {
 
     // ─── Per-voice persistent state (polyphonic, up to 16 channels) ─────────
     static const int MAX_POLY = 16;
-    float xx[MAX_POLY], yy[MAX_POLY], zz[MAX_POLY];  // HR state per voice
-    float trigPulse[MAX_POLY] = {};
-    dsp::SchmittTrigger trigIn[MAX_POLY];
-    dsp::SchmittTrigger syncIn[MAX_POLY];     // SYNC edge detector (hard reset to rest)
-    dsp::SchmittTrigger spikeDet[MAX_POLY];
-    dsp::PulseGenerator spikeGen[MAX_POLY];
-    dsp::TRCFilter<float> dcBlock[MAX_POLY];
-    // Anti-aliasing decimators (one per voice; only the active factor is used).
-    // The whole output chain — DC-block then tanh soft-clip — runs oversampled
-    // and is decimated here, so the sharp spikes and the tanh nonlinearity are
-    // band-limited before reaching the output sample.
-    dsp::Decimator<2, 8> decim2[MAX_POLY];
-    dsp::Decimator<4, 8> decim4[MAX_POLY];
-    dsp::Decimator<8, 8> decim8[MAX_POLY];
+    static const int GROUPS   = MAX_POLY / 4;   // voices processed 4-wide (simd::float_4)
+    simd::float_4 xx4[GROUPS], yy4[GROUPS], zz4[GROUPS];   // HR state per voice
+    simd::float_4 trigPulse4[GROUPS] = {};
+    dsp::TSchmittTrigger<simd::float_4> trigIn4[GROUPS];
+    dsp::TSchmittTrigger<simd::float_4> syncIn4[GROUPS];   // SYNC edge detector (hard reset to rest)
+    dsp::TSchmittTrigger<simd::float_4> spikeDet4[GROUPS];
+    dsp::PulseGenerator spikeGen[MAX_POLY];                // SPIKE pulse shaper (scalar, per voice)
+    dsp::TRCFilter<simd::float_4> dcBlock4[GROUPS];
+    // Anti-aliasing decimators (one per group; only the active factor is used).
+    dsp::Decimator<2, 8, simd::float_4> decim2_4[GROUPS];
+    dsp::Decimator<4, 8, simd::float_4> decim4_4[GROUPS];
+    dsp::Decimator<8, 8, simd::float_4> decim8_4[GROUPS];
     int   oversampleMode = 2;         // 0=off, 1=×2, 2=×4, 3=×8
     int   channels = 1;               // active voice count
     float lastFs = 0.f;
@@ -139,16 +137,17 @@ struct Soma : Module {
         configOutput(SPIKE_OUTPUT, "Spike (trigger on each spike)");
         configOutput(Z_OUTPUT, "Adaptation z (burst-envelope CV)");
 
-        for (int c = 0; c < MAX_POLY; c++) { xx[c] = -1.6f; yy[c] = -11.8f; zz[c] = 2.f; }
+        for (int g = 0; g < GROUPS; g++) { xx4[g] = -1.6f; yy4[g] = -11.8f; zz4[g] = 2.f; }
     }
 
     void onReset() override {
         oversampleMode = 2;   // restore default anti-aliasing (×4) on Initialize
-        for (int c = 0; c < MAX_POLY; c++) {
-            xx[c] = -1.6f; yy[c] = -11.8f; zz[c] = 2.f; trigPulse[c] = 0.f;
-            trigIn[c].reset(); syncIn[c].reset(); spikeDet[c].reset(); spikeGen[c].reset();
-            dcBlock[c].reset(); decim2[c].reset(); decim4[c].reset(); decim8[c].reset();
+        for (int g = 0; g < GROUPS; g++) {
+            xx4[g] = -1.6f; yy4[g] = -11.8f; zz4[g] = 2.f; trigPulse4[g] = 0.f;
+            trigIn4[g].reset(); syncIn4[g].reset(); spikeDet4[g].reset();
+            dcBlock4[g].reset(); decim2_4[g].reset(); decim4_4[g].reset(); decim8_4[g].reset();
         }
+        for (int c = 0; c < MAX_POLY; c++) spikeGen[c].reset();
     }
 
     json_t* dataToJson() override {
@@ -178,26 +177,14 @@ struct Soma : Module {
         }
     }
 
-    // HR derivatives — the FHN f() with one extra (slow) line, as the Axon plan
-    // anticipated. Same RK4 step below, now over three variables.
-    static inline void f(float x, float y, float z, float Itot, float r, float s,
-                         float& dx, float& dy, float& dz) {
+    // HR derivatives — the FHN f() with one extra (slow) line. Generic over the
+    // scalar type T so one expression serves scalar float and simd::float_4 (four
+    // poly voices at once); the shared neuron::rk4 step is likewise templated.
+    template <typename T>
+    static inline void f(T x, T y, T z, T Itot, T r, T s, T& dx, T& dy, T& dz) {
         dx = y - A*x*x*x + B*x*x - z + Itot;
         dy = C - D*x*x - y;
         dz = r * (s * (x - XR) - z);
-    }
-
-    // Shared neuron::rk4 stepper over the three HR variables — arithmetic
-    // identical to the original hand-written step (see integrator.hpp).
-    static inline void rk4(float& x, float& y, float& z, float h,
-                           float Itot, float r, float s) {
-        float st[3] = {x, y, z};
-        neuron::rk4<3>(st, h, [&](const float* Y, float* d) {
-            f(Y[0], Y[1], Y[2], Itot, r, s, d[0], d[1], d[2]);
-        });
-        x = st[0];
-        y = st[1];
-        z = st[2];
     }
 
     void process(const ProcessArgs& args) override {
@@ -210,11 +197,11 @@ struct Soma : Module {
         // keep the real-time corner at ~20 Hz. Caching trigDecay keeps a
         // transcendental off the per-sample path.
         if (fs != lastFs || os != lastOs) {
-            for (int c = 0; c < MAX_POLY; c++) dcBlock[c].setCutoffFreq(20.f / (fs * os));
+            for (int g = 0; g < GROUPS; g++) dcBlock4[g].setCutoffFreq(20.f / (fs * os));
             trigDecay = std::exp(-1.f / (TRIG_TAU_MS * 1e-3f * fs));
             dispPeriod = (int) (fs / 45.f);
             if (os != lastOs)
-                for (int c = 0; c < MAX_POLY; c++) { decim2[c].reset(); decim4[c].reset(); decim8[c].reset(); }
+                for (int g = 0; g < GROUPS; g++) { decim2_4[g].reset(); decim4_4[g].reset(); decim8_4[g].reset(); }
             lastFs = fs;
             lastOs = os;
         }
@@ -238,94 +225,95 @@ struct Soma : Module {
         // Alternating sub-LSB dither (anti-denormal), toggled once per sample.
         antiDenorm = -antiDenorm;
 
-        // Hoist the per-voice exp2s / divisions out of the loop when their CV is
-        // mono or unpatched (bit-identical, since getPolyVoltage(c) returns ch0).
-        const bool monoPitch = inputs[VOCT_INPUT].getChannels() <= 1;
-        const bool monoBurst = inputs[BURST_INPUT].getChannels() <= 1;
-        int K0 = MIN_SUB; float h0 = 0.f, r0 = 0.f;
-        if (monoPitch) {
-            float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
-                                pitchKnob + inputs[VOCT_INPUT].getVoltage());
-            float subTau = RATE_CAL * pitchHz / fs / os;
-            K0 = clamp((int) std::ceil(subTau / HSUB_MAX), MIN_SUB, MAX_SUB);
-            h0 = subTau / K0;
-        }
-        if (monoBurst)
-            r0 = clamp(dsp::approxExp2_taylor5(rLogBase + inputs[BURST_INPUT].getVoltage() * rAtt * CV_DEPTH),
-                       R_MIN, R_MAX);
+        const simd::float_4 sVec(s);    // ADAPT has no CV → same for every lane
+        const int nGroups = (channels + 3) / 4;
 
-        for (int c = 0; c < channels; c++) {
-            // ── params → physics (per voice) ──
-            float I = Ibase
-                    + inputs[CURRENT_INPUT].getPolyVoltage(c) * Iatt * CV_DEPTH;
+        for (int g = 0; g < nGroups; g++) {
+            const int base = g * 4;
+
+            // ── params → physics (4 lanes) ──
+            simd::float_4 I = Ibase
+                + inputs[CURRENT_INPUT].getPolyVoltageSimd<simd::float_4>(base) * Iatt * CV_DEPTH;
             // BURST is log₂(r); CV adds in the log domain (a multiplicative nudge on r).
-            float r = r0;
-            if (!monoBurst)
-                r = clamp(dsp::approxExp2_taylor5(rLogBase
-                        + inputs[BURST_INPUT].getPolyVoltage(c) * rAtt * CV_DEPTH), R_MIN, R_MAX);
+            simd::float_4 r = simd::clamp(dsp::approxExp2_taylor5(rLogBase
+                + inputs[BURST_INPUT].getPolyVoltageSimd<simd::float_4>(base) * rAtt * CV_DEPTH), R_MIN, R_MAX);
 
-            // ── hard sync: a rising edge re-seeds the voice at the rest fixed
-            // point (all three state variables). The discontinuity is the sync. ──
-            if (syncIn[c].process(inputs[SYNC_INPUT].getPolyVoltage(c), 0.1f, 1.f)) {
-                xx[c] = -1.6f; yy[c] = -11.8f; zz[c] = 2.f;
-            }
+            simd::float_4 x = xx4[g], y = yy4[g], z = zz4[g];
+
+            // ── hard sync: rising edge re-seeds those lanes to rest (all 3 vars) ──
+            simd::float_4 syncMask = syncIn4[g].process(
+                inputs[SYNC_INPUT].getPolyVoltageSimd<simd::float_4>(base), 0.1f, 1.f);
+            x = simd::ifelse(syncMask, -1.6f, x);
+            y = simd::ifelse(syncMask, -11.8f, y);
+            z = simd::ifelse(syncMask, 2.f, z);
 
             // ── excitable trigger: rising edge injects a decaying current pulse ──
-            if (trigIn[c].process(inputs[TRIG_INPUT].getPolyVoltage(c), 0.1f, 1.f))
-                trigPulse[c] = TRIG_AMP;
-            float Itot = I + trigPulse[c];
-            trigPulse[c] *= trigDecay;
-            if (std::fabs(trigPulse[c]) < 1e-30f) trigPulse[c] = 0.f;
+            simd::float_4 trigMask = trigIn4[g].process(
+                inputs[TRIG_INPUT].getPolyVoltageSimd<simd::float_4>(base), 0.1f, 1.f);
+            trigPulse4[g] = simd::ifelse(trigMask, TRIG_AMP, trigPulse4[g]);
+            simd::float_4 Itot = I + trigPulse4[g];
+            trigPulse4[g] *= trigDecay;
+            trigPulse4[g] = simd::ifelse(simd::abs(trigPulse4[g]) < 1e-30f, 0.f, trigPulse4[g]);
 
-            // ── pitch = simulation speed (open-loop; tracks tonic spike rate) ──
-            int K = K0; float h = h0;
-            if (!monoPitch) {
-                float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
-                                    pitchKnob + inputs[VOCT_INPUT].getPolyVoltage(c));
-                float subTau = RATE_CAL * pitchHz / fs / os;
-                K = clamp((int) std::ceil(subTau / HSUB_MAX), MIN_SUB, MAX_SUB);
-                h = subTau / K;
-            }
+            // ── pitch = simulation speed (open-loop). Run the group at its max K
+            // (a slower lane just gets a smaller-than-needed h; accuracy preserved). ──
+            simd::float_4 pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
+                pitchKnob + inputs[VOCT_INPUT].getPolyVoltageSimd<simd::float_4>(base));
+            simd::float_4 subTau = RATE_CAL * pitchHz / fs / (float) os;
+            simd::float_4 Kf = simd::ceil(subTau / HSUB_MAX);
+            int K = MIN_SUB;
+            for (int l = 0; l < 4; l++) K = std::max(K, (int) Kf[l]);
+            K = std::min(K, MAX_SUB);
+            simd::float_4 h = subTau / (float) K;
 
             // ── render os oversampled samples (full output chain each), decimate ──
-            float x = xx[c], y = yy[c], z = zz[c];
-            float osBuf[8];
+            simd::float_4 st[3] = {x, y, z};
+            simd::float_4 osBuf[8];
             for (int o = 0; o < os; o++) {
                 for (int k = 0; k < K; k++)
-                    rk4(x, y, z, h, Itot, r, s);
+                    neuron::rk4<3>(st, h, [&](const simd::float_4* Y, simd::float_4* d) {
+                        f(Y[0], Y[1], Y[2], Itot, r, sVec, d[0], d[1], d[2]);
+                    });
 
-                // Backstop.
-                if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
-                    x = -1.6f; y = -11.8f; z = 2.f;
-                }
-                x = clamp(x, -STATE_MAX, STATE_MAX);
-                y = clamp(y, -STATE_MAX, STATE_MAX);
-                z = clamp(z, -STATE_MAX, STATE_MAX);
+                // Backstop: reset any non-finite / runaway lane to rest, then clamp.
+                simd::float_4 finite = (st[0] == st[0]) & (st[1] == st[1]) & (st[2] == st[2])
+                    & (simd::abs(st[0]) < 1e6f) & (simd::abs(st[1]) < 1e6f) & (simd::abs(st[2]) < 1e6f);
+                st[0] = simd::ifelse(finite, st[0], -1.6f);
+                st[1] = simd::ifelse(finite, st[1], -11.8f);
+                st[2] = simd::ifelse(finite, st[2], 2.f);
+                st[0] = simd::clamp(st[0], -STATE_MAX, STATE_MAX);
+                st[1] = simd::clamp(st[1], -STATE_MAX, STATE_MAX);
+                st[2] = simd::clamp(st[2], -STATE_MAX, STATE_MAX);
 
-                if (spikeDet[c].process(x, 0.f, SPIKE_THRESH))
-                    spikeGen[c].trigger(1e-3f);
+                simd::float_4 spikeMask = spikeDet4[g].process(st[0], 0.f, SPIKE_THRESH);
+                int sm = simd::movemask(spikeMask);
+                for (int l = 0; l < 4; l++)
+                    if (sm & (1 << l)) spikeGen[base + l].trigger(1e-3f);
 
-                dcBlock[c].process(x + antiDenorm);
-                osBuf[o] = 5.f * coalescent::fastTanh(dcBlock[c].highpass() * OUT_GAIN);
+                dcBlock4[g].process(st[0] + antiDenorm);
+                osBuf[o] = 5.f * coalescent::fastTanh(dcBlock4[g].highpass() * OUT_GAIN);
             }
-            xx[c] = x; yy[c] = y; zz[c] = z;
+            xx4[g] = st[0]; yy4[g] = st[1]; zz4[g] = st[2];
 
-            float audio = os == 1 ? osBuf[0]
-                        : (os == 2 ? decim2[c].process(osBuf) : os == 4 ? decim4[c].process(osBuf) : decim8[c].process(osBuf));
+            simd::float_4 audio = os == 1 ? osBuf[0]
+                : (os == 2 ? decim2_4[g].process(osBuf)
+                :  os == 4 ? decim4_4[g].process(osBuf) : decim8_4[g].process(osBuf));
 
-            // ── outputs ──
-            outputs[OUT_OUTPUT].setVoltage(audio, c);
-            outputs[SPIKE_OUTPUT].setVoltage(spikeGen[c].process(args.sampleTime) ? 10.f : 0.f, c);
-            // Z is the slow adaptation variable — a burst-envelope CV (not high-passed).
-            outputs[Z_OUTPUT].setVoltage(clamp((z - Z_CENTER) * Z_GAIN, -5.f, 5.f), c);
+            // ── outputs (4 channels at once) ──
+            outputs[OUT_OUTPUT].setVoltageSimd(audio, base);
+            outputs[Z_OUTPUT].setVoltageSimd(simd::clamp((st[2] - Z_CENTER) * Z_GAIN, -5.f, 5.f), base);
+            simd::float_4 spikeOut;
+            for (int l = 0; l < 4; l++)
+                spikeOut[l] = spikeGen[base + l].process(args.sampleTime) ? 10.f : 0.f;
+            outputs[SPIKE_OUTPUT].setVoltageSimd(spikeOut, base);
         }
 
         // ── feed the (x,z) phase-portrait trails (all voices; decimated, bursts are slow) ──
         if (++trailDecim >= 6) {
             trailDecim = 0;
             for (int c = 0; c < channels; c++) {
-                trailX[c][trailIdx] = xx[c];
-                trailZ[c][trailIdx] = zz[c];
+                trailX[c][trailIdx] = xx4[c / 4][c % 4];
+                trailZ[c][trailIdx] = zz4[c / 4][c % 4];
             }
             trailIdx = (trailIdx + 1) % TRAIL;
         }
