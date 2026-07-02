@@ -93,6 +93,10 @@ three-variable system vs FHN's two.
 Leave anti-aliasing at ×4, or drop to ×2 / Off for large polyphonic patches; reach for ×8
 only when aliasing is audible on high notes.
 
+As in [Axon](axon.md#cpu), voices are processed in **groups of four SIMD lanes**
+(~4x cheaper at full polyphony; CPU steps at 1->5->9->13 voices; inactive lanes
+are masked so silent voices keep their state).
+
 ## Patches
 
 `tools/make_patches_neuron.py` also writes six Soma patches:

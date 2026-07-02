@@ -231,6 +231,12 @@ struct Soma : Module {
         for (int g = 0; g < nGroups; g++) {
             const int base = g * 4;
 
+            // Lanes at/above the channel count are inactive: they still compute
+            // (SIMD lanes can't be skipped) but must not evolve persistent state,
+            // preserving the documented "silent voices keep their state" semantic.
+            const simd::float_4 activeMask =
+                simd::float_4(0.f, 1.f, 2.f, 3.f) < (float) (channels - base);
+
             // ── params → physics (4 lanes) ──
             simd::float_4 I = Ibase
                 + inputs[CURRENT_INPUT].getPolyVoltageSimd<simd::float_4>(base) * Iatt * CV_DEPTH;
@@ -250,10 +256,11 @@ struct Soma : Module {
             // ── excitable trigger: rising edge injects a decaying current pulse ──
             simd::float_4 trigMask = trigIn4[g].process(
                 inputs[TRIG_INPUT].getPolyVoltageSimd<simd::float_4>(base), 0.1f, 1.f);
-            trigPulse4[g] = simd::ifelse(trigMask, TRIG_AMP, trigPulse4[g]);
-            simd::float_4 Itot = I + trigPulse4[g];
-            trigPulse4[g] *= trigDecay;
-            trigPulse4[g] = simd::ifelse(simd::abs(trigPulse4[g]) < 1e-30f, 0.f, trigPulse4[g]);
+            simd::float_4 tp = simd::ifelse(trigMask, TRIG_AMP, trigPulse4[g]);
+            simd::float_4 Itot = I + tp;
+            tp *= trigDecay;
+            tp = simd::ifelse(simd::abs(tp) < 1e-30f, 0.f, tp);
+            trigPulse4[g] = simd::ifelse(activeMask, tp, trigPulse4[g]);
 
             // ── pitch = simulation speed (open-loop). Run the group at its max K
             // (a slower lane just gets a smaller-than-needed h; accuracy preserved). ──
@@ -287,13 +294,16 @@ struct Soma : Module {
 
                 simd::float_4 spikeMask = spikeDet4[g].process(st[0], 0.f, SPIKE_THRESH);
                 int sm = simd::movemask(spikeMask);
-                for (int l = 0; l < 4; l++)
+                for (int l = 0; l < 4 && base + l < channels; l++)
                     if (sm & (1 << l)) spikeGen[base + l].trigger(1e-3f);
 
                 dcBlock4[g].process(st[0] + antiDenorm);
                 osBuf[o] = 5.f * coalescent::fastTanh(dcBlock4[g].highpass() * OUT_GAIN);
             }
-            xx4[g] = st[0]; yy4[g] = st[1]; zz4[g] = st[2];
+            // Write back active lanes only; inactive lanes keep their frozen state.
+            xx4[g] = simd::ifelse(activeMask, st[0], xx4[g]);
+            yy4[g] = simd::ifelse(activeMask, st[1], yy4[g]);
+            zz4[g] = simd::ifelse(activeMask, st[2], zz4[g]);
 
             simd::float_4 audio = os == 1 ? osBuf[0]
                 : (os == 2 ? decim2_4[g].process(osBuf)

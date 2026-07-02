@@ -89,6 +89,36 @@ int main() {
         tmax = std::max(tmax, (double) std::fabs(coalescent::fastTanh(x) - b[0]));
     }
     printf("fastTanh scalar vs float_4: max|Δ| = %.3e (differs only for |x|>4)\n", tmax);
+
+    // ── Mixed-lane group: the group-max-K path. Four materially different lanes
+    // share one K (the max), so slower lanes integrate with smaller h than their
+    // scalar equivalent — verify each lane still lands on the scalar pitch. ──
+    {
+        float laneHz[4] = {C4 / 4, C4, C4 * 4, C4 * 8};          // C2, C4, C6, C7
+        float laneI[4]  = {0.45f, 0.6f, 0.9f, 1.3f};             // spread across the band
+        float_4 hz(laneHz[0], laneHz[1], laneHz[2], laneHz[3]);
+        float_4 Iv(laneI[0], laneI[1], laneI[2], laneI[3]);
+        float_4 vv(-1.2f), ww(-0.6f);
+        std::vector<std::vector<float>> lane(4, std::vector<float>(FS));
+        for (int n = 0; n < (int) FS; n++) {
+            float_4 out = stepSimd(vv, ww, hz, Iv, float_4(0.08f), float_4(0.7f));
+            for (int l = 0; l < 4; l++) lane[l][n] = out[l];
+        }
+        printf("Mixed-lane group (one shared K) vs per-voice scalar:\n");
+        for (int l = 0; l < 4; l++) {
+            float sv = -1.2f, sw = -0.6f;
+            std::vector<float> ref(FS);
+            for (int n = 0; n < (int) FS; n++) ref[n] = stepScalar(sv, sw, laneHz[l], laneI[l], 0.08f, 0.7f);
+            float fRef = freqOf(ref), fLane = freqOf(lane[l]);
+            float cents = (fRef > 0 && fLane > 0) ? 1200.f * std::log2(fLane / fRef) : 0.f;
+            bool finite = std::isfinite(lane[l].back());
+            worstCents = std::max(worstCents, (double) std::fabs(cents));
+            printf("  lane %d (%6.1f Hz, I=%.2f): scalar %8.2f  simd %8.2f  %+.3f cents  %s\n",
+                   l, laneHz[l], laneI[l], fRef, fLane, cents, finite ? "" : "NON-FINITE!");
+            if (!finite) { printf("FAIL: mixed-lane output not finite\n"); return 1; }
+        }
+    }
+
     // Oscillator equivalence = same pitch. The per-sample |Δv| is phase micro-drift
     // from float-vs-float_4 rounding (inherent to SIMD), not a difference in tone.
     const double CENT_TOL = 1.0;
@@ -96,6 +126,6 @@ int main() {
         printf("FAIL: float_4 pitch drifts %.3f cents from scalar (> %.1f)\n", worstCents, CENT_TOL);
         return 1;
     }
-    printf("PASS: float_4 path is within %.1f cent of scalar for every voicing\n", CENT_TOL);
+    printf("PASS: float_4 path is within %.1f cent of scalar for every voicing (incl. mixed lanes)\n", CENT_TOL);
     return 0;
 }

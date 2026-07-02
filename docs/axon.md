@@ -127,6 +127,12 @@ Rule of thumb: leave anti-aliasing at ×4 (or drop to ×2 / Off), and only reach
 hear aliasing on high notes. [Soma](soma.md) is a touch heavier still (a
 three-variable system vs Axon's two).
 
+Internally, voices are processed in **groups of four SIMD lanes**, so the
+integrator cost is amortised across each four-voice group (~4x cheaper at full
+polyphony than voice-at-a-time). A partial group costs about the same as a full
+one, so CPU steps at 1->5->9->13 voices rather than per voice. Inactive lanes are
+masked: silent voices keep their last state and do not evolve.
+
 ## Patches
 
 `tools/make_patches_neuron.py` writes seven Axon smoke-test patches into `patches/`
