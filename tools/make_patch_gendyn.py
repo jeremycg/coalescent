@@ -57,8 +57,8 @@ for i, (N, center_hz) in enumerate(VOICES):
         "version": "2.0.0",
         "params": [
             {"id": 0,  "value": float(N)},          # N (breakpoints)
-            {"id": 1,  "value": 0.0075},           # SCALE_AMP (0.35x old 0.022: second-order walk)
-            {"id": 2,  "value": 0.0075},           # SCALE_DUR (0.35x old 0.022: second-order walk)
+            {"id": 1,  "value": 0.004},            # SCALE_AMP (slower, stately morph)
+            {"id": 2,  "value": 0.004},            # SCALE_DUR (slower, stately morph)
             {"id": 3,  "value": 0.8},              # B_AMP
             {"id": 4,  "value": float(center_hz)}, # B_DUR_CENTER
             {"id": 5,  "value": 0.4},              # B_DUR_WIDTH
@@ -139,7 +139,7 @@ ci = 0  # color index
 # GENDYN AUDIO_OUT(0) → VCMixer channel inputs
 for i, gid in enumerate(gendyn_ids):
     group  = i // 4       # which VCMixer (0-3)
-    ch_in  = (i % 4) + 5  # ids 5-8 = CH1-CH4 audio (0=mix CV, 1-4=channel level CV)
+    ch_in  = (i % 4) + 1  # ids 1-4 = CH_INPUTS audio (0=mix CV, 5-8=level CV) — verified from Fundamental src
     cables.append({
         "id": uid(),
         "outputModuleId": gid,

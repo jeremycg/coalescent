@@ -15,7 +15,7 @@ panels, not a separate brand); the same plugin has room for other series later.
 | **Neuron · Axon** | FitzHugh–Nagumo neuron | a spiking relaxation oscillator that crosses from drone to one-shot percussion on a single CURRENT knob |
 | **Neuron · Soma** | Hindmarsh–Rose neuron | Axon's three-variable sibling: tonic spikes → bursts → chaos, all from injected current |
 
-![Coalescent neuron pair](docs/img/neuron.png)
+![Coalescent — GENDYN, Haptik, Axon, Soma](docs/img/coalescent.png)
 
 ## Which module should I use?
 

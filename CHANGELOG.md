@@ -25,8 +25,21 @@ Performance and discoverability pass, prompted by user feedback (issue #2).
   pluck.
 
 **Anti-aliasing:** the Axon/Soma menu adds a **×2** option (Off / ×2 / ×4 / ×8,
-default ×4) for lower CPU. (Reordering shifts the stored index, so a pre-2.0.3
-patch that had chosen ×8 reloads as ×4.)
+default ×4) for lower CPU. Saved patches store the actual factor now (with a
+legacy remap), so pre-2.0.3 patches keep their setting despite the menu change.
+
+**Fixes:**
+- **GENDY3_cluster / GENDY3_16voice demo patches were silent** — their GENDYN
+  audio was wired into the VCMixer's channel-*CV* inputs (a regression introduced
+  by an old "wiring fix"); rewired to the channel audio inputs and all GENDYN
+  demo morph rates retuned slower.
+- **Haptik**: a NaN on V/OCT could permanently stick the scan phase and read out
+  of bounds (potential crash); guarded.
+- **GENDYN**: Initialize now always re-seeds (and resets the seed shape); the
+  FREQ CV no longer over-reports pitch under LOCK at extreme centre-freq × N;
+  re-seeding starts exactly on the chosen waveform (no first-cycle click).
+- Refreshed panel screenshots; new `coalescent_gallery.vcv` showcase patch (all
+  four modules, poly neurons, croppable layout).
 
 ## 2.0.2
 

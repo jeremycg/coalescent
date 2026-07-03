@@ -7,7 +7,7 @@ strategy. Part of the **Coalescent** plugin's *Fluctuations* series — see the
 
 Both neuron modules are **polyphonic** (up to 16 voices) — see [Polyphony](#polyphony).
 
-![Coalescent neuron pair](img/neuron.png)
+![Axon](img/axon.png)
 
 Axon is a voice built on the **FitzHugh–Nagumo** (FHN) model — a two-variable
 reduction of the Hodgkin–Huxley neuron. The membrane voltage `v` is the audio
