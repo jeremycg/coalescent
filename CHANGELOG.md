@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.0 (unreleased)
+
+- **Axon/Soma polyphony now runs 4 voices per SIMD group** (`simd::float_4`) —
+  the whole oversampled chain (RK4 → spike detect → DC block → tanh → decimate)
+  is vectorised. Measured ~4× on the integration chain at 16 voices; mono
+  unchanged. Verified 0-cent equivalent to the scalar path (incl. mixed-lane
+  groups); inactive lanes are masked so silent voices keep their state.
+
 ## 2.0.3
 
 Performance and discoverability pass, prompted by user feedback (issue #2).
