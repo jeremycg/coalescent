@@ -128,10 +128,13 @@ hear aliasing on high notes. [Soma](soma.md) is a touch heavier still (a
 three-variable system vs Axon's two).
 
 Internally, voices are processed in **groups of four SIMD lanes**, so the
-integrator cost is amortised across each four-voice group (~4x cheaper at full
-polyphony than voice-at-a-time). A partial group costs about the same as a full
-one, so CPU steps at 1->5->9->13 voices rather than per voice. Inactive lanes are
-masked: silent voices keep their last state and do not evolve.
+integrator cost is amortised across each four-voice group (measured ~4x on the
+RK4 integration chain at 16 voices; whole-module gains are somewhat lower, and
+mono is unchanged). A partial group costs about the same as a full one, so CPU
+steps at 1->5->9->13 voices rather than per voice. Inactive lanes are masked so
+a silent voice's *oscillator state* is frozen and resumes where it left off;
+small DSP helper state (edge detectors, DC filter) may still warm in the
+background, which is inaudible.
 
 ## Patches
 

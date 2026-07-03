@@ -94,8 +94,9 @@ Leave anti-aliasing at ×4, or drop to ×2 / Off for large polyphonic patches; r
 only when aliasing is audible on high notes.
 
 As in [Axon](axon.md#cpu), voices are processed in **groups of four SIMD lanes**
-(~4x cheaper at full polyphony; CPU steps at 1->5->9->13 voices; inactive lanes
-are masked so silent voices keep their state).
+(measured ~4x on the integration chain at 16 voices; CPU steps at 1->5->9->13
+voices; inactive lanes are masked so a silent voice's oscillator state is frozen
+— helper state like edge detectors may still warm, inaudibly).
 
 ## Patches
 
