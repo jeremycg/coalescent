@@ -49,7 +49,7 @@ def cable(om, oid, im, iid, ci):
 # ── Top row: the four Coalescent modules, dressed to impress ──────────────────
 # GENDYN: N=24 breakpoints, SCALE up so the sine seed morphs into a living
 # polygon within seconds (params: 0 N, 1 SCALE_AMP, 2 SCALE_DUR).
-gendyn = mod("GENDYN", 0, 0, params=[pv(0, 24), pv(1, 0.015), pv(2, 0.015)])
+gendyn = mod("GENDYN", 0, 0, params=[pv(0, 24), pv(1, 0.006), pv(2, 0.006)])
 # Haptik: drive excitation, low damp, N=32 (nodes render at N<=48).
 # (params: 0 N, 4 DAMP, 5 INJECT, 6 EXCITE)
 haptik = mod("Haptik", 12, 0, params=[pv(0, 32), pv(4, 0.10), pv(5, 0.7), pv(6, 3)])

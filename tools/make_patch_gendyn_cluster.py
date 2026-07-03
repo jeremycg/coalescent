@@ -70,8 +70,8 @@ for i, (track, imax, rall, note) in enumerate(VOICES):
         "version": "2.0.0",
         "params": [
             {"id": 0,  "value": float(imax)},    # N = Imax (Xenakis Table 1)
-            {"id": 1,  "value": 0.1},             # SCALE_AMP ≈ SC ampscale 0.5
-            {"id": 2,  "value": 0.2},             # SCALE_DUR ≈ SC durscale 0.5
+            {"id": 1,  "value": 0.035},           # SCALE_AMP (0.35x: retuned for the second-order walk)
+            {"id": 2,  "value": 0.07},            # SCALE_DUR (0.35x: retuned for the second-order walk)
             {"id": 3,  "value": 1.0},             # B_AMP — SC's fixed full amp range
             {"id": 4,  "value": hz},              # B_DUR_CENTER — exact Xenakis frequency
             {"id": 5,  "value": 0.2},             # B_DUR_WIDTH — 1.5:1 band like SC's 440–660
@@ -145,7 +145,7 @@ ci = 0
 
 for i, gid in enumerate(gendyn_ids):
     group = i // 4
-    ch_in = (i % 4) + 5  # 5-8 = CH1-CH4 audio (0=mix CV, 1-4=level CV)
+    ch_in = (i % 4) + 1  # 1-4 = CH_INPUTS audio (0=mix CV, 5-8=level CV) — verified from Fundamental src
     cables.append({
         "id": uid(),
         "outputModuleId": gid, "outputId": 0,
