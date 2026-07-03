@@ -9,6 +9,10 @@ These patches use modules from other (free, VCV Library) plugins. Rack will
 list anything you're missing when you open the patch — subscribe/install and
 reopen.
 
+**No sound on first load?** Shared patches carry the *contributor's* audio
+device (these expect an "AudioBox USB 96"). Click the AUDIO module and select
+your own driver/device — that's all it is.
+
 ## fractalgee — generative ambient systems
 
 Contributed by **fractalgee (Georg Carlson)** — thank you! Originally shared in
