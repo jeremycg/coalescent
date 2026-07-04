@@ -12,7 +12,7 @@
 static constexpr float POS = 1e-4f, STATE_MAX = 1e3f, HSUB_MAX = 0.05f;
 static constexpr float STAB_K = 0.5f, STAB_FLOOR = 0.2f, MAX_STAB_STEP = 0.25f, LV_V0_RANGE = 4.f;
 static constexpr float RM_B = 0.5f, RM_S = 1.0f;
-static constexpr int   MIN_SUB = 4, MAX_SUB = 64;
+static constexpr int   MIN_SUB = 2, MAX_SUB = 64;
 
 struct St { float x, y; };
 static inline void deriv(const float v[2], float d[2], int mode, float gamma, float K, float c, float kick) {
