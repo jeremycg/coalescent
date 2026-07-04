@@ -9,9 +9,14 @@ These patches use modules from other (free, VCV Library) plugins. Rack will
 list anything you're missing when you open the patch — subscribe/install and
 reopen.
 
-**No sound on first load?** Shared patches carry the *contributor's* audio
-device (these expect an "AudioBox USB 96"). Click the AUDIO module and select
-your own driver/device — that's all it is.
+**No sound on first load?** Two classic shared-patch gotchas, in order:
+
+1. **Press RUN on the Clocked module** (Impromptu). These are generative
+   patches — everything hangs off the master clock, so until it runs there are
+   no triggers, no envelopes, and no sound.
+2. **Select your audio device**: shared patches carry the *contributor's*
+   device (these expect an "AudioBox USB 96"). Click the AUDIO module and pick
+   your own driver/device.
 
 ## fractalgee — generative ambient systems
 
