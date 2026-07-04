@@ -121,7 +121,6 @@
         "circuit",
         "three phase",
         "3 phase",
-        "quadrature",
         "clock",
         "biological",
         "synthetic biology"
@@ -146,7 +145,6 @@
         "population",
         "ecology",
         "two phase",
-        "quadrature",
         "limit cycle"
       ]
     }

@@ -23,7 +23,7 @@
 //
 // Servo constants (STAB_K, STAB_FLOOR, and the LV V0 range) were set by offline
 // simulation: the plan's originals collapsed large orbits into the positivity
-// floor; STAB_K=0.5 / STAB_FLOOR=0.2 / V0≤Vmin+4 is the stable, monotonic envelope.
+// floor; STAB_K=0.5 / STAB_FLOOR=0.2 / V0≤Vmin+3.5 is the stable, monotonic envelope.
 
 static const int ORBIT_N = 512;   // phase-orbit trail length
 
@@ -85,7 +85,7 @@ struct Bunnies : Module {
     static constexpr float STAB_K       = 0.5f;   // servo gain (sim-time units) — retuned
     static constexpr float STAB_FLOOR   = 0.2f;   // reciprocal floor in the V-gradient — retuned
     static constexpr float MAX_STAB_STEP = 0.25f;
-    static constexpr float LV_V0_RANGE  = 4.f;    // WILD → V0 = Vmin + [0, LV_V0_RANGE] (retuned from 8)
+    static constexpr float LV_V0_RANGE  = 3.5f;   // WILD → V0 = Vmin + [0, 3.5]; keeps max WILD off the positivity floor (retuned from plan 8)
     static constexpr float KICK_GAIN = 0.5f;
     static constexpr float BALANCE_CV_DEPTH = 0.1f, WILD_CV_DEPTH = 0.1f;
     static constexpr float POP_MIN = 0.05f;
@@ -117,6 +117,9 @@ struct Bunnies : Module {
     }
 
     void reseed() { x = cx * 1.1f + 0.05f; y = cy * 0.9f + 0.02f; }
+    // Clears peak-detector edge state. Deliberately does NOT reset popGen: an
+    // in-flight ~1 ms pulse is allowed to finish across a mode change / reseed
+    // (harmless, and avoids chopping a gate). onReset() clears popGen fully.
     void resetPeakMemory() { prevPrey = prevPred = 0.f; risingPrey = risingPred = false; }
 
     void onReset() override {
@@ -227,7 +230,10 @@ struct Bunnies : Module {
         // ── visualizer: append to live ring, then publish a full copy ──
         if (fs != lastDisplayFs) {
             lastDisplayFs = fs;
-            trailDiv.setDivision(std::max(1, (int) std::round(fs / 300.f)));
+            // ~90 Hz: above the ~60 fps display (trail stays live) but far below the
+            // old 300 Hz — less ring-copy on the audio thread and a proportionally
+            // smaller double-buffer tear window.
+            trailDiv.setDivision(std::max(1, (int) std::round(fs / 90.f)));
         }
         if (trailDiv.process()) {
             liveOrbit.pt[liveOrbit.head][0] = cX;
