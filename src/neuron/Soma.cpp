@@ -1,5 +1,5 @@
 #include "plugin.hpp"
-#include "integrator.hpp"
+#include "../dsp/rk4.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
@@ -179,7 +179,7 @@ struct Soma : Module {
 
     // HR derivatives — the FHN f() with one extra (slow) line. Generic over the
     // scalar type T so one expression serves scalar float and simd::float_4 (four
-    // poly voices at once); the shared neuron::rk4 step is likewise templated.
+    // poly voices at once); the shared coalescent::rk4 step is likewise templated.
     template <typename T>
     static inline void f(T x, T y, T z, T Itot, T r, T s, T& dx, T& dy, T& dz) {
         dx = y - A*x*x*x + B*x*x - z + Itot;
@@ -278,7 +278,7 @@ struct Soma : Module {
             simd::float_4 osBuf[8];
             for (int o = 0; o < os; o++) {
                 for (int k = 0; k < K; k++)
-                    neuron::rk4<3>(st, h, [&](const simd::float_4* Y, simd::float_4* d) {
+                    coalescent::rk4<3>(st, h, [&](const simd::float_4* Y, simd::float_4* d) {
                         f(Y[0], Y[1], Y[2], Itot, r, sVec, d[0], d[1], d[2]);
                     });
 

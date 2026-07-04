@@ -1,5 +1,5 @@
 #include "plugin.hpp"
-#include "integrator.hpp"
+#include "../dsp/rk4.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
@@ -183,7 +183,7 @@ struct Axon : Module {
 
     // FHN derivatives in dimensionless time, generic over the scalar type T so the
     // one expression serves scalar float and simd::float_4 (four poly voices at
-    // once); the shared neuron::rk4 step (integrator.hpp) is likewise templated.
+    // once); the shared coalescent::rk4 step (integrator.hpp) is likewise templated.
     template <typename T>
     static inline void f(T v, T w, T Itot, T eps, T a, T& dv, T& dw) {
         dv = v - v * v * v / 3.f - w + Itot;
@@ -286,7 +286,7 @@ struct Axon : Module {
             simd::float_4 osBuf[8];
             for (int o = 0; o < os; o++) {
                 for (int k = 0; k < K; k++)
-                    neuron::rk4<2>(s, h, [&](const simd::float_4* y, simd::float_4* d) {
+                    coalescent::rk4<2>(s, h, [&](const simd::float_4* y, simd::float_4* d) {
                         f(y[0], y[1], Itot, eps, aVec, d[0], d[1]);
                     });
 
