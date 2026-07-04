@@ -23,8 +23,13 @@
         "Noise"
       ],
       "keywords": [
-        "Xenakis", "GENDY", "GENDY3", "stochastic", "random walk",
-        "dynamic stochastic synthesis", "oscillator"
+        "Xenakis",
+        "GENDY",
+        "GENDY3",
+        "stochastic",
+        "random walk",
+        "dynamic stochastic synthesis",
+        "oscillator"
       ]
     },
     {
@@ -37,8 +42,12 @@
         "Physical Modeling"
       ],
       "keywords": [
-        "scanned synthesis", "mass-spring", "ring", "physical modeling",
-        "string", "oscillator"
+        "scanned synthesis",
+        "mass-spring",
+        "ring",
+        "physical modeling",
+        "string",
+        "oscillator"
       ]
     },
     {
@@ -52,9 +61,19 @@
         "Polyphonic"
       ],
       "keywords": [
-        "FitzHugh", "Nagumo", "FHN", "neuron", "spike", "excitable",
-        "relaxation", "oscillator", "phase portrait", "polyphonic", "sync",
-        "voice", "percussion"
+        "FitzHugh",
+        "Nagumo",
+        "FHN",
+        "neuron",
+        "spike",
+        "excitable",
+        "relaxation",
+        "oscillator",
+        "phase portrait",
+        "polyphonic",
+        "sync",
+        "voice",
+        "percussion"
       ]
     },
     {
@@ -68,9 +87,44 @@
         "Polyphonic"
       ],
       "keywords": [
-        "Hindmarsh", "Rose", "HR", "neuron", "burst", "bursting",
-        "chaos", "adaptation", "oscillator", "phase portrait", "polyphonic", "sync",
-        "voice", "percussion"
+        "Hindmarsh",
+        "Rose",
+        "HR",
+        "neuron",
+        "burst",
+        "bursting",
+        "chaos",
+        "adaptation",
+        "oscillator",
+        "phase portrait",
+        "polyphonic",
+        "sync",
+        "voice",
+        "percussion"
+      ]
+    },
+    {
+      "slug": "Operon",
+      "name": "Operon",
+      "description": "Three-phase oscillator on the repressilator gene circuit: three genes repressing each other in a ring, ~120 degrees out of phase",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/operon.md",
+      "tags": [
+        "Oscillator",
+        "LFO"
+      ],
+      "keywords": [
+        "repressilator",
+        "Elowitz",
+        "Leibler",
+        "gene",
+        "genetic",
+        "circuit",
+        "three phase",
+        "3 phase",
+        "quadrature",
+        "clock",
+        "biological",
+        "synthetic biology"
       ]
     }
   ]

@@ -8,4 +8,5 @@ void init(Plugin* p) {
     p->addModel(modelHaptik);
     p->addModel(modelAxon);
     p->addModel(modelSoma);
+    p->addModel(modelOperon);
 }
