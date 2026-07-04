@@ -1,12 +1,16 @@
 # Changelog
 
-## 2.1.0 (unreleased)
+## 2.1.0
 
 - **Axon/Soma polyphony now runs 4 voices per SIMD group** (`simd::float_4`) —
   the whole oversampled chain (RK4 → spike detect → DC block → tanh → decimate)
   is vectorised. Measured ~4× on the integration chain at 16 voices; mono
   unchanged. Verified 0-cent equivalent to the scalar path (incl. mixed-lane
   groups); inactive lanes are masked so silent voices keep their state.
+- **Community patches**: `patches/community/` ships two self-playing generative
+  systems contributed by **fractalgee (Georg Carlson)** (CC BY 4.0 — thanks!),
+  with a README covering credits, required plugins, and the press-RUN /
+  select-your-audio-device gotchas.
 
 ## 2.0.3
 
