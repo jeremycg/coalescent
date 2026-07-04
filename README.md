@@ -14,6 +14,7 @@ panels, not a separate brand); the same plugin has room for other series later.
 | **Haptik** | scanned synthesis (mass–spring ring) | a ring of masses scanned at audio rate; pitch and timbre decoupled — pluck it, freeze it, or resonate it |
 | **Neuron · Axon** | FitzHugh–Nagumo neuron | a spiking relaxation oscillator that crosses from drone to one-shot percussion on a single CURRENT knob |
 | **Neuron · Soma** | Hindmarsh–Rose neuron | Axon's three-variable sibling: tonic spikes → bursts → chaos, all from injected current |
+| **Operon** | Elowitz–Leibler repressilator (gene ring) | three genes repressing each other in a ring, ~120° out of phase — a native three-phase oscillator, LFO, and clock |
 
 ![Coalescent — GENDYN, Haptik, Axon, Soma](docs/img/coalescent.png)
 
@@ -23,6 +24,7 @@ panels, not a separate brand); the same plugin has room for other series later.
 - **Plucked, struck, or resonant string-like bodies you can freeze?** → **Haptik**
 - **Pingable spikes and rubbery, excitable neuron percussion or drones?** → **Axon**
 - **Bursting, slow-fast, chaotic motion?** → **Soma**
+- **Three-phase tones, three-phase LFOs, or a three-phase clock?** → **Operon**
 
 ## The neuron pair
 
@@ -41,6 +43,7 @@ language so the kinship reads visually; they're also the only two modules tagged
 - [Haptik](docs/haptik.md) — scanned synthesis
 - [Axon](docs/axon.md) — FitzHugh–Nagumo neuron (+ polyphony notes)
 - [Soma](docs/soma.md) — Hindmarsh–Rose neuron
+- [Operon](docs/operon.md) — Elowitz–Leibler repressilator (three-phase)
 
 ## Demo patches
 
@@ -57,6 +60,7 @@ python3 tools/make_patches_haptik.py        # Haptik
 python3 tools/make_patch_gendyn.py          # GENDYN 16-voice
 python3 tools/make_patch_gendyn_2voice.py
 python3 tools/make_patch_gendyn_cluster.py
+python3 tools/make_patch_operon.py          # Operon (repressilator)
 python3 tools/make_patch_gallery.py         # all four side by side
 ```
 

@@ -88,7 +88,7 @@ struct Operon : Module {
     static constexpr int   MIN_SUB      = 4;
     static constexpr int   MAX_SUB      = 64;
     static constexpr float PITCH_TOTAL_MIN = -8.f, PITCH_TOTAL_MAX = 8.f;
-    static constexpr float OUT_GAIN     = 0.6f;
+    static constexpr float OUT_GAIN     = 0.3f;   // set offline: default RMS ~3.2V, peaks lightly saturate, high drive grits
     static constexpr float STATE_MAX    = 1e3f;
     static constexpr float PERTURB_GAIN = 0.5f;
     static constexpr float BIAS_EPS     = 1e-6f;   // zero-sum self-start symmetry breaker
@@ -103,7 +103,7 @@ struct Operon : Module {
     Operon() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
 
-        configParam(PITCH_PARAM, -4.f, 4.f, 0.f, "Pitch", " Hz", 2.f, dsp::FREQ_C4);
+        configParam(PITCH_PARAM, -8.f, 4.f, 0.f, "Frequency", " Hz", 2.f, dsp::FREQ_C4);  // down to ~1 Hz for the LFO/clock use
         configParam(ALPHA_PARAM, 0.f, 60.f, 12.f, "Promoter strength (drive)");
         configParam(HILL_PARAM, 1.2f, 8.f, 2.5f, "Hill coefficient (cooperativity n)");
         configParam(BETA_PARAM, 0.2f, 5.f, 1.0f, "Protein/mRNA decay ratio");
