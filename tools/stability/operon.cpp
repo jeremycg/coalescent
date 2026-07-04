@@ -11,7 +11,7 @@
 #include <algorithm>
 
 static constexpr float HSUB_MAX = 0.05f, STATE_MAX = 1e3f, BIAS_EPS = 1e-6f;
-static constexpr int   MIN_SUB = 4, MAX_SUB = 64;
+static constexpr int   MIN_SUB = 2, MAX_SUB = 64;
 
 struct Par { float alpha, n, beta, a0; };
 
