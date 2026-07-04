@@ -89,7 +89,23 @@ int main() {
     printf("ALPHA Hopf crossing (n=2.5 b=1 a0=0.05): ");
     for (float a = 1.f; a <= 60.f; a += 1.f) { Par p{a, 2.5f, 1.f, 0.05f}; measure(p, 0.02f, amp, per); if (amp > 0.05f) { printf("oscillates from alpha~%.0f\n", a); break; } }
 
+    // Hill LUT vs direct pow: max abs error of 1/(1+rep^n) over rep×n (guards the
+    // module's 8192-point lookup, incl. the sharp n=8 knee).
+    const int M = 8192; const float X = 64.f; static float lut[M + 1];
+    double lutMax = 0;
+    for (float nn : {1.2f, 2.5f, 5.f, 8.f}) {
+        for (int i = 0; i <= M; ++i) lut[i] = 1.f / (1.f + std::pow(X * i / M, nn));
+        for (float rep = 0.f; rep < X; rep += 0.013f) {
+            float f = rep * (M / X); int i = (int) f;
+            float lu = lut[i] + (f - i) * (lut[i + 1] - lut[i]);
+            float ex = 1.f / (1.f + std::pow(rep, nn));
+            lutMax = std::max(lutMax, (double) std::fabs(lu - ex));
+        }
+    }
+    printf("Hill LUT max |error| vs pow (n up to 8): %.2e\n", lutMax);
+
     if (fails) { printf("FAIL: %d unbounded runs\n", fails); return 1; }
-    printf("PASS: repressilator finite and bounded across the parameter box\n");
+    if (lutMax > 1e-3) { printf("FAIL: Hill LUT error too large\n"); return 1; }
+    printf("PASS: repressilator finite and bounded; Hill LUT within 1e-3 of pow\n");
     return 0;
 }

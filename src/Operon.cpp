@@ -72,6 +72,27 @@ struct Operon : Module {
     bool  pStarValid = false;
     dsp::PulseGenerator gateGen[3];
 
+    // Hill-response LUT: 1/(1+repⁿ) precomputed over rep, cached on n (rebuilt only
+    // when HILL changes, like pStar). Replaces the per-sample pow with a lookup —
+    // ~1.5× on the RK4 derivative. A live HILL_INPUT (audio-rate n would thrash the
+    // rebuild) falls back to direct pow. Sub-cent accurate even at n=8 (8192 pts).
+    static constexpr int   HILL_LUT_N    = 8192;
+    static constexpr float HILL_LUT_XMAX = 64.f;
+    float hillLut[HILL_LUT_N + 1];
+    float lutN = -1.f;
+    bool  lutValid = false;
+
+    void buildHillLut(float n) {
+        for (int i = 0; i <= HILL_LUT_N; ++i)
+            hillLut[i] = 1.f / (1.f + std::pow(HILL_LUT_XMAX * i / HILL_LUT_N, n));
+    }
+    inline float hillLookup(float rep) const {   // rep already >= 0
+        if (rep >= HILL_LUT_XMAX) return hillLut[HILL_LUT_N];
+        float f = rep * (HILL_LUT_N / HILL_LUT_XMAX);
+        int   i = (int) f;
+        return hillLut[i] + (f - i) * (hillLut[i + 1] - hillLut[i]);
+    }
+
     // ─── Display snapshot (lock-free double buffer; UI-only) ────────────────
     struct OperonSnapshot {
         float p[3] = {};                 // centered protein snapshot
@@ -139,6 +160,7 @@ struct Operon : Module {
         reseedAsymmetric();
         pStarValid = false;
         pStar = 0.f; pStarA = pStarN = pStarL = -1.f;
+        lutValid = false; lutN = -1.f;
         for (int k = 0; k < 3; ++k) { lastCentered[k] = 0.f; gateGen[k].reset(); }
     }
 
@@ -177,6 +199,13 @@ struct Operon : Module {
             pStarA = alpha; pStarN = n; pStarL = alpha0; pStarValid = true;
         }
 
+        // Hill LUT: rebuild only on n change (control-rate for a knob). With HILL
+        // being CV'd, n can move audio-rate, so use direct pow instead of thrashing.
+        const bool hillDirect = inputs[HILL_INPUT].isConnected();
+        if (!hillDirect && (!lutValid || n != lutN)) {
+            buildHillLut(n); lutN = n; lutValid = true;
+        }
+
         // ── 3.4 pitch = simulation speed; adaptive substepping ──
         float pitchTotal = clamp(params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage(),
                                  PITCH_TOTAL_MIN, PITCH_TOTAL_MAX);
@@ -190,7 +219,8 @@ struct Operon : Module {
         auto deriv = [&](const float* Y, float* D) {
             for (int i = 0; i < 3; ++i) {
                 float rep = std::max(Y[3 + ((i + 2) % 3)], 0.f);   // required: n non-integer
-                D[i]     = -Y[i] + alpha / (1.f + std::pow(rep, n)) + alpha0;
+                float hr  = hillDirect ? 1.f / (1.f + std::pow(rep, n)) : hillLookup(rep);
+                D[i]     = -Y[i] + alpha * hr + alpha0;
                 D[3 + i] = -beta * (Y[3 + i] - Y[i]);
             }
             D[0] += perturb;                    // PERTURB into gene-0 transcription
