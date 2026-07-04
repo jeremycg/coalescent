@@ -284,6 +284,20 @@ namespace opl {
 // lands in M6. Reads only the published snapshot — never the integrator.
 struct OperonRing : widget::TransparentWidget {
     Operon* module = nullptr;
+    std::shared_ptr<Font> font;
+
+    // Dark "screen" + bezel, drawn by the widget (house style — the SVG is just
+    // panel + rails + screws).
+    void draw(const DrawArgs& args) override {
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0, 0, box.size.x, box.size.y, mm2px(2.f));
+        nvgFillColor(args.vg, nvgRGB(0x0a, 0x07, 0x12));
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, nvgRGB(0x3a, 0x2b, 0x4d));
+        nvgStrokeWidth(args.vg, 1.2f);
+        nvgStroke(args.vg);
+        Widget::draw(args);
+    }
 
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
@@ -306,18 +320,30 @@ struct OperonRing : widget::TransparentWidget {
             nvgBeginPath(args.vg);
             nvgMoveTo(args.vg, node[k].x, node[k].y);
             nvgLineTo(args.vg, node[(k + 1) % 3].x, node[(k + 1) % 3].y);
-            nvgStrokeColor(args.vg, nvgRGBA(0x2b, 0x8f, 0x5e, 0x60));
+            nvgStrokeColor(args.vg, nvgRGBA(0x6a, 0x50, 0x9e, 0x60));
             nvgStrokeWidth(args.vg, 1.f);
             nvgStroke(args.vg);
         }
-        // Nodes — activity (|centered| / peak) drives glow; rest reads dim.
+        // Nodes — activity (|centered| / peak) drives glow; rest reads dim (violet).
         for (int k = 0; k < 3; ++k) {
             float activity = clamp(std::fabs(snap.p[k]) / peak, 0.f, 1.f);
             float rad = mm2px(1.6f) + mm2px(2.2f) * activity;
             nvgBeginPath(args.vg);
             nvgCircle(args.vg, node[k].x, node[k].y, rad);
-            nvgFillColor(args.vg, nvgRGBA(0x55, 0xe0, 0xa0, (int)(0x30 + 0xb0 * activity)));
+            nvgFillColor(args.vg, nvgRGBA(0xa8, 0x78, 0xff, (int)(0x30 + 0xb0 * activity)));
             nvgFill(args.vg);
+        }
+
+        // Title (top-left, DejaVuSans, letter-spaced, violet accent).
+        if (!font) font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+        if (font) {
+            nvgFontFaceId(args.vg, font->handle);
+            nvgFontSize(args.vg, mm2px(3.2f));
+            nvgTextLetterSpacing(args.vg, mm2px(0.5f));
+            nvgFillColor(args.vg, nvgRGBA(0xc8, 0xb0, 0xff, 0xcc));
+            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+            nvgText(args.vg, mm2px(2.6f), mm2px(2.2f), "OPERON", NULL);
+            nvgTextLetterSpacing(args.vg, 0.f);
         }
     }
 };
@@ -370,17 +396,17 @@ struct OperonWidget : ModuleWidget {
         if (!font) font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
-        nvgFillColor(args.vg, nvgRGB(0xe6, 0xf2, 0xea));
+        nvgFillColor(args.vg, nvgRGB(0xe6, 0xe6, 0xf2));   // near-white, ~13:1 (house legibility spec)
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         auto label = [&](float xmm, float ymm, const char* s, float sz = 2.0f) {
-            nvgFontSize(args.vg, mm2px(sz));
+            nvgFontSize(args.vg, mm2px(sz * 1.72f));       // Nunito Bold, sized up for legibility
             nvgText(args.vg, mm2px(xmm), mm2px(ymm), s, nullptr);
         };
         using namespace opl;
         const char* knobL[5] = {"PITCH", "DRIVE", "HILL", "DECAY", "LEAK"};
         for (int i = 0; i < 5; ++i) label(COL5[i], KNOB_Y - 6.f, knobL[i]);
         const char* inL[5] = {"V/OCT", "DRIVE", "HILL", "DECAY", "PERT"};
-        for (int i = 0; i < 5; ++i) label(COL5[i], IN_Y - 5.5f, inL[i], 1.8f);
+        for (int i = 0; i < 5; ++i) label(COL5[i], IN_Y - 5.5f, inL[i], 1.7f);
         const char* outL[3] = {"OUT1", "OUT2", "OUT3"};
         const char* gateL[3] = {"GATE1", "GATE2", "GATE3"};
         for (int i = 0; i < 3; ++i) {

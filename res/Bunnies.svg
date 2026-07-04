@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Bunnies — placeholder panel, 12 HP (60.96 x 128.5 mm). Coral/pink accent.
-     Control labels are drawn by the widget (nanosvg ignores <text>). -->
+     House style: bg + rails + screw holes only; the display screen, title, and
+     control labels are drawn by the widget. -->
 <svg xmlns="http://www.w3.org/2000/svg"
      width="60.96mm" height="128.5mm" viewBox="0 0 60.96 128.5">
-  <rect x="0" y="0" width="60.96" height="128.5" fill="#1c1418"/>
-  <rect x="0" y="0" width="60.96" height="128.5" fill="none" stroke="#ff6b8a" stroke-width="0.3" opacity="0.5"/>
-  <rect x="5" y="8" width="50.96" height="38" rx="2" fill="#120a0e" stroke="#ff6b8a" stroke-width="0.4" opacity="0.9"/>
-  <line x1="4" y1="48.5" x2="56.96" y2="48.5" stroke="#ff6b8a" stroke-width="0.2" opacity="0.35"/>
-  <line x1="4" y1="92" x2="56.96" y2="92" stroke="#ff6b8a" stroke-width="0.2" opacity="0.35"/>
+  <rect width="60.96" height="128.5" fill="#2a1820"/>
+  <rect y="0"     width="60.96" height="3" fill="#1c1016"/>
+  <rect y="125.5" width="60.96" height="3" fill="#1c1016"/>
+  <circle cx="3.5"   cy="3.5"   r="1.5" fill="#170b10"/>
+  <circle cx="57.46" cy="3.5"   r="1.5" fill="#170b10"/>
+  <circle cx="3.5"   cy="124.5" r="1.5" fill="#170b10"/>
+  <circle cx="57.46" cy="124.5" r="1.5" fill="#170b10"/>
 </svg>

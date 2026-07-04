@@ -1,21 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Operon — placeholder panel, 14 HP (71.12 x 128.5 mm). Final art TBD (M7).
-     nanosvg ignores <text>, so control labels are drawn by the widget; this
-     file supplies the background and the reserved display region only. -->
+<!-- Operon — placeholder panel, 14 HP (71.12 x 128.5 mm). Violet accent (gene
+     circuit; distinct from GENDYN green). House style: bg + rails + screw holes
+     only; the display screen, title, and control labels are drawn by the widget. -->
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="71.12mm" height="128.5mm"
-     viewBox="0 0 71.12 128.5">
-
-  <!-- Panel background -->
-  <rect x="0" y="0" width="71.12" height="128.5" fill="#141420"/>
-  <rect x="0" y="0" width="71.12" height="128.5" fill="none"
-        stroke="#2b8f5e" stroke-width="0.3" opacity="0.5"/>
-
-  <!-- Reserved display region (gene ring) -->
-  <rect x="6" y="8" width="59.12" height="38" rx="2"
-        fill="#0a0a12" stroke="#2b8f5e" stroke-width="0.4" opacity="0.9"/>
-
-  <!-- Faint section dividers -->
-  <line x1="4" y1="50.5" x2="67.12" y2="50.5" stroke="#2b8f5e" stroke-width="0.2" opacity="0.35"/>
-  <line x1="4" y1="92"   x2="67.12" y2="92"   stroke="#2b8f5e" stroke-width="0.2" opacity="0.35"/>
+     width="71.12mm" height="128.5mm" viewBox="0 0 71.12 128.5">
+  <rect width="71.12" height="128.5" fill="#1e1a2e"/>
+  <rect y="0"     width="71.12" height="3" fill="#120f1c"/>
+  <rect y="125.5" width="71.12" height="3" fill="#120f1c"/>
+  <circle cx="3.5"   cy="3.5"   r="1.5" fill="#0d0a16"/>
+  <circle cx="67.62" cy="3.5"   r="1.5" fill="#0d0a16"/>
+  <circle cx="3.5"   cy="124.5" r="1.5" fill="#0d0a16"/>
+  <circle cx="67.62" cy="124.5" r="1.5" fill="#0d0a16"/>
 </svg>

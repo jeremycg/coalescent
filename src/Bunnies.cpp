@@ -261,6 +261,19 @@ namespace bpl {
 // published snapshot; never touches the integrator.
 struct OrbitView : widget::TransparentWidget {
     Bunnies* module = nullptr;
+    std::shared_ptr<Font> font;
+
+    // Dark "screen" + bezel (house style — the SVG is just panel + rails + screws).
+    void draw(const DrawArgs& args) override {
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, 0, 0, box.size.x, box.size.y, mm2px(2.f));
+        nvgFillColor(args.vg, nvgRGB(0x12, 0x0a, 0x0e));
+        nvgFill(args.vg);
+        nvgStrokeColor(args.vg, nvgRGB(0x4d, 0x2b, 0x38));
+        nvgStrokeWidth(args.vg, 1.2f);
+        nvgStroke(args.vg);
+        Widget::draw(args);
+    }
 
     void drawBunny(NVGcontext* vg, float px, float py, float r, NVGcolor col) {
         nvgFillColor(vg, col);
@@ -301,6 +314,22 @@ struct OrbitView : widget::TransparentWidget {
         int newest = (head - 1 + ORBIT_N) % ORBIT_N;
         Vec bp = P(o.pt[newest][0], o.pt[newest][1]);
         drawBunny(args.vg, bp.x, bp.y, 4.5f, nvgRGB(0xff, 0xd0, 0xda));
+
+        // Title (top-left) + axis hint (bottom-right), DejaVuSans, coral accent.
+        if (!font) font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+        if (font) {
+            nvgFontFaceId(args.vg, font->handle);
+            nvgFontSize(args.vg, mm2px(3.2f));
+            nvgTextLetterSpacing(args.vg, mm2px(0.5f));
+            nvgFillColor(args.vg, nvgRGBA(0xff, 0xb0, 0xc0, 0xcc));
+            nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+            nvgText(args.vg, mm2px(2.6f), mm2px(2.2f), "BUNNIES", NULL);
+            nvgTextLetterSpacing(args.vg, 0.f);
+            nvgFontSize(args.vg, mm2px(2.2f));
+            nvgFillColor(args.vg, nvgRGBA(0xd0, 0x80, 0x90, 0xaa));
+            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+            nvgText(args.vg, box.size.x - mm2px(2.4f), box.size.y - mm2px(1.8f), "prey–pred", NULL);
+        }
     }
 };
 
@@ -343,19 +372,20 @@ struct BunniesWidget : ModuleWidget {
         if (!font) font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
-        nvgFillColor(args.vg, nvgRGB(0xff, 0xe6, 0xea));
+        nvgFillColor(args.vg, nvgRGB(0xe6, 0xe6, 0xf2));   // near-white, ~13:1 (house legibility spec)
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         auto label = [&](float xmm, float ymm, const char* s, float sz = 1.9f) {
-            nvgFontSize(args.vg, mm2px(sz)); nvgText(args.vg, mm2px(xmm), mm2px(ymm), s, nullptr);
+            nvgFontSize(args.vg, mm2px(sz * 1.72f));       // Nunito Bold, sized up for legibility
+            nvgText(args.vg, mm2px(xmm), mm2px(ymm), s, nullptr);
         };
         using namespace bpl;
         const char* kl[3] = {"RATE", "BALANCE", "WILD"};
         for (int i = 0; i < 3; ++i) label(KNOB_X[i], KNOB_Y - 6.f, kl[i]);
-        label(MODE_X, KNOB_Y - 6.f, "LV/RM", 1.7f);
+        label(MODE_X, KNOB_Y - 6.f, "LV/RM", 1.5f);
         const char* il[4] = {"V/OCT", "BAL", "WILD", "KICK"};
-        for (int i = 0; i < 4; ++i) label(IN_X[i], IN_Y - 5.5f, il[i], 1.7f);
-        label(OUT_X[0], OUT_Y - 5.5f, "PREY", 1.7f);  label(OUT_X[1], OUT_Y - 5.5f, "PRED", 1.7f);
-        label(OUT_X[0], POP_Y - 5.5f, "PREY↑", 1.6f); label(OUT_X[1], POP_Y - 5.5f, "PRED↑", 1.6f);
+        for (int i = 0; i < 4; ++i) label(IN_X[i], IN_Y - 5.5f, il[i], 1.55f);
+        label(OUT_X[0], OUT_Y - 5.5f, "PREY", 1.6f);  label(OUT_X[1], OUT_Y - 5.5f, "PRED", 1.6f);
+        label(OUT_X[0], POP_Y - 5.5f, "PREY↑", 1.5f); label(OUT_X[1], POP_Y - 5.5f, "PRED↑", 1.5f);
     }
 };
 
