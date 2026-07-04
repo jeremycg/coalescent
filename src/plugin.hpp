@@ -11,3 +11,4 @@ extern Model* modelHaptik;   // physical-modelling ring
 extern Model* modelAxon;     // FitzHugh–Nagumo neuron
 extern Model* modelSoma;     // Hindmarsh–Rose neuron
 extern Model* modelOperon;   // repressilator gene circuit (three-phase)
+extern Model* modelBunnies;  // predator-prey (Lotka-Volterra / Rosenzweig-MacArthur)

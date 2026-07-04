@@ -126,6 +126,29 @@
         "biological",
         "synthetic biology"
       ]
+    },
+    {
+      "slug": "Bunnies",
+      "name": "Bunnies",
+      "description": "Predator-prey oscillator: prey and predator chase each other a quarter cycle apart. Lotka-Volterra and Rosenzweig-MacArthur modes.",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/bunnies.md",
+      "tags": [
+        "Oscillator",
+        "LFO"
+      ],
+      "keywords": [
+        "predator",
+        "prey",
+        "Lotka",
+        "Volterra",
+        "Rosenzweig",
+        "MacArthur",
+        "population",
+        "ecology",
+        "two phase",
+        "quadrature",
+        "limit cycle"
+      ]
     }
   ]
 }
