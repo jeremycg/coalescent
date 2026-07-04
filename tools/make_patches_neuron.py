@@ -314,10 +314,31 @@ def patch_soma_poly():
     ]
     write_patch("soma_6_poly.vcv", [evP, evC, mgP, mgC, x, sm, a], cs, a["id"])
 
+# ── 8. Polyphonic triggers: proves per-voice poly TRIG. Three LFOs at different
+# rates → Merge (a 3-channel poly gate) → Axon TRIG, with CURRENT at REST so each
+# gate channel fires ONE spike on its own voice (not a free-running drone). The
+# poly OUT is summed, so you hear three independent rhythms. ─────────────────────
+def patch_polytrig():
+    freqs = [-1.0, 0.5, 1.6]          # LFO FREQ (V) → ~1, 3, 6 Hz: three distinct rates
+    lfos = [{"id": uid(), "plugin": "Fundamental", "model": "LFO", "version": "2.6.4",
+             "params": [{"id": 2, "value": f}], "pos": [i * 6, 0]} for i, f in enumerate(freqs)]
+    mg = merge((18, 0))
+    x  = axon(ap(current=0.1, eps=0.08, shape=0.7), [20, 0])   # CURRENT=0.1 → rest (silent until triggered)
+    sm = summ(0.3, (32, 0))
+    a  = audio([34, 0])
+    cs  = [cable(lfos[i]["id"], 3, mg["id"], i, i) for i in range(3)]  # LFO SQR → Merge ch i
+    cs += [
+        cable(mg["id"], 0, x["id"], 3, 3),    # Merge poly (3ch) → Axon TRIG
+        cable(x["id"], 0, sm["id"], 0, 4),    # Axon OUT (poly) → Sum
+        cable(sm["id"], 0, a["id"], 0, 5),    # Sum → L
+        cable(sm["id"], 0, a["id"], 1, 5),    # Sum → R
+    ]
+    write_patch("axon_8_polytrig.vcv", lfos + [mg, x, sm, a], cs, a["id"])
+
 if __name__ == "__main__":
     print("Generating Axon smoke-test patches:")
     patch_freerun(); patch_blips(); patch_selfevolving(); patch_crossmod()
-    patch_sync(); patch_poly(); patch_midipoly()
+    patch_sync(); patch_poly(); patch_midipoly(); patch_polytrig()
     print("Generating Soma smoke-test patches:")
     patch_soma_bursting(); patch_soma_chaos(); patch_soma_blips(); patch_soma_zmod()
     patch_soma_sync(); patch_soma_poly()
