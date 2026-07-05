@@ -5,7 +5,7 @@
 - **New module — Operon**: a three-phase oscillator on the Elowitz–Leibler
   repressilator (three genes repressing each other in a ring). Three protein
   outputs ~120° apart, three phase gates, DRIVE/HILL/DECAY/LEAK + PERTURB, and a
-  gene-ring display; usable as an audio voice, a three-phase LFO, or a clock.
+  three-protein time scope; usable as an audio voice, a three-phase LFO, or a clock.
   Math verified against BioModels BIOMD0000000012.
 - **New module — Bunnies**: a predator–prey oscillator with two modes,
   Lotka–Volterra (conservative, amplitude set by a conserved-quantity servo) and

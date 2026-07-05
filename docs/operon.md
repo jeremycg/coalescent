@@ -83,11 +83,12 @@ DRIVE or HILL.
 
 ## Display
 
-The screen shows the **gene ring**: three nodes with repression arrows between
-them, each node's glow driven by its live protein level. Because the phases run
-~120° apart, the activity visibly chases itself around the ring — and the rest →
-oscillation bifurcation reads at a glance (three steady dim nodes vs. a pulsing
-chase). Read lock-free from a ~45 Hz snapshot.
+The screen plots the **three protein levels over time** — three traces in stacked
+lanes (one gene each), scrolling right to left. Because the genes run ~120° apart,
+the chase reads directly: protein 1 crests, then 2, then 3. Faint vertical guides
+help you eyeball whether the traces are in or out of phase. It's recorded over a
+few-second window, so the phase relationship is clear at LFO / clock rates; an
+audio-rate tone naturally aliases here (as on any slow scope). Read lock-free.
 
 ## Patches
 

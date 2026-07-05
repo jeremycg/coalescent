@@ -81,8 +81,9 @@ pulses crowd together).
 
 The screen is the **phase-space orbit** — centered prey (x) vs predator (y). Rest
 is a dot at the origin; oscillation is a closed loop whose size is WILD and whose
-tilt shows the predator lag. A small **bunny rides the current point** around the
-loop. A fading trail fills the orbit over a few cycles.
+tilt shows the predator lag. A **bunny ambles slowly around the loop** so you can
+follow it at any pitch. The loop is a phase-average of the orbit (the trajectory
+binned by cycle phase), so it stays clean and closed — no aliasing at audio rate.
 
 ## Patches
 
