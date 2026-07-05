@@ -321,6 +321,12 @@ struct OperonScope : widget::TransparentWidget {
         const NVGcolor col[3] = { nvgRGB(0xd0, 0xb8, 0xff), nvgRGB(0xa8, 0x82, 0xf0), nvgRGB(0x82, 0x60, 0xd8) };
 
         nvgScissor(args.vg, 0, 0, W, H);
+        // faint vertical guides — eyeball phase alignment across the three lanes
+        for (int g = 1; g < 8; ++g) {
+            float x = W * g / 8.f;
+            nvgBeginPath(args.vg); nvgMoveTo(args.vg, x, 0); nvgLineTo(args.vg, x, H);
+            nvgStrokeColor(args.vg, nvgRGBA(0xc8, 0xb0, 0xff, 0x16)); nvgStrokeWidth(args.vg, 1.f); nvgStroke(args.vg);
+        }
         for (int k = 0; k < 3; ++k) {
             // faint lane baseline
             nvgBeginPath(args.vg); nvgMoveTo(args.vg, 0, laneMid[k]); nvgLineTo(args.vg, W, laneMid[k]);

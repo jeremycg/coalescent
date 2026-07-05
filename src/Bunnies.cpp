@@ -25,7 +25,7 @@
 // simulation: the plan's originals collapsed large orbits into the positivity
 // floor; STAB_K=0.5 / STAB_FLOOR=0.2 / V0≤Vmin+3.5 is the stable, monotonic envelope.
 
-static const int ORBIT_N = 512;   // phase-orbit trail length
+static const int LOOP_N = 128;    // phase bins for the averaged orbit loop
 
 struct Bunnies : Module {
 
@@ -66,12 +66,17 @@ struct Bunnies : Module {
     dsp::PulseGenerator popGen[2];
 
     // ─── Visualizer: live ring + lock-free double-buffered snapshot ──────────
-    struct Orbit { float pt[ORBIT_N][2] = {}; int head = 0; float peak = 1e-3f; };
-    Orbit liveOrbit;                 // audio-thread only
-    Orbit snap[2];
+    // Orbit stored as a phase-averaged closed loop: cycle-phase 0..1 indexes the
+    // bins, so the loop closes seamlessly (no ring-buffer seam) and averaging over
+    // cycles kills audio-rate aliasing. Phase 0 = centered prey crossing 0 upward.
+    struct Loop { float pt[LOOP_N][2] = {}; float peak = 1e-3f; };
+    Loop liveLoop;                   // audio-thread only (running phase-average)
+    Loop snap[2];                    // published copies
     std::atomic<int> snapIndex{0};
-    dsp::ClockDivider trailDiv;
+    dsp::ClockDivider pubDiv;
     float lastDisplayFs = 0.f;
+    float vPhase = 0.f, vInc = 0.002f, vPrev = 0.f;   // cycle-phase tracker
+    int   vSince = 0;                                 // samples since last phase-0
 
     // ─── Tunable constants (final values at M8) ─────────────────────────────
     static constexpr float RATE_CAL  = 7.49f;  // measured LV default period × √gamma (tools/stability/bunnies.cpp) → C4
@@ -127,7 +132,7 @@ struct Bunnies : Module {
         rmValid = false; rmA = rmB = rmC = -1.f; lastMode = -1;
         resetPeakMemory();
         for (int i = 0; i < 2; ++i) popGen[i].reset();
-        liveOrbit = Orbit{};
+        liveLoop = Loop{}; vPhase = 0.f; vInc = 0.002f; vPrev = 0.f; vSince = 0;
     }
 
     // rising→falling local max above POP_MIN on the centered signal.
@@ -227,22 +232,27 @@ struct Bunnies : Module {
         outputs[PREY_POP_OUTPUT].setVoltage(popGen[0].process(args.sampleTime) ? GATE_LEVEL : 0.f);
         outputs[PRED_POP_OUTPUT].setVoltage(popGen[1].process(args.sampleTime) ? GATE_LEVEL : 0.f);
 
-        // ── visualizer: append to live ring, then publish a full copy ──
-        if (fs != lastDisplayFs) {
-            lastDisplayFs = fs;
-            // ~90 Hz: above the ~60 fps display (trail stays live) but far below the
-            // old 300 Hz — less ring-copy on the audio thread and a proportionally
-            // smaller double-buffer tear window.
-            trailDiv.setDivision(std::max(1, (int) std::round(fs / 90.f)));
+        // ── visualizer: bin the orbit by cycle-phase into a closed loop ──
+        if (vPrev <= 0.f && cX > 0.f && vSince > 8) {   // centered prey crosses 0 upward → new cycle
+            vInc = 1.f / (float) vSince;                 // 1 / period(samples)
+            vSince = 0; vPhase = 0.f;
+        } else {
+            vSince++;
         }
-        if (trailDiv.process()) {
-            liveOrbit.pt[liveOrbit.head][0] = cX;
-            liveOrbit.pt[liveOrbit.head][1] = cY;
-            liveOrbit.head = (liveOrbit.head + 1) % ORBIT_N;
-            float a = std::max(std::fabs(cX), std::fabs(cY));
-            liveOrbit.peak = std::max(a, liveOrbit.peak * 0.999f + 1e-5f);
+        vPrev = cX;
+        vPhase += vInc; if (vPhase >= 1.f) vPhase -= 1.f;
+        int b = clamp((int) (vPhase * LOOP_N), 0, LOOP_N - 1);
+        liveLoop.pt[b][0] += (cX - liveLoop.pt[b][0]) * 0.02f;   // running average per phase bin
+        liveLoop.pt[b][1] += (cY - liveLoop.pt[b][1]) * 0.02f;
+
+        if (fs != lastDisplayFs) { lastDisplayFs = fs; pubDiv.setDivision(std::max(1, (int) std::round(fs / 45.f))); }
+        if (pubDiv.process()) {
+            float mx = 0.f;
+            for (int i = 0; i < LOOP_N; ++i)
+                mx = std::max(mx, std::max(std::fabs(liveLoop.pt[i][0]), std::fabs(liveLoop.pt[i][1])));
+            liveLoop.peak = std::max(mx, liveLoop.peak * 0.99f + 1e-4f);
             int back = 1 - snapIndex.load(std::memory_order_relaxed);
-            snap[back] = liveOrbit;                              // full ring copy
+            snap[back] = liveLoop;
             snapIndex.store(back, std::memory_order_release);
         }
     }
@@ -288,9 +298,9 @@ struct OrbitView : widget::TransparentWidget {
         float R = std::min(box.size.x, box.size.y) * 0.42f;
 
         int read = module ? module->snapIndex.load(std::memory_order_acquire) : 0;
-        const Bunnies::Orbit dummy;
-        const Bunnies::Orbit& o = module ? module->snap[read] : dummy;
-        float peak = std::max(o.peak, 1e-3f);
+        const Bunnies::Loop dummy;
+        const Bunnies::Loop& lp = module ? module->snap[read] : dummy;
+        float peak = std::max(lp.peak, 1e-3f);
         auto P = [&](float cx, float cy) {
             return ctr.plus(Vec(clamp(cx / peak, -1.1f, 1.1f) * R, -clamp(cy / peak, -1.1f, 1.1f) * R));
         };
@@ -299,25 +309,23 @@ struct OrbitView : widget::TransparentWidget {
         nvgBeginPath(args.vg); nvgCircle(args.vg, ctr.x, ctr.y, 1.5f);
         nvgFillColor(args.vg, nvgRGBA(0xff, 0x8a, 0x9a, 0x60)); nvgFill(args.vg);
 
-        // fading trail oldest→newest
-        int head = o.head;
+        // the averaged orbit loop (closed, phase-ordered)
         nvgLineCap(args.vg, NVG_ROUND); nvgLineJoin(args.vg, NVG_ROUND);
-        for (int i = 1; i < ORBIT_N; ++i) {
-            int a = (head + i - 1) % ORBIT_N, b = (head + i) % ORBIT_N;
-            Vec pa = P(o.pt[a][0], o.pt[a][1]), pb = P(o.pt[b][0], o.pt[b][1]);
-            float al = (float) i / ORBIT_N;
-            nvgBeginPath(args.vg); nvgMoveTo(args.vg, pa.x, pa.y); nvgLineTo(args.vg, pb.x, pb.y);
-            nvgStrokeColor(args.vg, nvgRGBA(0xff, 0x6b, 0x8a, (int)(0xd0 * al)));
-            nvgStrokeWidth(args.vg, 1.4f); nvgStroke(args.vg);
+        nvgBeginPath(args.vg);
+        for (int i = 0; i <= LOOP_N; ++i) {
+            Vec p = P(lp.pt[i % LOOP_N][0], lp.pt[i % LOOP_N][1]);
+            if (i == 0) nvgMoveTo(args.vg, p.x, p.y); else nvgLineTo(args.vg, p.x, p.y);
         }
-        // Single bunny ambling around the loop. A cursor sweeps the recorded orbit
-        // at a fixed slow pace (whole ~5.7 s trail over 32 s), interpolated between
-        // points. The index is ABSOLUTE (not head-relative): head advances at the
-        // 90 Hz record rate, so adding it dragged the cursor along at record speed.
-        float fidx = (float) std::fmod(system::getTime() / 32.0 * ORBIT_N, (double) ORBIT_N);
-        int i0 = (int) fidx % ORBIT_N, i1 = (i0 + 1) % ORBIT_N;
-        float fr = fidx - std::floor(fidx);
-        Vec a0 = P(o.pt[i0][0], o.pt[i0][1]), a1 = P(o.pt[i1][0], o.pt[i1][1]);
+        nvgStrokeColor(args.vg, nvgRGBA(0xff, 0x6b, 0x8a, 0xc0));
+        nvgStrokeWidth(args.vg, 1.4f); nvgStroke(args.vg);
+
+        // Bunny ambling round the loop: sweep by PHASE at a constant slow pace
+        // (~7 s/lap). The loop is closed (bin LOOP_N-1 → 0 is the same phase step),
+        // so the wrap is seamless — no more mid-loop jump from the ring seam.
+        float f = (float) std::fmod(system::getTime() / 7.0, 1.0) * LOOP_N;
+        int i0 = (int) f % LOOP_N, i1 = (i0 + 1) % LOOP_N;
+        float fr = f - std::floor(f);
+        Vec a0 = P(lp.pt[i0][0], lp.pt[i0][1]), a1 = P(lp.pt[i1][0], lp.pt[i1][1]);
         Vec bp = a0.plus(a1.minus(a0).mult(fr));
         drawBunny(args.vg, bp.x, bp.y, 4.5f, nvgRGB(0xff, 0xd0, 0xda));
 
