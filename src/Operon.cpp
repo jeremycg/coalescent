@@ -262,7 +262,7 @@ struct Operon : Module {
         // (clean at LFO/clock rates; an audio-rate tone naturally aliases here) ──
         if (fs != lastDisplayFs) {
             lastDisplayFs = fs;
-            dispDiv.setDivision(std::max(1, (int) std::round(fs / 45.f)));
+            dispDiv.setDivision(std::max(1, (int) std::round(fs / 25.f)));  // ~25 Hz → ~10 s window, calmer scroll
         }
         if (dispDiv.process()) {
             float mx = 0.f;
@@ -315,22 +315,22 @@ struct OperonScope : widget::TransparentWidget {
         const Operon::OperonScope& sc = module ? module->scope[read] : dummy;
         float peak = std::max(sc.peak, 1e-3f);
         const float W = box.size.x, H = box.size.y;
-        const float mid = H * 0.56f;       // centreline (room for the title above)
-        const float halfH = H * 0.34f;     // ±peak maps to ±halfH
+        // three stacked lanes (title occupies the top ~20%), one protein each
+        const float laneMid[3] = { H * 0.36f, H * 0.58f, H * 0.80f };
+        const float laneH = H * 0.10f;     // ±peak maps to ±laneH within a lane
+        const NVGcolor col[3] = { nvgRGB(0xd0, 0xb8, 0xff), nvgRGB(0xa8, 0x82, 0xf0), nvgRGB(0x82, 0x60, 0xd8) };
 
         nvgScissor(args.vg, 0, 0, W, H);
-        // faint centreline
-        nvgBeginPath(args.vg); nvgMoveTo(args.vg, 0, mid); nvgLineTo(args.vg, W, mid);
-        nvgStrokeColor(args.vg, nvgRGBA(0x6a, 0x50, 0x9e, 0x40)); nvgStrokeWidth(args.vg, 1.f); nvgStroke(args.vg);
-
-        // three protein traces, oldest (left) → newest (right); violet shades
-        const NVGcolor col[3] = { nvgRGB(0xd0, 0xb8, 0xff), nvgRGB(0xa8, 0x82, 0xf0), nvgRGB(0x82, 0x60, 0xd8) };
         for (int k = 0; k < 3; ++k) {
+            // faint lane baseline
+            nvgBeginPath(args.vg); nvgMoveTo(args.vg, 0, laneMid[k]); nvgLineTo(args.vg, W, laneMid[k]);
+            nvgStrokeColor(args.vg, nvgRGBA(0x6a, 0x50, 0x9e, 0x35)); nvgStrokeWidth(args.vg, 1.f); nvgStroke(args.vg);
+            // trace, oldest (left) → newest (right)
             nvgBeginPath(args.vg);
             for (int i = 0; i < N; ++i) {
                 int idx = (sc.head + i) % N;    // sc.head = oldest sample
                 float x = W * i / (N - 1);
-                float y = mid - clamp(sc.p[k][idx] / peak, -1.1f, 1.1f) * halfH;
+                float y = laneMid[k] - clamp(sc.p[k][idx] / peak, -1.2f, 1.2f) * laneH;
                 if (i == 0) nvgMoveTo(args.vg, x, y); else nvgLineTo(args.vg, x, y);
             }
             nvgStrokeColor(args.vg, col[k]);

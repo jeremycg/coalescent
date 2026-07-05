@@ -310,12 +310,12 @@ struct OrbitView : widget::TransparentWidget {
             nvgStrokeColor(args.vg, nvgRGBA(0xff, 0x6b, 0x8a, (int)(0xd0 * al)));
             nvgStrokeWidth(args.vg, 1.4f); nvgStroke(args.vg);
         }
-        // Single bunny ambling around the loop. Rather than the live (audio-rate)
-        // point, a cursor sweeps the recorded orbit at ~1/3 real speed, interpolated
-        // between trail points — a slow, smooth amble at any pitch, with the real
-        // loop shape behind it. (Sweep the whole ~5.7 s trail over 28 s.)
-        float fidx = (float) std::fmod(system::getTime() / 28.0 * ORBIT_N, (double) ORBIT_N);
-        int i0 = (head + (int) fidx) % ORBIT_N, i1 = (i0 + 1) % ORBIT_N;
+        // Single bunny ambling around the loop. A cursor sweeps the recorded orbit
+        // at a fixed slow pace (whole ~5.7 s trail over 32 s), interpolated between
+        // points. The index is ABSOLUTE (not head-relative): head advances at the
+        // 90 Hz record rate, so adding it dragged the cursor along at record speed.
+        float fidx = (float) std::fmod(system::getTime() / 32.0 * ORBIT_N, (double) ORBIT_N);
+        int i0 = (int) fidx % ORBIT_N, i1 = (i0 + 1) % ORBIT_N;
         float fr = fidx - std::floor(fidx);
         Vec a0 = P(o.pt[i0][0], o.pt[i0][1]), a1 = P(o.pt[i1][0], o.pt[i1][1]);
         Vec bp = a0.plus(a1.minus(a0).mult(fr));
