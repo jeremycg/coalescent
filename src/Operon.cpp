@@ -285,6 +285,7 @@ namespace opl {
 struct OperonRing : widget::TransparentWidget {
     Operon* module = nullptr;
     std::shared_ptr<Font> font;
+    float glow[3] = {};   // per-node smoothed activity (breathe, not flicker at audio rate)
 
     // Dark "screen" + bezel, drawn by the widget (house style — the SVG is just
     // panel + rails + screws).
@@ -327,10 +328,12 @@ struct OperonRing : widget::TransparentWidget {
         // Nodes — activity (|centered| / peak) drives glow; rest reads dim (violet).
         for (int k = 0; k < 3; ++k) {
             float activity = clamp(std::fabs(snap.p[k]) / peak, 0.f, 1.f);
-            float rad = mm2px(1.6f) + mm2px(2.2f) * activity;
+            glow[k] += (activity - glow[k]) * 0.06f;   // ~250 ms smoothing: breathe, not flicker
+            float a = glow[k];
+            float rad = mm2px(1.6f) + mm2px(2.2f) * a;
             nvgBeginPath(args.vg);
             nvgCircle(args.vg, node[k].x, node[k].y, rad);
-            nvgFillColor(args.vg, nvgRGBA(0xa8, 0x78, 0xff, (int)(0x30 + 0xb0 * activity)));
+            nvgFillColor(args.vg, nvgRGBA(0xa8, 0x78, 0xff, (int)(0x30 + 0xb0 * a)));
             nvgFill(args.vg);
         }
 

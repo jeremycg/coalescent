@@ -282,19 +282,6 @@ struct OrbitView : widget::TransparentWidget {
         nvgBeginPath(vg); nvgEllipse(vg, px + r * 0.5f, py - r * 1.1f, r * 0.28f, r * 0.7f); nvgFill(vg);  // ear
     }
 
-    void drawFox(NVGcontext* vg, float px, float py, float r, NVGcolor col) {
-        nvgFillColor(vg, col);
-        nvgBeginPath(vg);   // face: triangle, snout pointing down
-        nvgMoveTo(vg, px - r * 0.85f, py - r * 0.5f); nvgLineTo(vg, px + r * 0.85f, py - r * 0.5f);
-        nvgLineTo(vg, px, py + r * 0.95f); nvgClosePath(vg); nvgFill(vg);
-        nvgBeginPath(vg);   // left ear
-        nvgMoveTo(vg, px - r * 0.85f, py - r * 0.5f); nvgLineTo(vg, px - r * 0.45f, py - r * 1.55f);
-        nvgLineTo(vg, px - r * 0.05f, py - r * 0.5f); nvgClosePath(vg); nvgFill(vg);
-        nvgBeginPath(vg);   // right ear
-        nvgMoveTo(vg, px + r * 0.85f, py - r * 0.5f); nvgLineTo(vg, px + r * 0.45f, py - r * 1.55f);
-        nvgLineTo(vg, px + r * 0.05f, py - r * 0.5f); nvgClosePath(vg); nvgFill(vg);
-    }
-
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         Vec ctr = box.size.div(2);
@@ -323,27 +310,16 @@ struct OrbitView : widget::TransparentWidget {
             nvgStrokeColor(args.vg, nvgRGBA(0xff, 0x6b, 0x8a, (int)(0xd0 * al)));
             nvgStrokeWidth(args.vg, 1.4f); nvgStroke(args.vg);
         }
-        // Slowed cursor: sweep the *recorded* orbit at a fixed ~0.2 Hz so the motion
-        // is watchable at any pitch (an illustrative slow proxy — an audio-rate point
-        // can't be shown at 60 fps; this rides the real loop, just slowly).
-        float sweep = (float) std::fmod(system::getTime() * 0.2, 1.0);
-        int cur = (head + (int) (sweep * ORBIT_N)) % ORBIT_N;
-        Vec live = P(o.pt[cur][0], o.pt[cur][1]);
-        float bunnyY = box.size.y - mm2px(3.2f);   // prey creature rides the bottom axis
-        float foxX   = mm2px(3.2f);                 // predator creature rides the left axis
-
-        // faint drop-lines: the live point is where prey (bunny, x) meets predator (fox, y)
-        nvgStrokeColor(args.vg, nvgRGBA(0xff, 0x8a, 0x9a, 0x55));
-        nvgStrokeWidth(args.vg, 1.f);
-        nvgBeginPath(args.vg);
-        nvgMoveTo(args.vg, live.x, bunnyY); nvgLineTo(args.vg, live.x, live.y);
-        nvgMoveTo(args.vg, foxX, live.y);   nvgLineTo(args.vg, live.x, live.y);
-        nvgStroke(args.vg);
-        nvgBeginPath(args.vg); nvgCircle(args.vg, live.x, live.y, 2.f);
-        nvgFillColor(args.vg, nvgRGBA(0xff, 0xe0, 0xe6, 0xdd)); nvgFill(args.vg);
-
-        drawBunny(args.vg, live.x, bunnyY, 4.f, nvgRGB(0xff, 0xc0, 0xd0));   // prey (pink), slides ↔
-        drawFox(args.vg, foxX, live.y, 4.f, nvgRGB(0xff, 0x9a, 0x5a));       // predator (orange), slides ↕
+        // Single bunny ambling around the loop. Rather than the live (audio-rate)
+        // point, a cursor sweeps the recorded orbit at ~1/3 real speed, interpolated
+        // between trail points — a slow, smooth amble at any pitch, with the real
+        // loop shape behind it. (Sweep the whole ~5.7 s trail over 16 s.)
+        float fidx = (float) std::fmod(system::getTime() / 16.0 * ORBIT_N, (double) ORBIT_N);
+        int i0 = (head + (int) fidx) % ORBIT_N, i1 = (i0 + 1) % ORBIT_N;
+        float fr = fidx - std::floor(fidx);
+        Vec a0 = P(o.pt[i0][0], o.pt[i0][1]), a1 = P(o.pt[i1][0], o.pt[i1][1]);
+        Vec bp = a0.plus(a1.minus(a0).mult(fr));
+        drawBunny(args.vg, bp.x, bp.y, 4.5f, nvgRGB(0xff, 0xd0, 0xda));
 
         // Title (top-left) + axis hint (bottom-right), DejaVuSans, coral accent.
         if (!font) font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
