@@ -313,8 +313,8 @@ struct OrbitView : widget::TransparentWidget {
         // Single bunny ambling around the loop. Rather than the live (audio-rate)
         // point, a cursor sweeps the recorded orbit at ~1/3 real speed, interpolated
         // between trail points — a slow, smooth amble at any pitch, with the real
-        // loop shape behind it. (Sweep the whole ~5.7 s trail over 16 s.)
-        float fidx = (float) std::fmod(system::getTime() / 16.0 * ORBIT_N, (double) ORBIT_N);
+        // loop shape behind it. (Sweep the whole ~5.7 s trail over 28 s.)
+        float fidx = (float) std::fmod(system::getTime() / 28.0 * ORBIT_N, (double) ORBIT_N);
         int i0 = (head + (int) fidx) % ORBIT_N, i1 = (i0 + 1) % ORBIT_N;
         float fr = fidx - std::floor(fidx);
         Vec a0 = P(o.pt[i0][0], o.pt[i0][1]), a1 = P(o.pt[i1][0], o.pt[i1][1]);

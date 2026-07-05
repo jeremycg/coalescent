@@ -93,13 +93,16 @@ struct Operon : Module {
         return hillLut[i] + (f - i) * (hillLut[i + 1] - hillLut[i]);
     }
 
-    // ─── Display snapshot (lock-free double buffer; UI-only) ────────────────
-    struct OperonSnapshot {
-        float p[3] = {};                 // centered protein snapshot
-        float peak = 1e-3f;              // smoothed normaliser
+    // ─── Display scope: the 3 protein levels over time (lock-free double buffer) ──
+    static const int HIST_N = 256;
+    struct OperonScope {
+        float p[3][HIST_N] = {};         // centered protein history (ring)
+        int   head = 0;                  // next write index
+        float peak = 1e-3f;              // smoothed y-scale
     };
-    OperonSnapshot snapshots[2];
-    std::atomic<int> snapshotIndex{0};
+    OperonScope liveScope;               // audio-thread only
+    OperonScope scope[2];                // published copies
+    std::atomic<int> scopeIndex{0};
     dsp::ClockDivider dispDiv;
     float lastDisplayFs = 0.f;
 
@@ -254,19 +257,25 @@ struct Operon : Module {
         for (int k = 0; k < 3; ++k)
             outputs[GATE1_OUTPUT + k].setVoltage(gateGen[k].process(args.sampleTime) ? GATE_LEVEL : 0.f);
 
-        // ── display snapshot (~45 Hz, lock-free double buffer; UI-only) ──
+        // ── display scope: record the 3 centered proteins into a history ring at
+        // ~45 Hz and publish a full copy — a slowed time plot a few seconds wide
+        // (clean at LFO/clock rates; an audio-rate tone naturally aliases here) ──
         if (fs != lastDisplayFs) {
             lastDisplayFs = fs;
             dispDiv.setDivision(std::max(1, (int) std::round(fs / 45.f)));
         }
         if (dispDiv.process()) {
-            int w = 1 - snapshotIndex.load(std::memory_order_relaxed);
-            OperonSnapshot& s = snapshots[w];
             float mx = 0.f;
-            for (int k = 0; k < 3; ++k) { s.p[k] = p[k] - pStar; mx = std::max(mx, std::fabs(s.p[k])); }
-            const OperonSnapshot& prev = snapshots[1 - w];
-            s.peak = std::max(mx, prev.peak * 0.95f + 1e-4f);   // slow decay, avoids /0
-            snapshotIndex.store(w, std::memory_order_release);
+            for (int k = 0; k < 3; ++k) {
+                float c = p[k] - pStar;
+                liveScope.p[k][liveScope.head] = c;
+                mx = std::max(mx, std::fabs(c));
+            }
+            liveScope.head = (liveScope.head + 1) % HIST_N;
+            liveScope.peak = std::max(mx, liveScope.peak * 0.999f + 1e-4f);
+            int back = 1 - scopeIndex.load(std::memory_order_relaxed);
+            scope[back] = liveScope;
+            scopeIndex.store(back, std::memory_order_release);
         }
     }
 };
@@ -279,16 +288,14 @@ namespace opl {
     static const float ATT3[3] = {22.8f, 35.6f, 48.4f};               // attenuverters
 }
 
-// Gene-ring display. M1: three static dim nodes + repression arrows so the panel
-// reads as a ring; the live, peak-normalised glow driven by the protein snapshot
-// lands in M6. Reads only the published snapshot — never the integrator.
-struct OperonRing : widget::TransparentWidget {
+// Display: the three protein levels over time — three ~120°-staggered traces on
+// one centreline, so the phase chase reads directly. Recorded at ~45 Hz (a few
+// seconds wide); reads only the published history, never the integrator.
+struct OperonScope : widget::TransparentWidget {
     Operon* module = nullptr;
     std::shared_ptr<Font> font;
-    float glow[3] = {};   // per-node smoothed activity (breathe, not flicker at audio rate)
 
-    // Dark "screen" + bezel, drawn by the widget (house style — the SVG is just
-    // panel + rails + screws).
+    // Dark "screen" + bezel (house style — the SVG is just panel + rails + screws).
     void draw(const DrawArgs& args) override {
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, 0, 0, box.size.x, box.size.y, mm2px(2.f));
@@ -302,40 +309,36 @@ struct OperonRing : widget::TransparentWidget {
 
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
-        Vec ctr = box.size.div(2);
-        float R = std::min(box.size.x, box.size.y) * 0.32f;
-        const float ang[3] = {-(float)M_PI / 2.f,
-                              -(float)M_PI / 2.f + 2.f * (float)M_PI / 3.f,
-                              -(float)M_PI / 2.f + 4.f * (float)M_PI / 3.f};
-        Vec node[3];
-        for (int k = 0; k < 3; ++k)
-            node[k] = ctr.plus(Vec(std::cos(ang[k]), std::sin(ang[k])).mult(R));
+        const int N = Operon::HIST_N;
+        int read = module ? module->scopeIndex.load(std::memory_order_acquire) : 0;
+        const Operon::OperonScope dummy;
+        const Operon::OperonScope& sc = module ? module->scope[read] : dummy;
+        float peak = std::max(sc.peak, 1e-3f);
+        const float W = box.size.x, H = box.size.y;
+        const float mid = H * 0.56f;       // centreline (room for the title above)
+        const float halfH = H * 0.34f;     // ±peak maps to ±halfH
 
-        int read = module ? module->snapshotIndex.load(std::memory_order_acquire) : 0;
-        const Operon::OperonSnapshot dummy;
-        const Operon::OperonSnapshot& snap = module ? module->snapshots[read] : dummy;
-        float peak = std::max(snap.peak, 1e-3f);
+        nvgScissor(args.vg, 0, 0, W, H);
+        // faint centreline
+        nvgBeginPath(args.vg); nvgMoveTo(args.vg, 0, mid); nvgLineTo(args.vg, W, mid);
+        nvgStrokeColor(args.vg, nvgRGBA(0x6a, 0x50, 0x9e, 0x40)); nvgStrokeWidth(args.vg, 1.f); nvgStroke(args.vg);
 
-        // Repression arrows k -> (k+1)%3 (dim, static).
+        // three protein traces, oldest (left) → newest (right); violet shades
+        const NVGcolor col[3] = { nvgRGB(0xd0, 0xb8, 0xff), nvgRGB(0xa8, 0x82, 0xf0), nvgRGB(0x82, 0x60, 0xd8) };
         for (int k = 0; k < 3; ++k) {
             nvgBeginPath(args.vg);
-            nvgMoveTo(args.vg, node[k].x, node[k].y);
-            nvgLineTo(args.vg, node[(k + 1) % 3].x, node[(k + 1) % 3].y);
-            nvgStrokeColor(args.vg, nvgRGBA(0x6a, 0x50, 0x9e, 0x60));
-            nvgStrokeWidth(args.vg, 1.f);
+            for (int i = 0; i < N; ++i) {
+                int idx = (sc.head + i) % N;    // sc.head = oldest sample
+                float x = W * i / (N - 1);
+                float y = mid - clamp(sc.p[k][idx] / peak, -1.1f, 1.1f) * halfH;
+                if (i == 0) nvgMoveTo(args.vg, x, y); else nvgLineTo(args.vg, x, y);
+            }
+            nvgStrokeColor(args.vg, col[k]);
+            nvgStrokeWidth(args.vg, 1.3f);
+            nvgLineJoin(args.vg, NVG_ROUND);
             nvgStroke(args.vg);
         }
-        // Nodes — activity (|centered| / peak) drives glow; rest reads dim (violet).
-        for (int k = 0; k < 3; ++k) {
-            float activity = clamp(std::fabs(snap.p[k]) / peak, 0.f, 1.f);
-            glow[k] += (activity - glow[k]) * 0.06f;   // ~250 ms smoothing: breathe, not flicker
-            float a = glow[k];
-            float rad = mm2px(1.6f) + mm2px(2.2f) * a;
-            nvgBeginPath(args.vg);
-            nvgCircle(args.vg, node[k].x, node[k].y, rad);
-            nvgFillColor(args.vg, nvgRGBA(0xa8, 0x78, 0xff, (int)(0x30 + 0xb0 * a)));
-            nvgFill(args.vg);
-        }
+        nvgResetScissor(args.vg);
 
         // Title (top-left, DejaVuSans, letter-spaced, violet accent).
         if (!font) font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
@@ -363,11 +366,11 @@ struct OperonWidget : ModuleWidget {
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f, 122.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(65.12f, 122.0f))));
 
-        OperonRing* ring = new OperonRing();
-        ring->module = module;
-        ring->box.pos = mm2px(Vec(6.f, 8.f));
-        ring->box.size = mm2px(Vec(59.12f, 38.f));
-        addChild(ring);
+        OperonScope* scope = new OperonScope();
+        scope->module = module;
+        scope->box.pos = mm2px(Vec(6.f, 8.f));
+        scope->box.size = mm2px(Vec(59.12f, 38.f));
+        addChild(scope);
 
         using namespace opl;
         // Knob row: PITCH, ALPHA, HILL, BETA, LEAK
