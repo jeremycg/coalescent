@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.2.0 (unreleased)
+## 2.2.0
 
 - **New module — Operon**: a three-phase oscillator on the Elowitz–Leibler
   repressilator (three genes repressing each other in a ring). Three protein
