@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Operon — placeholder panel, 14 HP (71.12 x 128.5 mm). Violet accent (gene
+     circuit; distinct from GENDYN green). House style: bg + rails + screw holes
+     only; the display screen, title, and control labels are drawn by the widget. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="71.12mm" height="128.5mm" viewBox="0 0 71.12 128.5">
+  <rect width="71.12" height="128.5" fill="#1e1a2e"/>
+  <rect y="0"     width="71.12" height="3" fill="#120f1c"/>
+  <rect y="125.5" width="71.12" height="3" fill="#120f1c"/>
+  <circle cx="3.5"   cy="3.5"   r="1.5" fill="#0d0a16"/>
+  <circle cx="67.62" cy="3.5"   r="1.5" fill="#0d0a16"/>
+  <circle cx="3.5"   cy="124.5" r="1.5" fill="#0d0a16"/>
+  <circle cx="67.62" cy="124.5" r="1.5" fill="#0d0a16"/>
+</svg>

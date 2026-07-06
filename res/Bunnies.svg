@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bunnies — placeholder panel, 12 HP (60.96 x 128.5 mm). Coral/pink accent.
+     House style: bg + rails + screw holes only; the display screen, title, and
+     control labels are drawn by the widget. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="60.96mm" height="128.5mm" viewBox="0 0 60.96 128.5">
+  <rect width="60.96" height="128.5" fill="#2a1820"/>
+  <rect y="0"     width="60.96" height="3" fill="#1c1016"/>
+  <rect y="125.5" width="60.96" height="3" fill="#1c1016"/>
+  <circle cx="3.5"   cy="3.5"   r="1.5" fill="#170b10"/>
+  <circle cx="57.46" cy="3.5"   r="1.5" fill="#170b10"/>
+  <circle cx="3.5"   cy="124.5" r="1.5" fill="#170b10"/>
+  <circle cx="57.46" cy="124.5" r="1.5" fill="#170b10"/>
+</svg>

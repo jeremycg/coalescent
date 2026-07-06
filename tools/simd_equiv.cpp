@@ -1,13 +1,13 @@
 // Proof that the float_4 (poly-SIMD) RK4 path matches the scalar per-voice path
 // for Axon's FitzHugh–Nagumo kernel. Runs the same voicings through both the
-// scalar neuron::rk4<2,float> and the vectorised neuron::rk4<2,float_4> (four
+// scalar coalescent::rk4<2,float> and the vectorised coalescent::rk4<2,float_4> (four
 // identical lanes) and reports the max deviation, plus the same for fastTanh.
 //
 //   g++ -O3 -funsafe-math-optimizations -march=nehalem -std=c++17 -DARCH_X64 -DARCH_LIN \
 //       -I$RACK/include -I$RACK/dep/include tools/simd_equiv.cpp -o /tmp/se && /tmp/se
 #include <simd/functions.hpp>
 using namespace rack;              // so `simd::` resolves as it does inside the plugin
-#include "../src/neuron/integrator.hpp"
+#include "../src/dsp/rk4.hpp"
 #include "../src/tanh_approx.hpp"
 #include <cstdio>
 #include <cmath>
@@ -31,7 +31,7 @@ static float stepScalar(float& v, float& w, float pitchHz, float I, float eps, f
     float h = subTau / K;
     float s[2] = {v, w};
     for (int k = 0; k < K; k++)
-        neuron::rk4<2>(s, h, [&](const float* y, float* d) { fFHN(y[0], y[1], I, eps, a, d[0], d[1]); });
+        coalescent::rk4<2>(s, h, [&](const float* y, float* d) { fFHN(y[0], y[1], I, eps, a, d[0], d[1]); });
     if (!std::isfinite(s[0]) || !std::isfinite(s[1])) { s[0] = -1.2f; s[1] = -0.6f; }
     s[0] = std::clamp(s[0], -SMAX, SMAX); s[1] = std::clamp(s[1], -SMAX, SMAX);
     v = s[0]; w = s[1];
@@ -45,7 +45,7 @@ static float_4 stepSimd(float_4& v, float_4& w, float_4 pitchHz, float_4 I, floa
     float_4 h = subTau / (float) K;
     float_4 s[2] = {v, w};
     for (int k = 0; k < K; k++)
-        neuron::rk4<2>(s, h, [&](const float_4* y, float_4* d) { fFHN(y[0], y[1], I, eps, a, d[0], d[1]); });
+        coalescent::rk4<2>(s, h, [&](const float_4* y, float_4* d) { fFHN(y[0], y[1], I, eps, a, d[0], d[1]); });
     float_4 fin = (s[0] == s[0]) & (s[1] == s[1]) & (simd::abs(s[0]) < 1e6f) & (simd::abs(s[1]) < 1e6f);
     s[0] = simd::ifelse(fin, s[0], -1.2f); s[1] = simd::ifelse(fin, s[1], -0.6f);
     s[0] = simd::clamp(s[0], -SMAX, SMAX); s[1] = simd::clamp(s[1], -SMAX, SMAX);

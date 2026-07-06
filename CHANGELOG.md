@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.2.0 (unreleased)
+
+- **New module — Operon**: a three-phase oscillator on the Elowitz–Leibler
+  repressilator (three genes repressing each other in a ring). Three protein
+  outputs ~120° apart, three phase gates, DRIVE/HILL/DECAY/LEAK + PERTURB, and a
+  three-protein time scope; usable as an audio voice, a three-phase LFO, or a clock.
+  Math verified against BioModels BIOMD0000000012.
+- **New module — Bunnies**: a predator–prey oscillator with two modes,
+  Lotka–Volterra (conservative, amplitude set by a conserved-quantity servo) and
+  Rosenzweig–MacArthur (self-correcting limit cycle). PREY/PRED outputs a quarter
+  cycle apart, two peak gates, KICK prey-force, and a phase-orbit display with a
+  bunny. Usable as an audio voice, a two-phase LFO, or a clock.
+- The shared RK4 integrator moved from `src/neuron/integrator.hpp` to
+  `src/dsp/rk4.hpp` (`coalescent::rk4`), now that a non-neuron module uses it.
+
+
 ## 2.1.0
 
 - **Axon/Soma polyphony now runs 4 voices per SIMD group** (`simd::float_4`) —

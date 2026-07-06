@@ -1,4 +1,4 @@
-// Numeric proof that the shared neuron::rk4 template (src/neuron/integrator.hpp)
+// Numeric proof that the shared coalescent::rk4 template (src/dsp/rk4.hpp)
 // produces the same results as the original hand-written RK4 steppers it
 // replaced, for both Axon (FitzHugh–Nagumo, N=2) and Soma (Hindmarsh–Rose,
 // N=3).
@@ -15,7 +15,7 @@
 //
 //   g++ -O2 -std=c++17 -o /tmp/eq tools/integrator_equiv.cpp && /tmp/eq
 //   exit 0 = within tolerance across the sweep; 1 = a real divergence.
-#include "../src/neuron/integrator.hpp"
+#include "../src/dsp/rk4.hpp"
 #include <cstdio>
 #include <cmath>
 #include <cstdint>
@@ -37,7 +37,7 @@ static inline void rk4A_old(float& v, float& w, float h, float Itot, float eps, 
 }
 static inline void rk4A_new(float& v, float& w, float h, float Itot, float eps, float a) {
     float s[2] = {v, w};
-    neuron::rk4<2>(s, h, [&](const float* y, float* d) { fA(y[0], y[1], Itot, eps, a, d[0], d[1]); });
+    coalescent::rk4<2>(s, h, [&](const float* y, float* d) { fA(y[0], y[1], Itot, eps, a, d[0], d[1]); });
     v = s[0]; w = s[1];
 }
 
@@ -61,7 +61,7 @@ static inline void rk4S_old(float& x, float& y, float& z, float h, float Itot, f
 }
 static inline void rk4S_new(float& x, float& y, float& z, float h, float Itot, float r, float s) {
     float st[3] = {x, y, z};
-    neuron::rk4<3>(st, h, [&](const float* Y, float* d) { fS(Y[0], Y[1], Y[2], Itot, r, s, d[0], d[1], d[2]); });
+    coalescent::rk4<3>(st, h, [&](const float* Y, float* d) { fS(Y[0], Y[1], Y[2], Itot, r, s, d[0], d[1], d[2]); });
     x = st[0]; y = st[1]; z = st[2];
 }
 
@@ -106,6 +106,6 @@ int main() {
         printf("FAIL: stepper extraction changed results beyond reassociation noise\n");
         return 1;
     }
-    printf("PASS: shared neuron::rk4 matches the original steppers within tolerance\n");
+    printf("PASS: shared coalescent::rk4 matches the original steppers within tolerance\n");
     return 0;
 }

@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Gallery/showcase patch: all four Coalescent modules in one row, each doing
-its best trick — for screenshots and a quick visual check.
+"""Gallery/showcase patch: all six Coalescent modules in one row, each doing
+its best trick — all six side by side for screenshots and a quick visual check.
 
 - Axon: 4 poly voices (Cmaj7) with CURRENT spread via 8vert->Merge, so the scope
   draws four differently-sized coloured orbits (values proven in axon_6_poly).
 - Soma: 4 poly voices (Cmin7) with currents walking tonic->chaos (soma_6_poly).
 - GENDYN: sine seed with SCALE turned up so the polygon visibly morphs, N=24.
 - Haptik: continuous drive, low damp, N=32 so the mass nodes render.
+- Operon: LFO pitch so the 3-lane protein scope shows clean staggered waves.
+- Bunnies: LV, mid WILD, LFO pitch so the phase loop + bunny read clearly.
 
-Top row (y=0) holds ONLY the Coalescent modules; all utility modules (8vert /
+Top row (y=0) holds ONLY the six Coalescent modules; all utility modules (8vert /
 Merge poly sources) live on the second row (y=1) so a screenshot can crop to
 the top row cleanly. No audio cables — the displays animate regardless.
 """
@@ -46,7 +48,9 @@ def cable(om, oid, im, iid, ci):
             "inputModuleId": im, "inputId": iid, "color": colors[ci % len(colors)],
             "inputPlugOrder": ci, "outputPlugOrder": ci}
 
-# ── Top row: the four Coalescent modules, dressed to impress ──────────────────
+# ── Top row: the six Coalescent modules, dressed to impress ───────────────────
+# HP widths: GENDYN 12, Haptik 18, Axon 12, Soma 12, Operon 14, Bunnies 12 → the
+# left edges below tile them left-to-right (0,12,30,42,54,68).
 # GENDYN: N=24 breakpoints, SCALE up so the sine seed morphs into a living
 # polygon within seconds (params: 0 N, 1 SCALE_AMP, 2 SCALE_DUR).
 gendyn = mod("GENDYN", 0, 0, params=[pv(0, 24), pv(1, 0.006), pv(2, 0.006)])
@@ -59,6 +63,12 @@ axon = mod("Axon", 30, 0, params=[pv(1, 0.6), pv(2, 0.08), pv(3, 0.7), pv(4, 1.0
 # Soma: bursting BURST rate so the current spread walks tonic -> chaos.
 # (params: 1 CURRENT, 2 BURST=log2 r, 3 ADAPT, 4 CURRENT_ATT)
 soma = mod("Soma", 42, 0, params=[pv(1, 2.0), pv(2, math.log2(0.006)), pv(3, 4.0), pv(4, 1.0)])
+# Operon: repressilator at LFO pitch so the 3-lane time scope shows clean, sharp
+# staggered waves. (params: 0 PITCH, 1 ALPHA, 2 HILL, 3 BETA, 4 LEAK)
+operon = mod("Operon", 54, 0, params=[pv(0, -7), pv(1, 12), pv(2, 4.0), pv(3, 1.0), pv(4, 0.05)])
+# Bunnies: LV predator-prey at LFO pitch, mid WILD, so the phase loop is an open
+# shape with the bunny ambling on it. (params: 0 RATE, 1 BALANCE, 2 WILD, 3 MODE)
+bunnies = mod("Bunnies", 68, 0, params=[pv(0, -5), pv(1, 0.5), pv(2, 0.5), pv(3, 0)])
 
 # ── Second row: poly sources (proven values from axon_6_poly / soma_6_poly) ──
 axon_semis, axon_cur = [0, 4, 7, 11], [-1.5, 1.0, 4.0, 7.5]     # I ≈ 0.45..1.35
@@ -70,7 +80,7 @@ evPs = eightvert([s / 120.0 for s in soma_semis], 24)
 evCs = eightvert([v / 10.0 for v in soma_cur], 32)
 mgPs, mgCs = merge(40), merge(42)
 
-modules = [gendyn, haptik, axon, soma, evPa, evCa, mgPa, mgCa, evPs, evCs, mgPs, mgCs]
+modules = [gendyn, haptik, axon, soma, operon, bunnies, evPa, evCa, mgPa, mgCa, evPs, evCs, mgPs, mgCs]
 
 cables  = [cable(evPa["id"], i, mgPa["id"], i, i) for i in range(4)]
 cables += [cable(evCa["id"], i, mgCa["id"], i, i) for i in range(4)]

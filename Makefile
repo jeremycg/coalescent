@@ -42,4 +42,6 @@ check:
 	$(CHECK_CXX) tools/stability/axon.cpp   -o /tmp/coalescent_check_axon   && /tmp/coalescent_check_axon
 	$(CHECK_CXX) tools/stability/soma.cpp   -o /tmp/coalescent_check_soma   && /tmp/coalescent_check_soma
 	$(CHECK_CXX) tools/stability/haptik.cpp -o /tmp/coalescent_check_haptik && /tmp/coalescent_check_haptik
+	$(CHECK_CXX) tools/stability/operon.cpp -o /tmp/coalescent_check_operon && /tmp/coalescent_check_operon
+	$(CHECK_CXX) tools/stability/bunnies.cpp -o /tmp/coalescent_check_bunnies && /tmp/coalescent_check_bunnies
 	$(CHECK_CXX) -funsafe-math-optimizations tools/integrator_equiv.cpp -o /tmp/coalescent_check_equiv && /tmp/coalescent_check_equiv
