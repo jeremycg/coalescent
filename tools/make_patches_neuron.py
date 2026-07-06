@@ -335,10 +335,39 @@ def patch_polytrig():
     ]
     write_patch("axon_8_polytrig.vcv", lfos + [mg, x, sm, a], cs, a["id"])
 
+# ── 9. Polyphonic gated voices: gate → a ringing NOTE per channel. Axon is the
+# oscillator (a pitched voice per V/OCT channel, CURRENT in the oscillating band);
+# the poly gates drive a poly ADSR→VCA so each note attacks, holds while held, and
+# RINGS OUT on release. TRIG is left unpatched — it's a percussion ping, not a note
+# gate; note shaping is external, exactly as after any VCO. ────────────────────────
+def patch_polyvoice():
+    gfreq = [-1.0, 0.4, 1.3]           # three gate rates → notes at different times
+    lfos = [{"id": uid(), "plugin": "Fundamental", "model": "LFO", "version": "2.6.4",
+             "params": [{"id": 2, "value": f}], "pos": [i * 6, 0]} for i, f in enumerate(gfreq)]
+    mgG = merge((18, 0))                                     # 3 gates → poly gate
+    ev  = eightvert([s / 120.0 for s in (0, 4, 7)], (20, 0))  # C-E-G: 3 poly V/OCT pitches
+    mgP = merge((28, 0))
+    x   = axon(ap(current=0.6, eps=0.08, shape=0.7), [30, 0])  # oscillating → a pitched voice
+    env = adsr(a=0.01, d=0.3, s=0.6, r=0.9, pos=(42, 0))       # release 0.9 s → ring-out
+    vca = vca1(1.0, (52, 0))
+    sm  = summ(0.3, (56, 0))
+    a   = audio([58, 0])
+    cs  = [cable(lfos[i]["id"], 3, mgG["id"], i, i) for i in range(3)]   # gates → Merge
+    cs += [cable(ev["id"], i, mgP["id"], i, i) for i in range(3)]        # pitches → Merge
+    cs += [
+        cable(mgP["id"], 0, x["id"], 0, 0),    # poly V/OCT → Axon (3 pitched voices)
+        cable(mgG["id"], 0, env["id"], 4, 1),  # poly gate → ADSR GATE
+        cable(x["id"], 0, vca["id"], 1, 2),    # Axon OUT (poly) → VCA IN
+        cable(env["id"], 0, vca["id"], 0, 3),  # ADSR env (poly) → VCA CV → gated notes
+        cable(vca["id"], 0, sm["id"], 0, 0),   # VCA out (poly) → Sum
+        cable(sm["id"], 0, a["id"], 0, 1), cable(sm["id"], 0, a["id"], 1, 1),
+    ]
+    write_patch("axon_9_polyvoice.vcv", lfos + [mgG, ev, mgP, x, env, vca, sm, a], cs, a["id"])
+
 if __name__ == "__main__":
     print("Generating Axon smoke-test patches:")
     patch_freerun(); patch_blips(); patch_selfevolving(); patch_crossmod()
-    patch_sync(); patch_poly(); patch_midipoly(); patch_polytrig()
+    patch_sync(); patch_poly(); patch_midipoly(); patch_polytrig(); patch_polyvoice()
     print("Generating Soma smoke-test patches:")
     patch_soma_bursting(); patch_soma_chaos(); patch_soma_blips(); patch_soma_zmod()
     patch_soma_sync(); patch_soma_poly()
