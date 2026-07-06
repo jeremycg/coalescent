@@ -17,7 +17,7 @@ panels, not a separate brand); the same plugin has room for other series later.
 | **Operon** | Elowitz–Leibler repressilator (gene ring) | three genes repressing each other in a ring, ~120° out of phase — a native three-phase oscillator, LFO, and clock |
 | **Bunnies** | Lotka–Volterra / Rosenzweig–MacArthur | predator & prey chasing each other a quarter cycle apart — a two-phase oscillator, LFO, and clock |
 
-![Coalescent — GENDYN, Haptik, Axon, Soma](docs/img/coalescent.png)
+![Coalescent — GENDYN, Haptik, Axon, Soma, Operon, Bunnies](docs/img/coalescent.png)
 
 ## Which module should I use?
 
