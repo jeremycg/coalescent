@@ -79,7 +79,8 @@ struct Operon : Module {
     static constexpr int   HILL_LUT_N    = 8192;
     static constexpr float HILL_LUT_XMAX = 64.f;
     float hillLut[HILL_LUT_N + 1];
-    float lutN = -1.f;
+    float lutN = -1.f;      // n the LUT was built for
+    float prevN = -1.f;     // n last sample — used to detect when the knob has settled
     bool  lutValid = false;
 
     void buildHillLut(float n) {
@@ -163,7 +164,7 @@ struct Operon : Module {
         reseedAsymmetric();
         pStarValid = false;
         pStar = 0.f; pStarA = pStarN = pStarL = -1.f;
-        lutValid = false; lutN = -1.f;
+        lutValid = false; lutN = -1.f; prevN = -1.f;
         for (int k = 0; k < 3; ++k) { lastCentered[k] = 0.f; gateGen[k].reset(); }
     }
 
@@ -204,10 +205,16 @@ struct Operon : Module {
 
         // Hill LUT: rebuild only on n change (control-rate for a knob). With HILL
         // being CV'd, n can move audio-rate, so use direct pow instead of thrashing.
-        const bool hillDirect = inputs[HILL_INPUT].isConnected();
-        if (!hillDirect && (!lutValid || n != lutN)) {
+        // Rebuild the 8192-point Hill LUT only once n has SETTLED. Dialling the HILL
+        // knob smooths n across a new value every sample; rebuilding each (8192 pow)
+        // thrashes CPU. While n is moving (or HILL is CV'd) use direct pow instead,
+        // and rebuild exactly once when it stops.
+        const bool hillCV = inputs[HILL_INPUT].isConnected();
+        if (!hillCV && std::fabs(n - prevN) < 1e-5f && (!lutValid || std::fabs(n - lutN) > 1e-6f)) {
             buildHillLut(n); lutN = n; lutValid = true;
         }
+        prevN = n;
+        const bool hillDirect = hillCV || !lutValid || std::fabs(n - lutN) > 1e-6f;
 
         // ── 3.4 pitch = simulation speed; adaptive substepping ──
         float pitchTotal = clamp(params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage(),
