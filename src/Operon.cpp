@@ -72,15 +72,16 @@ struct Operon : Module {
     bool  pStarValid = false;
     dsp::PulseGenerator gateGen[3];
 
-    // Hill-response LUT: 1/(1+repⁿ) precomputed over rep, cached on n (rebuilt only
-    // when HILL changes, like pStar). Replaces the per-sample pow with a lookup —
-    // ~1.5× on the RK4 derivative. A live HILL_INPUT (audio-rate n would thrash the
-    // rebuild) falls back to direct pow. Sub-cent accurate even at n=8 (8192 pts).
+    // Hill-response LUT: 1/(1+repⁿ) precomputed over rep, keyed on n — replaces the
+    // per-sample pow with a lookup (~1.5× on the RK4 derivative), sub-cent even at
+    // n=8 (8192 pts). Rebuilds are rate-limited (see process()) and fall back to
+    // direct pow while n moves, so dialling HILL or CV'ing it can't thrash the
+    // 8192-pow rebuild.
     static constexpr int   HILL_LUT_N    = 8192;
     static constexpr float HILL_LUT_XMAX = 64.f;
     float hillLut[HILL_LUT_N + 1];
     float lutN = -1.f;      // n the LUT was built for
-    float prevN = -1.f;     // n last sample — used to detect when the knob has settled
+    int   rebuildClock = 0; // rate-limit LUT rebuilds (samples since the last one)
     bool  lutValid = false;
 
     void buildHillLut(float n) {
@@ -164,7 +165,7 @@ struct Operon : Module {
         reseedAsymmetric();
         pStarValid = false;
         pStar = 0.f; pStarA = pStarN = pStarL = -1.f;
-        lutValid = false; lutN = -1.f; prevN = -1.f;
+        lutValid = false; lutN = -1.f; rebuildClock = 0;
         for (int k = 0; k < 3; ++k) { lastCentered[k] = 0.f; gateGen[k].reset(); }
     }
 
@@ -205,16 +206,16 @@ struct Operon : Module {
 
         // Hill LUT: rebuild only on n change (control-rate for a knob). With HILL
         // being CV'd, n can move audio-rate, so use direct pow instead of thrashing.
-        // Rebuild the 8192-point Hill LUT only once n has SETTLED. Dialling the HILL
-        // knob smooths n across a new value every sample; rebuilding each (8192 pow)
-        // thrashes CPU. While n is moving (or HILL is CV'd) use direct pow instead,
-        // and rebuild exactly once when it stops.
+        // Rebuild the 8192-point Hill LUT at most once per ~2048 samples (~46 ms).
+        // Dialling the HILL knob smooths n across many values — including a slow tail
+        // of tiny per-sample deltas — so any per-change rebuild thrashes 8192 pow and
+        // spikes CPU. Rate-limiting caps a rebuild to well under one block's budget;
+        // between rebuilds (and while HILL is CV'd) the derivative uses direct pow.
         const bool hillCV = inputs[HILL_INPUT].isConnected();
-        if (!hillCV && std::fabs(n - prevN) < 1e-5f && (!lutValid || std::fabs(n - lutN) > 1e-6f)) {
-            buildHillLut(n); lutN = n; lutValid = true;
+        if (!hillCV && std::fabs(n - lutN) > 1e-4f && ++rebuildClock >= 2048) {
+            buildHillLut(n); lutN = n; lutValid = true; rebuildClock = 0;
         }
-        prevN = n;
-        const bool hillDirect = hillCV || !lutValid || std::fabs(n - lutN) > 1e-6f;
+        const bool hillDirect = hillCV || !lutValid || std::fabs(n - lutN) > 1e-4f;
 
         // ── 3.4 pitch = simulation speed; adaptive substepping ──
         float pitchTotal = clamp(params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage(),
