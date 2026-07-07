@@ -37,7 +37,7 @@ static double run(int N, float fEvo, float kSpr, float damp, float fs,
     seedBump(N);
     float wc = 2.f * (float)M_PI * fEvo * D / fs;
     float kCtr = std::min(wc * wc, 0.35f);          // KCTR_MAX clamp (slow mode)
-    float gamma = std::exp(-damp * 800.f * D / fs); // DAMP_MAX_HZ=800, D-scaled
+    float gamma = std::exp(-damp * damp * 250.f * D / fs); // DAMP_MAX_HZ=250, quadratic taper, D-scaled
     double maxabs = 0.0; float scanPhase = 0.f;
     long firstWrap = -1, lastWrap = -1; int wraps = 0; int divc = 0;
     for (long n = 0; n < samples; n++) {

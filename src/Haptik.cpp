@@ -73,7 +73,7 @@ struct Haptik : Module {
     int   dispPeriod = 980;         // samples between snapshots (~45 Hz; refreshed on SR change)
 
     // ─── Tunable constants ──────────────────────────────────────────────────
-    static constexpr float DAMP_MAX_HZ = 800.f;
+    static constexpr float DAMP_MAX_HZ = 250.f;   // retaper (with quadratic knob): keep the whole knob musical
     static constexpr float OUT_GAIN    = 1.0f;
     static constexpr float MOTION_GAIN = 4.f;
     static constexpr float EXT_GAIN    = 0.005f;  // ±5V VCO at 0.2 saturated the ring; 0.005 lets it resonate
@@ -93,7 +93,7 @@ struct Haptik : Module {
         configParam(RATE_PARAM, std::log2(0.05f), std::log2(30.f), std::log2(3.f),
                     "Evolution rate", " Hz", 2.f);
         configParam(COUPLE_PARAM, 0.f, 0.9f, 0.3f, "Coupling");
-        configParam(DAMP_PARAM, 0.f, 1.f, 0.35f, "Damping");
+        configParam(DAMP_PARAM, 0.f, 1.f, 0.30f, "Damping");   // ~44 ms decay under the quadratic taper → boots lively
         configParam(INJECT_PARAM, 0.f, 1.f, 0.6f, "Inject");
 
         configParam(EXCITE_PARAM, 0.f, 3.f, 3.f, "Excitation")->snapEnabled = true;
@@ -212,7 +212,8 @@ struct Haptik : Module {
         float damp = clamp(params[DAMP_PARAM].getValue()
                          + inputs[DAMP_INPUT].getVoltage() * params[DAMP_ATT_PARAM].getValue() * CV_DEPTH,
                          0.f, 1.f);
-        float gamma = dsp::approxExp2_taylor5(-damp * DAMP_MAX_HZ * D / fs * 1.44269504f);   // velocity multiplier ≤ 1; D-scaled so
+        float dampEff = damp * damp;   // quadratic taper: spreads the lively range under most of the knob
+        float gamma = dsp::approxExp2_taylor5(-dampEff * DAMP_MAX_HZ * D / fs * 1.44269504f);   // velocity multiplier ≤ 1; D-scaled so
                                                                 // wall-clock decay is divider-independent
 
         float amt = clamp(params[INJECT_PARAM].getValue()
@@ -328,7 +329,8 @@ struct Haptik : Module {
 // read-head. State is read lock-free from the audio thread — fine for a display.
 struct RingDisplay : Widget {
     Haptik* module = nullptr;
-    float dispPeak = 0.6f;   // smoothed peak |y| for auto-scaling the radius
+    float dispPeak = 0.6f;   // smoothed peak deviation-from-mean, for auto-scaling the radius
+    float dispDev  = 0.f;    // smoothed unfloored deviation → drives ring brightness
     double lastT  = 0.0;     // last frame time, for time-based smoothing
     std::shared_ptr<Font> font;   // cached once (loaded lazily in drawLayer)
 
@@ -363,9 +365,15 @@ struct RingDisplay : Widget {
             // Auto-scale: normalise the ring to a smoothed peak displacement so it stays
             // a readable size instead of zooming with absolute level. Fast attack lets a
             // new pluck fit quickly; slow (~1.2 s) release damps the shrink as it decays.
+            // Remove the ring's DC wander before scaling: the audio path DC-blocks OUT,
+            // but the display reads raw y[], and the near-free spatially-uniform mode lets
+            // keepalive kicks pump a large slow mean. Show shape (deviation), not that drift.
+            float mean = 0.f;
+            for (int i = 0; i < N; i++) mean += module ? module->dispY[b][i] : demoShape(i, N);
+            mean /= (float) N;
             float peak = 1e-4f;
             for (int i = 0; i < N; i++) {
-                float yi = module ? module->dispY[b][i] : demoShape(i, N);
+                float yi = (module ? module->dispY[b][i] : demoShape(i, N)) - mean;
                 peak = std::max(peak, std::fabs(yi));
             }
             double t = system::getTime();
@@ -373,10 +381,16 @@ struct RingDisplay : Widget {
             lastT = t;
             float tau = (peak > dispPeak) ? 0.10f : 1.2f;
             dispPeak += (peak - dispPeak) * (dt > 0.f ? 1.f - std::exp(-dt / tau) : 0.f);
-            dispPeak = std::max(dispPeak, 0.05f);   // floor: silence stays small, not amplified
+            dispPeak = std::max(dispPeak, 0.02f);   // floor (deviation scale): silence stays small
+
+            // Brightness follows absolute activity so rest reads as a dim near-circle, not
+            // amplified denormal fuzz (the dispPeak floor already caps radius blow-up).
+            dispDev += (peak - dispDev) * (dt > 0.f ? 1.f - std::exp(-dt / 0.15f) : 0.f);
+            float act = clamp((dispDev - 0.01f) / (0.06f - 0.01f), 0.f, 1.f);
+            float ringAlpha = 0.25f + 0.75f * act;
 
             auto radiusAt = [&](int i) {
-                float yi = module ? module->dispY[b][i] : demoShape(i, N);
+                float yi = (module ? module->dispY[b][i] : demoShape(i, N)) - mean;
                 float norm = clamp(yi / dispPeak, -1.4f, 1.4f);
                 return clamp(R + norm * targetAmp, rmin, rmax);
             };
@@ -411,12 +425,12 @@ struct RingDisplay : Widget {
                 if (i == 0) nvgMoveTo(args.vg, px, py); else nvgLineTo(args.vg, px, py);
             }
             nvgClosePath(args.vg);
-            nvgFillColor(args.vg, nvgRGBA(0x40, 0xc0, 0xff, 0x22));
+            nvgFillColor(args.vg, nvgRGBA(0x40, 0xc0, 0xff, (int)(0x22 * ringAlpha)));
             nvgFill(args.vg);
-            nvgStrokeColor(args.vg, nvgRGBA(0x55, 0xc8, 0xff, 0x40));
+            nvgStrokeColor(args.vg, nvgRGBA(0x55, 0xc8, 0xff, (int)(0x40 * ringAlpha)));
             nvgStrokeWidth(args.vg, 3.5f);
             nvgStroke(args.vg);
-            nvgStrokeColor(args.vg, nvgRGB(0x9a, 0xe4, 0xff));
+            nvgStrokeColor(args.vg, nvgRGBA(0x9a, 0xe4, 0xff, (int)(0xff * ringAlpha)));
             nvgStrokeWidth(args.vg, 1.3f);
             nvgStroke(args.vg);
 
@@ -426,7 +440,7 @@ struct RingDisplay : Widget {
                     float th = ang((float)i), r = radiusAt(i);
                     nvgBeginPath(args.vg);
                     nvgCircle(args.vg, cx + r * std::cos(th), cy + r * std::sin(th), 1.3f);
-                    nvgFillColor(args.vg, nvgRGBA(0xc0, 0xee, 0xff, 0xdd));
+                    nvgFillColor(args.vg, nvgRGBA(0xc0, 0xee, 0xff, (int)(0xdd * ringAlpha)));
                     nvgFill(args.vg);
                 }
 

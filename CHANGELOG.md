@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.2.1 (unreleased)
+
+- **Haptik — DAMP retaper**: the damping knob is now musical across its whole
+  travel. `DAMP_MAX_HZ` 800 → 250 with a quadratic knob taper (default 0.35 →
+  0.30, ~44 ms decay). Previously everything above ~15 % of the knob collapsed to
+  a click. **Patch note:** the stored value is unchanged but the *mapping* is, so
+  saved Haptik patches will play back noticeably more resonant (a saved DAMP=0.5
+  is now ~31 Hz effective, was ~400 Hz).
+- **Haptik — ring display**: the scope now removes the ring's DC wander and scales
+  to deviation-from-mean, so it shows the wave *shape* instead of reading as a
+  circle at normal damping; brightness follows activity (dim near-circle at rest).
+
 ## 2.2.0
 
 - **New module — Operon**: a three-phase oscillator on the Elowitz–Leibler
