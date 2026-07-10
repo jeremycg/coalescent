@@ -397,7 +397,6 @@ struct RingDisplay : Widget {
     float dispPeak = 0.6f;   // smoothed peak deviation-from-mean, for auto-scaling the radius
     float dispDev  = 0.f;    // smoothed unfloored deviation → drives ring brightness
     double lastT  = 0.0;     // last frame time, for time-based smoothing
-    std::shared_ptr<Font> font;   // cached once (loaded lazily in drawLayer)
 
     // Decorative shape shown in the module browser (no running module).
     static float demoShape(int i, int N) {
@@ -545,8 +544,7 @@ struct RingDisplay : Widget {
             nvgFillColor(args.vg, nvgRGBA(0x88, 0xcc, 0xff, 0x90)); nvgFill(args.vg);
 
             // Screen text: title (top-left), RUN/FREEZE status (top-right), N (bottom-left).
-            if (!font)
-                font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+            std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
             if (font) {
                 nvgFontFaceId(args.vg, font->handle);
                 nvgFontSize(args.vg, mm2px(3.4f));
@@ -578,13 +576,11 @@ struct RingDisplay : Widget {
 // ─── Widget ─────────────────────────────────────────────────────────────────
 
 struct HaptikWidget : ModuleWidget {
-    std::shared_ptr<Font> font;   // cached once (loaded lazily in draw)
 
     void draw(const DrawArgs& args) override {
         ModuleWidget::draw(args);
 
-        if (!font)
-            font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
         nvgSave(args.vg);

@@ -329,7 +329,6 @@ namespace opl {
 // wide); reads only the published history, never the integrator.
 struct OperonScope : widget::TransparentWidget {
     Operon* module = nullptr;
-    std::shared_ptr<Font> font;
 
     // Dark "screen" + bezel (house style — the SVG is just panel + rails + screws).
     void draw(const DrawArgs& args) override {
@@ -383,7 +382,7 @@ struct OperonScope : widget::TransparentWidget {
         nvgResetScissor(args.vg);
 
         // Title (top-left, DejaVuSans, letter-spaced, violet accent).
-        if (!font) font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
         if (font) {
             nvgFontFaceId(args.vg, font->handle);
             nvgFontSize(args.vg, mm2px(3.2f));
@@ -397,7 +396,6 @@ struct OperonScope : widget::TransparentWidget {
 };
 
 struct OperonWidget : ModuleWidget {
-    std::shared_ptr<Font> font;
 
     OperonWidget(Operon* module) {
         setModule(module);
@@ -441,7 +439,7 @@ struct OperonWidget : ModuleWidget {
     // Control labels (nanosvg ignores <text>, so labels live here on the panel).
     void draw(const DrawArgs& args) override {
         ModuleWidget::draw(args);
-        if (!font) font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
         nvgFillColor(args.vg, nvgRGB(0xe6, 0xe6, 0xf2));   // near-white, ~13:1 (house legibility spec)

@@ -361,7 +361,6 @@ struct Soma : Module {
 // across a narrow amber band.
 struct SomaDisplay : Widget {
     Soma* module = nullptr;
-    std::shared_ptr<Font> font;
 
     static constexpr float XMIN = -2.0f, XMAX = 2.2f;
     static constexpr float ZMIN = 0.3f, ZMAX = 4.0f;
@@ -443,8 +442,7 @@ struct SomaDisplay : Widget {
                 nvgStroke(args.vg);
             }
 
-            if (!font)
-                font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+            std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
             if (font) {
                 nvgFontFaceId(args.vg, font->handle);
                 nvgFontSize(args.vg, mm2px(3.2f));
@@ -480,12 +478,10 @@ struct SomaDisplay : Widget {
 // ─── Widget ─────────────────────────────────────────────────────────────────
 
 struct SomaWidget : ModuleWidget {
-    std::shared_ptr<Font> font;
 
     void draw(const DrawArgs& args) override {
         ModuleWidget::draw(args);
-        if (!font)
-            font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
         nvgSave(args.vg);

@@ -273,7 +273,6 @@ namespace bpl {
 // published snapshot; never touches the integrator.
 struct OrbitView : widget::TransparentWidget {
     Bunnies* module = nullptr;
-    std::shared_ptr<Font> font;
 
     // Dark "screen" + bezel (house style — the SVG is just panel + rails + screws).
     void draw(const DrawArgs& args) override {
@@ -332,7 +331,7 @@ struct OrbitView : widget::TransparentWidget {
         drawBunny(args.vg, bp.x, bp.y, 4.5f, nvgRGB(0xff, 0xd0, 0xda));
 
         // Title (top-left) + axis hint (bottom-right), DejaVuSans, coral accent.
-        if (!font) font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
         if (font) {
             nvgFontFaceId(args.vg, font->handle);
             nvgFontSize(args.vg, mm2px(3.2f));
@@ -350,7 +349,6 @@ struct OrbitView : widget::TransparentWidget {
 };
 
 struct BunniesWidget : ModuleWidget {
-    std::shared_ptr<Font> font;
 
     BunniesWidget(Bunnies* module) {
         setModule(module);
@@ -385,7 +383,7 @@ struct BunniesWidget : ModuleWidget {
 
     void draw(const DrawArgs& args) override {
         ModuleWidget::draw(args);
-        if (!font) font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
         nvgFontFaceId(args.vg, font->handle);
         nvgFillColor(args.vg, nvgRGB(0xe6, 0xe6, 0xf2));   // near-white, ~13:1 (house legibility spec)

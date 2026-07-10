@@ -369,7 +369,6 @@ struct Axon : Module {
 // on its own hue stepped across a narrow cyan band so the chord is legible.
 struct PhaseDisplay : Widget {
     Axon* module = nullptr;
-    std::shared_ptr<Font> font;
 
     // Plot ranges for v (x axis) and w (y axis). Sized with margin around the
     // orbit envelope (v∈[-2.0,2.0], w∈[-0.6,2.3] across the oscillating param
@@ -477,8 +476,7 @@ struct PhaseDisplay : Widget {
             }
 
             // Screen title.
-            if (!font)
-                font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+            std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
             if (font) {
                 nvgFontFaceId(args.vg, font->handle);
                 nvgFontSize(args.vg, mm2px(3.2f));
@@ -514,13 +512,11 @@ struct PhaseDisplay : Widget {
 // ─── Widget ─────────────────────────────────────────────────────────────────
 
 struct AxonWidget : ModuleWidget {
-    std::shared_ptr<Font> font;
 
     void draw(const DrawArgs& args) override {
         ModuleWidget::draw(args);
 
-        if (!font)
-            font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
         nvgSave(args.vg);

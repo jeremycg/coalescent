@@ -460,7 +460,6 @@ struct GENDYN : Module {
 // Read lock-free from the audio thread's snapshot — fine for a display.
 struct GENDYScope : Widget {
     GENDYN* module = nullptr;
-    std::shared_ptr<Font> font;
 
     void draw(const DrawArgs& args) override {
         nvgBeginPath(args.vg);
@@ -545,8 +544,7 @@ struct GENDYScope : Widget {
                 }
             }
 
-            if (!font)
-                font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
+            std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/DejaVuSans.ttf"));
             if (font) {
                 nvgFontFaceId(args.vg, font->handle);
                 nvgFontSize(args.vg, mm2px(3.2f));
@@ -574,13 +572,11 @@ struct GENDYScope : Widget {
 // ─── Widget ───────────────────────────────────────────────────────────────────
 
 struct GENDYWidget : ModuleWidget {
-    std::shared_ptr<Font> font;   // cached once (loaded lazily in draw)
 
     void draw(const DrawArgs& args) override {
         ModuleWidget::draw(args);
 
-        if (!font)
-            font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
         nvgSave(args.vg);
