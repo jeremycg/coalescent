@@ -62,15 +62,11 @@ jobs:
 
       # Needs Rack headers (unlike the SDK-free `make check`), so it runs here
       # after the SDK download. Proves the float_4 poly path matches the scalar
-      # kernel (0-cent pitch, incl. mixed-lane groups sharing one K).
+      # kernel (0-cent pitch, incl. mixed-lane groups sharing one K) for both the
+      # Axon/FHN (2-state) and Soma/HR (3-state) paths.
       - name: SIMD equivalence check (Linux)
         if: runner.os == 'Linux'
-        run: |
-          g++ -O3 -funsafe-math-optimizations -march=nehalem -std=c++17 \
-            -DARCH_X64 -DARCH_LIN -I"$PWD" \
-            -I"$PWD/Rack-SDK/include" -I"$PWD/Rack-SDK/dep/include" \
-            tools/simd_equiv.cpp -o /tmp/coalescent_simd_equiv
-          /tmp/coalescent_simd_equiv
+        run: make check-simd RACK_DIR="$PWD/Rack-SDK"
 
       - name: Build
         run: make -j"$(getconf _NPROCESSORS_ONLN)" RACK_DIR="$PWD/Rack-SDK" dist

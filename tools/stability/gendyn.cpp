@@ -48,6 +48,34 @@ static float lockNorm(float sum_dur, int N, float fs, float centerFreq) {
 
 static double cents(double got, double want) { return 1200.0 * std::log2(got / want); }
 
+// src/GENDYN.cpp:309-313 frequency-barrier derivation. `buggy` selects the shipped
+// regression (widen a zero-width window by +1 sample) vs the fix (clamp bDurMax>=bDurMin).
+struct Barriers { float durCenter, bDurMin, bDurMax; };
+static Barriers barriers(float bDurWidth, float fs, float centerFreq, int N, bool buggy) {
+    float durCenter = fs / (centerFreq * (float) N);
+    float halfWidth = bDurWidth * durCenter;
+    float bDurMin = std::max(1.f, durCenter - halfWidth);
+    float bDurMax;
+    if (buggy) { bDurMax = durCenter + halfWidth; if (bDurMax <= bDurMin) bDurMax = bDurMin + 1.f; }
+    else       { bDurMax = std::max(bDurMin, durCenter + halfWidth); }
+    return {durCenter, bDurMin, bDurMax};
+}
+
+// src/GENDYN.cpp runCycleUpdate() duration walk: pDurHW=(max-min)/2, gainDur=scaleDur*pDurHW,
+// then reflect the persistent step and the duration. A zero-width window makes gainDur=0, so
+// the duration must stay pinned. Deterministic driver (fixed nonzero draw) for reproducibility.
+static void walkDurations(const Barriers& b, int N, float scaleDur, int cycles, float* dur) {
+    float pDurHW = (b.bDurMax - b.bDurMin) * 0.5f;
+    float gainDur = scaleDur * pDurHW;
+    float step[64];
+    for (int i = 0; i < N; i++) { dur[i] = std::max(1.f, b.durCenter); step[i] = 0.f; }
+    for (int c = 0; c < cycles; c++)
+        for (int i = 0; i < N; i++) {
+            step[i] = reflect(step[i] + 0.3f, -1.f, 1.f);          // any nonzero draw exposes a nonzero gainDur
+            dur[i]  = reflect(dur[i] + gainDur * step[i], b.bDurMin, b.bDurMax);
+        }
+}
+
 int main() {
     int fails = 0;
     const float sampleRates[] = {44100.f, 48000.f, 96000.f};
@@ -71,21 +99,39 @@ int main() {
         if (!ok) fails++;
     }
 
-    // [2] DUR WID=0 → durations pinned at durCenter → exact centre pitch, every SR.
+    // [2] DUR WID=0: derive the barriers and RUN THE WALK. The shipped bug only
+    //     detuned *after* the duration walk moved inside a widened window, so a test
+    //     that just plays durCenter would pass the buggy code too. Assert the
+    //     zero-width walk stays degenerate (durations pinned → exact pitch), and
+    //     verify the old widened-barrier version actually drifts, so the test
+    //     genuinely discriminates the regression.
     {
         bool ok = true;
         for (float fs : sampleRates)
             for (int N : {8, 13, 32, 64})
                 for (float f : {130.81f, 261.6256f, 440.f}) {
-                    float durCenter = fs / (f * (float) N);
-                    if (durCenter < 1.f) continue;              // above fs/N floor → tested in [3]
-                    float dur[64]; for (int i = 0; i < N; i++) dur[i] = durCenter;
+                    Barriers b = barriers(0.f, fs, f, N, /*buggy=*/false);
+                    if (b.durCenter < 1.f) continue;            // above fs/N floor → tested in [3]
+                    float dur[64]; walkDurations(b, N, 1.0f, 4000, dur);   // WID=0, strong SCALE DUR
+                    float maxdev = 0.f;
+                    for (int i = 0; i < N; i++) maxdev = std::max(maxdev, std::fabs(dur[i] - b.durCenter));
                     double hz = playHz(dur, N, 1.f, fs, 40000);
                     double dc = cents(hz, f);
-                    if (std::fabs(dc) > 2.0) { ok = false;
-                        printf("  [2] FAIL fs=%.0f N=%d f=%.1f -> %.3f Hz (%.1f cents)\n", fs, N, f, hz, dc); }
+                    if (maxdev > 1e-3f || std::fabs(dc) > 2.0) { ok = false;
+                        printf("  [2] FAIL fs=%.0f N=%d f=%.1f: maxdev=%.4f -> %.3f Hz (%.1f cents)\n",
+                               fs, N, f, maxdev, hz, dc); }
                 }
-        printf("[2] DUR WID=0 plays centre pitch (was ~41 cents flat): %s\n", ok ? "PASS" : "FAIL");
+        // Discrimination: the old widened barrier must actually detune under the same
+        // walk, otherwise the test above would prove nothing.
+        {
+            Barriers bug = barriers(0.f, 44100.f, 261.6256f, 13, /*buggy=*/true);
+            float dur[64]; walkDurations(bug, 13, 1.0f, 4000, dur);
+            double dc = cents(playHz(dur, 13, 1.f, 44100.f, 40000), 261.6256);
+            if (std::fabs(dc) < 10.0) { ok = false;
+                printf("  [2] FAIL discrimination: buggy barrier only %.1f cents off — test wouldn't catch it\n", dc); }
+            else printf("  [2] discrimination OK: old widened barrier drifts %.1f cents under the same walk\n", dc);
+        }
+        printf("[2] DUR WID=0 walk stays degenerate -> centre pitch: %s\n", ok ? "PASS" : "FAIL");
         if (!ok) fails++;
     }
 

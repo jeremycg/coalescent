@@ -26,7 +26,7 @@ static inline void fFHN(T v, T w, T I, T e, T a, T& dv, T& dw) {
 
 // One output sample of raw v, scalar path (mirrors Axon at os=1 for the test).
 static float stepScalar(float& v, float& w, float pitchHz, float I, float eps, float a) {
-    float subTau = RATE_CAL * pitchHz / FS;
+    float subTau = std::min(RATE_CAL * pitchHz / FS, HSUB * MAX_SUB);   // mirror production cap
     int K = std::min(MAX_SUB, std::max(MIN_SUB, (int) std::ceil(subTau / HSUB)));
     float h = subTau / K;
     float s[2] = {v, w};
@@ -39,7 +39,7 @@ static float stepScalar(float& v, float& w, float pitchHz, float I, float eps, f
 }
 // Same, four identical lanes via float_4 (mirrors the module's group path).
 static float_4 stepSimd(float_4& v, float_4& w, float_4 pitchHz, float_4 I, float_4 eps, float_4 a) {
-    float_4 subTau = RATE_CAL * pitchHz / FS;
+    float_4 subTau = simd::fmin(RATE_CAL * pitchHz / FS, float_4(HSUB * MAX_SUB));   // mirror production cap
     float_4 Kf = simd::ceil(subTau / HSUB);
     int K = MIN_SUB; for (int l = 0; l < 4; l++) K = std::max(K, (int) Kf[l]); K = std::min(K, MAX_SUB);
     float_4 h = subTau / (float) K;

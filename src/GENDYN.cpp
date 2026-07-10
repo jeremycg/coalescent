@@ -453,16 +453,19 @@ struct GENDYScope : Widget {
                 return module ? std::max(1.f, module->dispDur[b][i]) : 1.f;
             };
 
-            // Vertices at cumulative segment starts; close the period at x = W.
+            // Match the audio's segment/duration pairing: segment i interpolates
+            // amp[i-1] -> amp[i] over dur[i], and a cycle begins from amp[N-1]. So
+            // amp[i] sits at the cumulative END of dur[0..i], and the wrap value
+            // amp[N-1] anchors both x=0 and x=W. (With equal durations this is the
+            // old picture rotated one segment; with unequal durations it now matches
+            // the waveform being heard.)
             nvgBeginPath(args.vg);
+            nvgMoveTo(args.vg, 0.f, Y(ampAt(N - 1)));
             float cum = 0.f;
             for (int i = 0; i < N; i++) {
-                float x = cum / total * W;
-                if (i == 0) nvgMoveTo(args.vg, x, Y(ampAt(0)));
-                else        nvgLineTo(args.vg, x, Y(ampAt(i)));
                 cum += durAt(i);
+                nvgLineTo(args.vg, cum / total * W, Y(ampAt(i)));
             }
-            nvgLineTo(args.vg, W, Y(ampAt(0)));     // wrap: period end == start value
             nvgLineCap(args.vg, NVG_ROUND);
             nvgLineJoin(args.vg, NVG_ROUND);
             nvgStrokeColor(args.vg, nvgRGBA(0x55, 0xe0, 0xa0, 0x55));   // green glow
@@ -476,12 +479,12 @@ struct GENDYScope : Widget {
             if (N <= 40) {
                 cum = 0.f;
                 for (int i = 0; i < N; i++) {
+                    cum += durAt(i);                       // amp[i] at the end of dur[i] (see polygon above)
                     float x = cum / total * W;
                     nvgBeginPath(args.vg);
                     nvgCircle(args.vg, x, Y(ampAt(i)), 1.6f);
                     nvgFillColor(args.vg, nvgRGBA(0xc0, 0xff, 0xd8, 0xdd));
                     nvgFill(args.vg);
-                    cum += durAt(i);
                 }
             }
 

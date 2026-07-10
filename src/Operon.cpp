@@ -207,9 +207,10 @@ struct Operon : Module {
         }
 
         // Hill LUT vs direct pow, gated on whether n is *actually moving* this sample
-        // (not on cable presence): a settled n — from a knob at rest OR a static/slow
-        // HILL CV — uses the 8192-point LUT; an audio-rate-modulated n uses direct pow,
-        // since a rebuilt-at-most-every-N-samples LUT would lag and detune.
+        // (not on cable presence): a STATIC n — knob at rest or a held HILL CV — uses
+        // the 8192-point LUT; a moving n (audio-rate, or a slow drift once it exceeds
+        // the rebuild threshold) uses direct pow, since a rebuilt-at-most-every-N-
+        // samples LUT would lag and detune.
         // Two guards keep the rebuild off the hot path:
         //   • nMoving blocks rebuilds while n is being dialled/swept (use direct pow);
         //   • the ~2048-sample rate-limit backstops the knob-smoothing asymptotic tail

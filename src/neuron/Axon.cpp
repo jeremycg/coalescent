@@ -272,8 +272,12 @@ struct Axon : Module {
             // ── pitch = simulation speed (open-loop). Run the group at its max
             // substep count K: a slower lane just gets a smaller-than-needed h,
             // so accuracy is preserved lane-by-lane (same reasoning as MIN_SUB). ──
-            simd::float_4 pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
-                pitchKnob + inputs[VOCT_INPUT].getPolyVoltageSimd<simd::float_4>(base));
+            // Sanitize the pitch exponent BEFORE approxExp2: its internal float->int
+            // shift is UB on a non-finite or absurd CV (NaN->0=C4; clamp bounds ±inf
+            // and huge-finite). The subTau cap below then bounds the resulting step.
+            simd::float_4 pexp = pitchKnob + inputs[VOCT_INPUT].getPolyVoltageSimd<simd::float_4>(base);
+            pexp = simd::clamp(simd::ifelse(pexp == pexp, pexp, 0.f), -30.f, 30.f);
+            simd::float_4 pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pexp);
             simd::float_4 subTau = RATE_CAL * pitchHz / fs / (float) os;
             // Hard guard (matches Operon/Bunnies): cap the per-sample sim-time so
             // h = subTau/K stays <= HSUB_MAX and Kf stays in range, even at extreme

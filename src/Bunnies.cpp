@@ -203,9 +203,11 @@ struct Bunnies : Module {
         float st[2] = {x, y};
         for (int s = 0; s < Ksub; ++s) {
             coalescent::rk4<2>(st, h, deriv);
+            // isfinite BEFORE clamp: clamp() is fmin/fmax-based and maps NaN to a
+            // bound, which would hide it from this backstop.
+            if (!std::isfinite(st[0]) || !std::isfinite(st[1])) { reseed(); st[0] = x; st[1] = y; resetPeakMemory(); break; }
             st[0] = clamp(st[0], POS_FLOOR, STATE_MAX);
             st[1] = clamp(st[1], POS_FLOOR, STATE_MAX);
-            if (!std::isfinite(st[0]) || !std::isfinite(st[1])) { reseed(); st[0] = x; st[1] = y; resetPeakMemory(); break; }
         }
 
         // ── LV conserved-quantity servo — kills drift AND sets amplitude ──

@@ -36,7 +36,10 @@ endif
 # Validate the manifest and run the standalone DSP stability replicas plus the
 # RK4 equivalence proof. No Rack SDK required; used by CI and local dev alike.
 CHECK_CXX ?= g++ -std=c++17 -O2
-.PHONY: check
+# `check` is deliberately SDK-free (the CI guardrail runs it before the Rack SDK is
+# downloaded). Anything needing Rack headers (simd/*) goes in `check-simd`, which CI
+# runs as a separate post-SDK step.
+.PHONY: check check-simd
 check:
 	jq . plugin.json >/dev/null
 	$(CHECK_CXX) tools/stability/gendyn.cpp -o /tmp/coalescent_check_gendyn && /tmp/coalescent_check_gendyn
@@ -46,4 +49,7 @@ check:
 	$(CHECK_CXX) tools/stability/operon.cpp -o /tmp/coalescent_check_operon && /tmp/coalescent_check_operon
 	$(CHECK_CXX) tools/stability/bunnies.cpp -o /tmp/coalescent_check_bunnies && /tmp/coalescent_check_bunnies
 	$(CHECK_CXX) -funsafe-math-optimizations tools/integrator_equiv.cpp -o /tmp/coalescent_check_equiv && /tmp/coalescent_check_equiv
+
+# Needs Rack headers (simd). Run after the SDK is available: make check-simd
+check-simd:
 	$(CHECK_CXX) -funsafe-math-optimizations -march=nehalem -DARCH_X64 -DARCH_LIN -I$(RACK_DIR)/include -I$(RACK_DIR)/dep/include tools/simd_equiv.cpp -o /tmp/coalescent_check_simd && /tmp/coalescent_check_simd
