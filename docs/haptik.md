@@ -64,7 +64,7 @@ The **MODE** switch picks how fast the ring itself evolves:
 CV inputs (RATE, COUPLE, DAMP, INJECT) each have an attenuverter. **V/OCT** sums
 with PITCH. **TRIG** re-excites with the current EXCITE shape on each rising edge.
 **EXT IN** injects external audio as a force at the DRIVER mass (level scales with
-INJECT).
+INJECT). A polyphonic cable is summed to mono (Haptik has a single lattice).
 
 Outputs: **OUT** — the scanned waveform, soft-clipped to ±5 V and internally
 DC-blocked at ~20 Hz. **MOTION** — the displacement of **mass 0** (a fixed point

@@ -102,11 +102,14 @@ bundles to a GitHub Release on a `v*` tag.
 ### Tests
 
 `make check` validates the manifest and runs every module's standalone kernel
-replica (stability/calibration) plus the RK4 equivalence proof — no Rack SDK
-needed. It's the same guardrail CI gates releases on:
+replica (stability/calibration) plus the RK4 equivalence check — no Rack SDK
+needed. It's the same guardrail CI gates releases on. A second target,
+`make check-simd`, proves the float_4 (poly-SIMD) path matches the scalar kernel;
+it needs the Rack headers, so CI runs it after the SDK download.
 
 ```bash
-make check
+make check                                 # SDK-free stability/calibration/RK4
+make check-simd RACK_DIR=~/Rack2-SDK/Rack-SDK   # SIMD equivalence (needs Rack headers)
 ```
 
 Each replica can also be built and run on its own:
