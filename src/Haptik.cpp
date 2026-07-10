@@ -58,6 +58,7 @@ struct Haptik : Module {
     int   last_N    = -1;           // -1 forces reinit on first process()
     int   driverIdx = 0;            // mass that excitation / EXT IN drives
     int   divCounter = 0;           // slow-mode: samples since the last lattice step
+    bool  wasFrozen = false;        // slow-mode: FREEZE edge detector (capture interpolated frame)
     dsp::SchmittTrigger trig;
     dsp::TRCFilter<float> dcBlock;  // fixed internal DC blocker on OUT
     float lastFs = 0.f;             // detects SR change to refresh dcBlock cutoff
@@ -65,7 +66,10 @@ struct Haptik : Module {
     // Display snapshot: ~45 Hz the audio thread publishes the lattice into a
     // lock-free double buffer (fill the back buffer, flip dispBuf with a release
     // store); the UI reads the front buffer after an acquire load instead of the
-    // live y[] (which churns every sample). Lock-free and race-free.
+    // live y[] (which churns every sample). The acquire/release ordering keeps a
+    // published frame internally consistent; it is NOT fully race-free — two audio
+    // publications during one UI read could still reclaim the buffer being drawn
+    // (benign tear at 45 Hz; a proper fix — triple-buffer or seqlock — is deferred).
     float dispY[2][MAX_N] = {};
     int   dispN[2] = {64, 64}, dispDriver[2] = {0, 0};
     std::atomic<int> dispBuf{0};
@@ -184,6 +188,7 @@ struct Haptik : Module {
             std::fill(yPrev, yPrev + MAX_N, 0.f);
             scanPhase = 0.f;
             divCounter = 0;
+            wasFrozen = false;
             applyExcite(1, 1.f, N);            // always a full bump (ignores EXCITE/INJECT) so it sounds on load
             last_N = N;
         }
@@ -222,6 +227,20 @@ struct Haptik : Module {
 
         bool freeze = params[FREEZE_PARAM].getValue() > 0.5f;
         int  shape  = (int) std::round(params[EXCITE_PARAM].getValue());
+
+        // Slow-mode FREEZE edge: capture the frame the ear is *currently* hearing —
+        // the interpolated shape between yPrev and y — into y, so the frozen readout
+        // (which reads y directly) doesn't jump forward to the y endpoint and click.
+        // Collapsing yPrev to the same frame lets an un-freeze restart cleanly too.
+        if (slow && freeze && !wasFrozen) {
+            float fr = (float) divCounter / (float) D;
+            for (int i = 0; i < N; i++) {
+                y[i]     = yPrev[i] + fr * (y[i] - yPrev[i]);
+                yPrev[i] = y[i];
+            }
+            divCounter = 0;
+        }
+        wasFrozen = freeze;
 
         // ── excitation ──
         // Hysteresis window (0.1..1V) so an offset/DC-coupled trigger source can't latch.

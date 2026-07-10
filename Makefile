@@ -39,9 +39,11 @@ CHECK_CXX ?= g++ -std=c++17 -O2
 .PHONY: check
 check:
 	jq . plugin.json >/dev/null
+	$(CHECK_CXX) tools/stability/gendyn.cpp -o /tmp/coalescent_check_gendyn && /tmp/coalescent_check_gendyn
 	$(CHECK_CXX) tools/stability/axon.cpp   -o /tmp/coalescent_check_axon   && /tmp/coalescent_check_axon
 	$(CHECK_CXX) tools/stability/soma.cpp   -o /tmp/coalescent_check_soma   && /tmp/coalescent_check_soma
 	$(CHECK_CXX) tools/stability/haptik.cpp -o /tmp/coalescent_check_haptik && /tmp/coalescent_check_haptik
 	$(CHECK_CXX) tools/stability/operon.cpp -o /tmp/coalescent_check_operon && /tmp/coalescent_check_operon
 	$(CHECK_CXX) tools/stability/bunnies.cpp -o /tmp/coalescent_check_bunnies && /tmp/coalescent_check_bunnies
 	$(CHECK_CXX) -funsafe-math-optimizations tools/integrator_equiv.cpp -o /tmp/coalescent_check_equiv && /tmp/coalescent_check_equiv
+	$(CHECK_CXX) -funsafe-math-optimizations -march=nehalem -DARCH_X64 -DARCH_LIN -I$(RACK_DIR)/include -I$(RACK_DIR)/dep/include tools/simd_equiv.cpp -o /tmp/coalescent_check_simd && /tmp/coalescent_check_simd

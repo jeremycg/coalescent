@@ -2,6 +2,33 @@
 
 ## 2.2.1 (unreleased)
 
+- **GENDYN — DUR WID = 0 tuning fix**: a zero-width frequency barrier is
+  documented to hold pitch fixed, but a stray `+1`-sample floor widened the window
+  so the duration walk kept moving — playing ~41 cents flat at the default. Removed
+  it; the walk now pins to `durCenter` and the error-diffused playback lands on the
+  exact centre pitch (verified 0 cents across N and sample rates).
+- **Axon/Soma — extreme-pitch step guard**: the per-sample sim-time is now capped
+  (like Operon/Bunnies) so the integration step `h` stays ≤ `HSUB_MAX` and the
+  substep count can't overflow the float→int conversion at very large V/OCT
+  (undefined behaviour). Trade-off: with oversampling **Off**, pitch goes flat
+  above ~+3.3 oct instead of integrating with an oversized step; the ×4 default is
+  unaffected.
+- **Haptik — Slow-mode FREEZE click**: engaging FREEZE in Slow mode jumped the
+  readout from the interpolated inter-frame shape to the raw frame endpoint (a
+  click). FREEZE now captures the shape currently being heard, so it holds
+  seamlessly (and un-freezes cleanly).
+- **Tests / tooling**: added a GENDYN stability test (barrier degeneracy, LOCK
+  pitch, `fs/N` max-frequency floor, `reflect()` bounds — it would have caught the
+  DUR WID bug) and wired it + the SIMD-equivalence check into `make check`; the
+  SIMD check now covers Soma's 3-state HR path (0.000 cents scalar-vs-SIMD, incl.
+  mixed-lane groups); the Soma/Axon offline WAV renderers use current production
+  constants (Soma `RATE_CAL` 14.9→55.36, `MIN_SUB` 4→2) and no longer overstate
+  output-stage parity.
+- **Docs**: GENDYN scope is sampled at ~45 Hz, not low-pass filtered (claim
+  corrected); documented GENDYN's `fs/N` frequency ceiling; Axon manual lists all
+  nine patches (adds polytrig/polyvoice) and describes poly CV normalling correctly
+  (monophonic broadcasts; partial-poly channels read 0 V); softened Axon's
+  "one spike per trigger" wording; softened Haptik's display "race-free" comment.
 - **Bunnies — tuning fix**: the LV default voicing was ~37 cents sharp
   (`RATE_CAL` 7.49, which put PITCH=0 at ~267 Hz instead of C4's 261.6 Hz). The
   constant was left stale after `LV_V0_RANGE` was retuned. Corrected to 7.33

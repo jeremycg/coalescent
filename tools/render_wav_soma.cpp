@@ -1,7 +1,10 @@
-// Offline auditioning for Soma: replicates the src/Soma.cpp kernel + output
-// stage and writes WAVs so HR voicings can be heard without launching Rack.
+// Offline auditioning for Soma: replicates the src/Soma.cpp HR kernel (same
+// constants, RK4, substep schedule) with a SIMPLIFIED output stage — plain tanh
+// soft-clip + DC block, no oversampling/FIR decimation — so HR voicings can be
+// heard roughly without launching Rack. Not a bit-exact render of the plugin's
+// output; for the exact chain, run it in Rack.
 //
-//   g++ -O2 -o /tmp/soma_wav soma_render_wav.cpp && /tmp/soma_wav
+//   g++ -O2 -o /tmp/soma_wav render_wav_soma.cpp && /tmp/soma_wav
 //
 // Writes: soma_bursting.wav (default), soma_chaos.wav (I=3.25), soma_tonic.wav,
 //         soma_blips.wav (sub-threshold, periodic triggers fire bursts).
@@ -14,8 +17,8 @@
 
 static constexpr float A=1,B=3,C=1,D=5,XR=-1.6f;
 static constexpr float HSUB_MAX=0.05f, STATE_MAX=25.f;
-static constexpr int MIN_SUB=4, MAX_SUB=64;
-static constexpr float RATE_CAL=14.925501f, FREQ_C4=261.6256f;
+static constexpr int MIN_SUB=2, MAX_SUB=64;                  // match src/neuron/Soma.cpp
+static constexpr float RATE_CAL=55.364003f, FREQ_C4=261.6256f;  // match src/neuron/Soma.cpp (was a stale 14.925501)
 static constexpr float TRIG_AMP=1.0f, TRIG_TAU_MS=5.f, OUT_GAIN=1.5f;
 
 static inline float clampf(float x,float lo,float hi){return x<lo?lo:(x>hi?hi:x);}

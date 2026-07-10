@@ -85,11 +85,12 @@ piecewise-linear curve over one cycle (x = cumulative duration, y = amplitude).
 As the two random walks evolve, the vertices drift — vertically (the amplitude
 walk) and horizontally (the duration walk) — so the polygon slowly morphs in
 place. The faint horizontal band marks the ±B AMP barriers the amplitude walk
-reflects within. The display low-passes the breakpoints (~0.4 s) so the picture
-eases at a watchable pace — the walk actually updates every cycle (audio rate),
-which is ~an order of magnitude too fast to follow, so the smoothing removes the
-per-cycle shimmer while leaving the slow morph (and the audio) untouched. The
-per-sample playhead and the individual random draws are deliberately not shown.
+reflects within. The display *samples* the breakpoints at ~45 Hz (not every
+cycle) rather than filtering them: the walk updates every cycle (audio rate),
+far too fast to follow, so snapshotting at a fixed slow rate decimates the
+per-cycle shimmer while the slow morph (and the audio) is untouched. There is no
+smoothing filter, and the per-sample playhead and individual random draws are
+deliberately not shown.
 
 ## Seeding the waveform
 
@@ -131,6 +132,11 @@ drift can't offset the signal.)
   duration-walk timbre with it; LOCK with a wide B DUR WID is how
   Xenakis got the "beautiful clear tones" — stable pitch, living
   waveform.
+- **Reachable top frequency is `sampleRate / N`.** Every segment plays for at
+  least one sample, so a cycle can't be shorter than N samples — e.g. at 44.1 kHz
+  with N = 64 the ceiling is ~689 Hz even though B DUR CTR reaches 5 kHz. For high
+  pitches use a small N (N = 8 → ~5.5 kHz), or raise the sample rate. Under LOCK
+  the FREQ output reports the *actual* (floored) pitch, not the requested one.
 - Logistic distribution (DIST=3) is the closest match to Xenakis's original and is the default.
 - **SuperCollider Gendy mode:** PERSIST 0%, SCALE ≈ 0.1, DIST Cauchy,
   B DUR CTR ≈ 520 Hz with B DUR WID ≈ 0.2 lands close to `Gendy1.ar()`

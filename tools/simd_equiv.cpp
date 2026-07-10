@@ -53,6 +53,43 @@ static float_4 stepSimd(float_4& v, float_4& w, float_4 pitchHz, float_4 I, floa
     return v;
 }
 
+// ── Soma / Hindmarsh–Rose: the 3-state path (grouping + shared-K + subTau cap) ──
+static constexpr float HR_A = 1.f, HR_B = 3.f, HR_C = 1.f, HR_D = 5.f, HR_XR = -1.6f;
+static constexpr float HR_RATE_CAL = 55.364003f, HR_SMAX = 25.f;
+template <typename T>
+static inline void fHR(T x, T y, T z, T I, T r, T s, T& dx, T& dy, T& dz) {
+    dx = y - HR_A*x*x*x + HR_B*x*x - z + I;
+    dy = HR_C - HR_D*x*x - y;
+    dz = r * (s * (x - HR_XR) - z);
+}
+static float stepScalarHR(float& x, float& y, float& z, float pitchHz, float I, float r, float s) {
+    float subTau = std::min(HR_RATE_CAL * pitchHz / FS, HSUB * MAX_SUB);
+    int K = std::min(MAX_SUB, std::max(MIN_SUB, (int) std::ceil(subTau / HSUB)));
+    float h = subTau / K;
+    float st[3] = {x, y, z};
+    for (int k = 0; k < K; k++)
+        coalescent::rk4<3>(st, h, [&](const float* Y, float* d) { fHR(Y[0], Y[1], Y[2], I, r, s, d[0], d[1], d[2]); });
+    for (int i = 0; i < 3; i++) { if (!std::isfinite(st[i])) { st[0]=-1.6f; st[1]=0.f; st[2]=0.f; break; } }
+    for (int i = 0; i < 3; i++) st[i] = std::clamp(st[i], -HR_SMAX, HR_SMAX);
+    x = st[0]; y = st[1]; z = st[2];
+    return x;
+}
+static float_4 stepSimdHR(float_4& x, float_4& y, float_4& z, float_4 pitchHz, float_4 I, float_4 r, float_4 s) {
+    float_4 subTau = simd::fmin(HR_RATE_CAL * pitchHz / FS, float_4(HSUB * MAX_SUB));
+    float_4 Kf = simd::ceil(subTau / HSUB);
+    int K = MIN_SUB; for (int l = 0; l < 4; l++) K = std::max(K, (int) Kf[l]); K = std::min(K, MAX_SUB);
+    float_4 h = subTau / (float) K;
+    float_4 st[3] = {x, y, z};
+    for (int k = 0; k < K; k++)
+        coalescent::rk4<3>(st, h, [&](const float_4* Y, float_4* d) { fHR(Y[0], Y[1], Y[2], I, r, s, d[0], d[1], d[2]); });
+    float_4 fin = (st[0]==st[0]) & (st[1]==st[1]) & (st[2]==st[2])
+        & (simd::abs(st[0])<1e6f) & (simd::abs(st[1])<1e6f) & (simd::abs(st[2])<1e6f);
+    st[0] = simd::ifelse(fin, st[0], -1.6f); st[1] = simd::ifelse(fin, st[1], 0.f); st[2] = simd::ifelse(fin, st[2], 0.f);
+    for (int i = 0; i < 3; i++) st[i] = simd::clamp(st[i], -HR_SMAX, HR_SMAX);
+    x = st[0]; y = st[1]; z = st[2];
+    return x;
+}
+
 static float freqOf(const std::vector<float>& x) {
     int last = -1; double sum = 0; int cnt = 0;
     for (int n = 1; n < (int) x.size(); n++)
@@ -116,6 +153,50 @@ int main() {
             printf("  lane %d (%6.1f Hz, I=%.2f): scalar %8.2f  simd %8.2f  %+.3f cents  %s\n",
                    l, laneHz[l], laneI[l], fRef, fLane, cents, finite ? "" : "NON-FINITE!");
             if (!finite) { printf("FAIL: mixed-lane output not finite\n"); return 1; }
+        }
+    }
+
+    // ── Soma / HR: the 3-state path. Same idea — scalar vs float_4 (four identical
+    // lanes) must land on the same pitch — plus a mixed-lane group for the shared-K
+    // masking path, which the FHN test above cannot exercise for HR. ──
+    {
+        struct HRV { const char* n; float hz, I, r, s; };
+        HRV vs[] = {{"tonic C4", C4, 2.0f, 0.03f, 4.f}, {"burst", C4, 2.6f, 0.008f, 4.f},
+                    {"C2 low", C4/4, 2.0f, 0.03f, 4.f}, {"C6 high", C4*4, 2.0f, 0.03f, 4.f}};
+        printf("Soma/HR (3-state) scalar vs float_4:\n");
+        for (auto& t : vs) {
+            float sx=-1.6f, sy=0.f, sz=0.f; float_4 vx(-1.6f), vy(0.f), vz(0.f);
+            std::vector<float> a(FS), b(FS); double mx = 0;
+            for (int n = 0; n < (int) FS; n++) {
+                a[n] = stepScalarHR(sx, sy, sz, t.hz, t.I, t.r, t.s);
+                b[n] = stepSimdHR(vx, vy, vz, float_4(t.hz), float_4(t.I), float_4(t.r), float_4(t.s))[0];
+                mx = std::max(mx, (double) std::fabs(a[n] - b[n]));
+            }
+            float fa = freqOf(a), fb = freqOf(b);
+            float cents = (fa > 0 && fb > 0) ? 1200.f * std::log2(fb / fa) : 0.f;
+            worstCents = std::max(worstCents, (double) std::fabs(cents));
+            printf("  %-10s scalar %8.2f  simd %8.2f  %+.3f cents  max|Δx|=%.3e\n", t.n, fa, fb, cents, mx);
+        }
+        // Mixed-lane HR group: four different voicings share one K (the max).
+        float lHz[4] = {C4/4, C4, C4*2, C4*4}; float lI[4] = {2.0f, 2.4f, 2.0f, 2.2f};
+        float_4 vx(-1.6f), vy(0.f), vz(0.f);
+        std::vector<std::vector<float>> lane(4, std::vector<float>(FS));
+        for (int n = 0; n < (int) FS; n++) {
+            float_4 out = stepSimdHR(vx, vy, vz, float_4(lHz[0],lHz[1],lHz[2],lHz[3]),
+                                     float_4(lI[0],lI[1],lI[2],lI[3]), float_4(0.03f), float_4(4.f));
+            for (int l = 0; l < 4; l++) lane[l][n] = out[l];
+        }
+        printf("Mixed-lane HR group (one shared K) vs per-voice scalar:\n");
+        for (int l = 0; l < 4; l++) {
+            float sx=-1.6f, sy=0.f, sz=0.f; std::vector<float> ref(FS);
+            for (int n = 0; n < (int) FS; n++) ref[n] = stepScalarHR(sx, sy, sz, lHz[l], lI[l], 0.03f, 4.f);
+            float fRef = freqOf(ref), fLane = freqOf(lane[l]);
+            float cents = (fRef > 0 && fLane > 0) ? 1200.f * std::log2(fLane / fRef) : 0.f;
+            bool finite = std::isfinite(lane[l].back());
+            worstCents = std::max(worstCents, (double) std::fabs(cents));
+            printf("  lane %d (%6.1f Hz, I=%.2f): scalar %8.2f  simd %8.2f  %+.3f cents  %s\n",
+                   l, lHz[l], lI[l], fRef, fLane, cents, finite ? "" : "NON-FINITE!");
+            if (!finite) { printf("FAIL: mixed-lane HR output not finite\n"); return 1; }
         }
     }
 

@@ -13,7 +13,9 @@ Axon is a voice built on the **FitzHugh–Nagumo** (FHN) model — a two-variabl
 reduction of the Hodgkin–Huxley neuron. The membrane voltage `v` is the audio
 output. Above a current threshold the neuron free-runs as a relaxation
 oscillator (a slow charge-up followed by a fast spike); below threshold it sits
-at rest and fires exactly one spike each time you trigger it. One knob —
+at rest and fires a spike each time you trigger it — one shot near the low end,
+occasionally two right at the oscillation boundary (and at the high-current end it
+rests again, ignoring triggers). One knob —
 **CURRENT** — moves you across that boundary (a Hopf bifurcation), so the same
 module is a drone oscillator at one setting and a percussion/transient voice at
 another.
@@ -91,8 +93,10 @@ Both neuron modules are polyphonic, up to **16 voices**, each an independent neu
 with its own integration state. The voice count is taken from the **V/OCT** cable's
 channel count, falling back to **TRIG** — so a polyphonic gate/trigger (with no
 pitch patched) gives you polyphonic percussion. Every CV input (CURRENT, EPS /
-BURST, TRIG) is read per voice and normalled to channel 0 when it carries fewer
-channels, and **OUT / SPIKE / W (Z)** are polyphonic. Knobs and attenuverters are
+BURST, TRIG) is read per voice; a **monophonic** (1-channel) cable broadcasts to
+every voice (Rack's normalling), but a *partially* polyphonic cable reads 0 V on
+the channels it doesn't carry — it is not backfilled from channel 0. **OUT / SPIKE
+/ W (Z)** are polyphonic. Knobs and attenuverters are
 shared across all voices.
 
 The display traces **every** active voice at once: each orbit is drawn on its own
@@ -138,7 +142,7 @@ background, which is inaudible.
 
 ## Patches
 
-`tools/make_patches_neuron.py` writes seven Axon smoke-test patches into `patches/`
+`tools/make_patches_neuron.py` writes nine Axon smoke-test patches into `patches/`
 (and copies them into the Windows Rack patches folder if present):
 
 - **axon_1_freerun** — default voicing → audio; play V/OCT
@@ -157,6 +161,13 @@ background, which is inaudible.
   GATE opens an ADSR→VCA after Axon so notes start/stop (Axon free-runs, so the VCA
   is what you "play"). Pick your MIDI device and set the module's Polyphony channels
   in its right-click menu
+- **axon_8_polytrig** — three independent LFO-clocked trigger channels merged into
+  a polyphonic TRIG, CURRENT held at rest: three separate percussive spike voices,
+  no external envelope needed (each trigger fires its own one-shot)
+- **axon_9_polyvoice** — held/ringing poly notes the conventional way: pitches into
+  V/OCT, gates through a poly ADSR→VCA *after* the oscillator, so the envelope (not
+  TRIG) is what sustains each note. The pattern to reach for when you expected TRIG
+  to open a gate (see issue #3)
 
 ## Notes / known limits
 

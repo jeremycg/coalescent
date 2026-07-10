@@ -1,6 +1,8 @@
-// Offline auditioning for Axon: replicates the src/Axon.cpp kernel + output
-// stage (tanh soft-clip + 20 Hz DC blocker) and writes WAV files so voicings
-// can be heard without launching Rack. Keep in sync with the kernel.
+// Offline auditioning for Axon: replicates the src/Axon.cpp FHN kernel (same
+// constants, RK4, substep schedule) with a SIMPLIFIED output stage — plain tanh
+// soft-clip + 20 Hz DC blocker, no oversampling/FIR decimation — so voicings can
+// be heard roughly without launching Rack. Not a bit-exact render of the plugin's
+// output. Keep the kernel constants in sync with src/neuron/Axon.cpp.
 //
 //   g++ -O2 -o /tmp/axon_wav render_wav.cpp && /tmp/axon_wav
 //
@@ -16,7 +18,7 @@
 #include <string>
 
 static constexpr float B_FIXED = 0.8f, HSUB_MAX = 0.05f, STATE_MAX = 10.f;
-static constexpr int MIN_SUB = 4, MAX_SUB = 64;
+static constexpr int MIN_SUB = 2, MAX_SUB = 64;   // match src/neuron/Axon.cpp (was a stale 4)
 static constexpr float RATE_CAL = 37.899004f, FREQ_C4 = 261.6256f;
 static constexpr float TRIG_AMP = 0.6f, TRIG_TAU_MS = 3.f, OUT_GAIN = 1.0f;
 

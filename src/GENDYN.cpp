@@ -304,13 +304,15 @@ struct GENDYN : Module {
         bDurWidth = clamp(bDurWidth, 0.f, 1.f);
 
         // Average samples-per-breakpoint at the target frequency, ±bDurWidth
-        // fraction of that centre value. bDurWidth=0 collapses to a 1-sample
-        // window, giving a fixed pitch.
+        // fraction of that centre value. bDurWidth=0 collapses the window to the
+        // single value durCenter: gainDur→0 pins the duration walk and reflect()
+        // returns durCenter, so the (error-diffused) playback holds the exact
+        // centre pitch. Do NOT widen a zero-width window — that reintroduces a
+        // duration walk and detunes (a +1-sample floor biased the pitch flat).
         const float durCenter = args.sampleRate / (centerFreq * (float)N);
         const float halfWidth = bDurWidth * durCenter;
         float bDurMin = std::max(1.f, durCenter - halfWidth);
-        float bDurMax = durCenter + halfWidth;
-        if (bDurMax <= bDurMin) bDurMax = bDurMin + 1.f;
+        float bDurMax = std::max(bDurMin, durCenter + halfWidth);
 
         int dist = clamp((int)params[DISTRIBUTION_PARAM].getValue(), 0, 3);
 

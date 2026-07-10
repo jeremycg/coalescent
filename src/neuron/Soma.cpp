@@ -267,6 +267,11 @@ struct Soma : Module {
             simd::float_4 pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
                 pitchKnob + inputs[VOCT_INPUT].getPolyVoltageSimd<simd::float_4>(base));
             simd::float_4 subTau = RATE_CAL * pitchHz / fs / (float) os;
+            // Hard guard (matches Operon/Bunnies): cap the per-sample sim-time so
+            // h = subTau/K stays <= HSUB_MAX and Kf stays in range, even at extreme
+            // V/OCT (an uncapped Kf can overflow the float->int below = UB). The
+            // trade is that pitch goes flat above the cap with oversampling Off.
+            subTau = simd::fmin(subTau, simd::float_4(HSUB_MAX * MAX_SUB));
             simd::float_4 Kf = simd::ceil(subTau / HSUB_MAX);
             int K = MIN_SUB;
             for (int l = 0; l < 4; l++) K = std::max(K, (int) Kf[l]);

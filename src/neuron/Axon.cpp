@@ -275,6 +275,11 @@ struct Axon : Module {
             simd::float_4 pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
                 pitchKnob + inputs[VOCT_INPUT].getPolyVoltageSimd<simd::float_4>(base));
             simd::float_4 subTau = RATE_CAL * pitchHz / fs / (float) os;
+            // Hard guard (matches Operon/Bunnies): cap the per-sample sim-time so
+            // h = subTau/K stays <= HSUB_MAX and Kf stays in range, even at extreme
+            // V/OCT (an uncapped Kf can overflow the float->int below = UB). The
+            // trade is that pitch goes flat above the cap with oversampling Off.
+            subTau = simd::fmin(subTau, simd::float_4(HSUB_MAX * MAX_SUB));
             simd::float_4 Kf = simd::ceil(subTau / HSUB_MAX);
             int K = MIN_SUB;
             for (int l = 0; l < 4; l++) K = std::max(K, (int) Kf[l]);
@@ -481,7 +486,7 @@ struct PhaseDisplay : Widget {
 
                 // Voice-count badge when polyphonic.
                 if (nv > 1) {
-                    char buf[8];
+                    char buf[16];
                     snprintf(buf, sizeof(buf), "%dv", nv);
                     nvgFontSize(args.vg, mm2px(2.2f));
                     nvgFillColor(args.vg, nvgRGBA(0x60, 0x80, 0xb0, 0xcc));
