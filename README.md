@@ -32,7 +32,7 @@ panels, not a separate brand); the same plugin has room for other series later.
 
 **Axon** and **Soma** are conceptual twins — the FitzHugh–Nagumo and Hindmarsh–Rose
 spiking-neuron models — and they're built that way: both live in `src/neuron/` over
-a shared `integrator.hpp` (a generic `neuron::rk4<N>` step + pitch-adaptive
+a shared `src/dsp/rk4.hpp` (a generic `coalescent::rk4<N>` step + pitch-adaptive
 substepping, where the HR model extends the FHN one with a third, slow adaptation
 equation). They
 share a name prefix so they sort together in the browser and an accent/panel

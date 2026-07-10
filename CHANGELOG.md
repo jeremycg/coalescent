@@ -2,6 +2,29 @@
 
 ## 2.2.1 (unreleased)
 
+- **Bunnies — tuning fix**: the LV default voicing was ~37 cents sharp
+  (`RATE_CAL` 7.49, which put PITCH=0 at ~267 Hz instead of C4's 261.6 Hz). The
+  constant was left stale after `LV_V0_RANGE` was retuned. Corrected to 7.33
+  (verified −0.3 cents), and the stability test now **asserts** the constant
+  tracks its measured value so this can't silently drift again. **Patch note:**
+  saved Bunnies patches will play back ~37 cents lower (now in tune).
+- **Bunnies — long-idle overflow fix**: the display's cycle-phase sample counter
+  was an unbounded `int`; with no zero-crossing (e.g. RM at rest) it overflowed
+  after ~13.5 h at 44.1 kHz (signed overflow = UB). Now saturates well below the
+  limit.
+- **Operon — HILL performance (CV path)**: the Hill lookup table was disabled
+  whenever a cable was patched into HILL, forcing per-sample `pow()` in the
+  derivative even when the CV was static or slow (and even when only DRIVE was the
+  thing being modulated). The gate now keys on whether `n` is *actually moving*
+  per sample: a settled `n` — from a knob at rest **or** a static/slow HILL CV —
+  uses the LUT; only genuine audio-rate HILL modulation falls back to direct
+  `pow()` (where a lagging LUT would detune). Measured ~80× less transcendental
+  work in the patched-but-static case (≈2.1M → 27k `pow`/s at default pitch); the
+  rate-limiter still backstops the knob-smoothing tail. No behaviour change.
+- **Manifest / docs housekeeping**: `keywords` changed from arrays to the
+  spec-compliant space-separated strings (VCV Manifest); README now points at
+  `src/dsp/rk4.hpp`/`coalescent::rk4`; Operon scope comments corrected to ~25 Hz;
+  Bunnies documents its residual DC; the Bunnies patch generator now checks `zstd`.
 - **Haptik — DAMP retaper**: the damping knob is now musical across its whole
   travel. `DAMP_MAX_HZ` 800 → 250 with a quadratic knob taper (default 0.35 →
   0.30, ~44 ms decay). Previously everything above ~15 % of the knob collapsed to

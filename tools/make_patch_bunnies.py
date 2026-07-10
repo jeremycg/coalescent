@@ -30,7 +30,8 @@ def write(name, mods, cables, master):
         jp = os.path.join(tmp, "patch.json"); json.dump(patch, open(jp, "w"), indent=2)
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:") as tf: tf.add(jp, arcname="patch.json")
-        subprocess.run(["zstd", "-19", "-o", out, "-f"], input=buf.getvalue(), capture_output=True)
+        r = subprocess.run(["zstd", "-19", "-o", out, "-f"], input=buf.getvalue(), capture_output=True)
+        if r.returncode: print("zstd error:", r.stderr.decode(), file=sys.stderr); sys.exit(1)
     print(f"  {name}: {len(mods)} modules, {len(cables)} cables")
     for w in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"): shutil.copy2(out, os.path.join(w, name))
 

@@ -14,6 +14,7 @@ static constexpr float POS = 1e-4f, STATE_MAX = 1e3f, HSUB_MAX = 0.05f;
 static constexpr float STAB_K = 0.5f, STAB_FLOOR = 0.2f, MAX_STAB_STEP = 0.25f, LV_V0_RANGE = 3.5f;
 static constexpr float RM_B = 0.5f, RM_S = 1.0f, KICK_GAIN = 0.5f;
 static constexpr int   MIN_SUB = 2, MAX_SUB = 64;
+static constexpr float RATE_CAL = 7.33f;   // must match src/Bunnies.cpp; asserted below so tuning can't silently drift
 
 static inline void deriv(const float v[2], float d[2], int mode, float gamma, float K, float c, float kick) {
     float X = std::max(v[0], POS), Y = std::max(v[1], POS);
@@ -44,7 +45,7 @@ static bool run(int mode, float balance, float wild, float kick, float dtau, int
     dt = std::min(dt, HSUB_MAX * MAX_SUB);
     int Ksub = std::min(MAX_SUB, std::max(MIN_SUB, (int) std::ceil(dt / HSUB_MAX))); float h = dt / Ksub;
     float kf = kick * KICK_GAIN;
-    float y[2] = {cx * 1.3f + 0.05f, cy * 0.9f + 0.02f};
+    float y[2] = {cx * 1.1f + 0.05f, cy * 0.9f + 0.02f};   // mirrors production reseed() in src/Bunnies.cpp
     dg.minState = 1e9f; float pmn = 1e9f, pmx = -1e9f, prev = 0, lc = -1; double sp = 0; int np = 0;
     long clamps = 0, tot = 0; float maxVe = 0;
     for (int s = 0; s < NS; s++) {
@@ -88,7 +89,17 @@ int main() {
 
     run(0, 0.5f, 0.4f, 0.f, 0.02f, 120000, dg);   // LV default
     float gamma = 0.2f + 0.5f * 4.8f;
-    printf("LV default (bal=0.5 wild=0.4): amp=%.2f period=%.2f tau => RATE_CAL~%.2f\n", dg.amp, dg.period, dg.period * std::sqrt(gamma));
+    float ratecalMeasured = dg.period * std::sqrt(gamma);
+    printf("LV default (bal=0.5 wild=0.4): amp=%.2f period=%.2f tau => RATE_CAL~%.2f (const %.2f)\n",
+           dg.amp, dg.period, ratecalMeasured, RATE_CAL);
+    // Assert the constant tracks the measured value: |Δ| in cents must stay small so
+    // the LV default voicing lands on C4. (7.49 vs 7.33 was ~37 cents sharp.)
+    float cents = 1200.f * std::log2(RATE_CAL / ratecalMeasured);
+    if (std::fabs(cents) > 5.f) {
+        printf("FAIL: RATE_CAL %.2f is %.1f cents off the measured %.2f (LV default not on C4)\n",
+               RATE_CAL, cents, ratecalMeasured);
+        fails++;
+    }
 
     // LV servo health across WILD (plan §6 diagnostics): V should track V0, clamp
     // fraction stay low, and orbits stay off the positivity floor.

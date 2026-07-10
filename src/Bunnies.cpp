@@ -79,7 +79,7 @@ struct Bunnies : Module {
     int   vSince = 0;                                 // samples since last phase-0
 
     // ─── Tunable constants (final values at M8) ─────────────────────────────
-    static constexpr float RATE_CAL  = 7.49f;  // measured LV default period × √gamma (tools/stability/bunnies.cpp) → C4
+    static constexpr float RATE_CAL  = 7.33f;  // measured LV default period × √gamma (tools/stability/bunnies.cpp) → C4 (261.6 Hz)
     static constexpr float HSUB_MAX  = 0.05f;
     static constexpr int   MIN_SUB   = 2;   // profiled: adaptive wants K=1 at default; 2 keeps 0-cent + floor margin, halves RK4
     static constexpr int   MAX_SUB   = 64;
@@ -236,8 +236,8 @@ struct Bunnies : Module {
         if (vPrev <= 0.f && cX > 0.f && vSince > 8) {   // centered prey crosses 0 upward → new cycle
             vInc = 1.f / (float) vSince;                 // 1 / period(samples)
             vSince = 0; vPhase = 0.f;
-        } else {
-            vSince++;
+        } else if (vSince < (1 << 24)) {
+            vSince++;   // saturate ~380 s in: any real period is far shorter, and this avoids signed overflow on a long idle
         }
         vPrev = cX;
         vPhase += vInc; if (vPhase >= 1.f) vPhase -= 1.f;

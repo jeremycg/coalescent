@@ -110,6 +110,11 @@ threshold with a clock → KICK for kick-and-settle wobbles.
   parameter-dependent, especially in big relaxation cycles.
 - **Aliasing.** Substeps keep the orbit accurate but don't band-limit the output;
   big spiky orbits alias at high pitch (v1 limit).
+- **Residual DC.** PREY/PRED are centered on the population equilibrium, but a
+  boom-bust orbit is asymmetric, so its mean isn't exactly that equilibrium and
+  the soft-clip adds a little more — expect a small offset (roughly −0.2 V PREY /
+  −0.6 V PRED at the LV default). Harmless for LFO/modulation use; add a DC blocker
+  downstream if you need perfectly DC-free audio.
 - **State is not saved.** Populations re-seed on load; params (including MODE) persist.
 
 `tools/stability/bunnies.cpp` sweeps BALANCE × WILD in both modes at several pitches

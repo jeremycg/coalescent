@@ -81,8 +81,10 @@ struct Operon : Module {
     static constexpr float HILL_LUT_XMAX = 64.f;
     float hillLut[HILL_LUT_N + 1];
     float lutN = -1.f;      // n the LUT was built for
+    float nPrev = -1.f;     // n from the previous sample (movement detector)
     int   rebuildClock = 0; // rate-limit LUT rebuilds (samples since the last one)
     bool  lutValid = false;
+    static constexpr float N_MOVE_EPS = 1e-4f;   // per-sample |Δn| above this = "actively modulated"
 
     void buildHillLut(float n) {
         for (int i = 0; i <= HILL_LUT_N; ++i)
@@ -165,7 +167,7 @@ struct Operon : Module {
         reseedAsymmetric();
         pStarValid = false;
         pStar = 0.f; pStarA = pStarN = pStarL = -1.f;
-        lutValid = false; lutN = -1.f; rebuildClock = 0;
+        lutValid = false; lutN = -1.f; nPrev = -1.f; rebuildClock = 0;
         for (int k = 0; k < 3; ++k) { lastCentered[k] = 0.f; gateGen[k].reset(); }
     }
 
@@ -204,18 +206,22 @@ struct Operon : Module {
             pStarA = alpha; pStarN = n; pStarL = alpha0; pStarValid = true;
         }
 
-        // Hill LUT: rebuild only on n change (control-rate for a knob). With HILL
-        // being CV'd, n can move audio-rate, so use direct pow instead of thrashing.
-        // Rebuild the 8192-point Hill LUT at most once per ~2048 samples (~46 ms).
-        // Dialling the HILL knob smooths n across many values — including a slow tail
-        // of tiny per-sample deltas — so any per-change rebuild thrashes 8192 pow and
-        // spikes CPU. Rate-limiting caps a rebuild to well under one block's budget;
-        // between rebuilds (and while HILL is CV'd) the derivative uses direct pow.
-        const bool hillCV = inputs[HILL_INPUT].isConnected();
-        if (!hillCV && std::fabs(n - lutN) > 1e-4f && ++rebuildClock >= 2048) {
+        // Hill LUT vs direct pow, gated on whether n is *actually moving* this sample
+        // (not on cable presence): a settled n — from a knob at rest OR a static/slow
+        // HILL CV — uses the 8192-point LUT; an audio-rate-modulated n uses direct pow,
+        // since a rebuilt-at-most-every-N-samples LUT would lag and detune.
+        // Two guards keep the rebuild off the hot path:
+        //   • nMoving blocks rebuilds while n is being dialled/swept (use direct pow);
+        //   • the ~2048-sample rate-limit backstops the knob-smoothing asymptotic tail
+        //     (tiny per-sample deltas that read as "settled" while n still creeps),
+        //     which otherwise thrashes 8192 pow per change and spikes CPU.
+        const bool nMoving = std::fabs(n - nPrev) > N_MOVE_EPS;
+        nPrev = n;
+        ++rebuildClock;
+        if (!nMoving && std::fabs(n - lutN) > 1e-4f && rebuildClock >= 2048) {
             buildHillLut(n); lutN = n; lutValid = true; rebuildClock = 0;
         }
-        const bool hillDirect = hillCV || !lutValid || std::fabs(n - lutN) > 1e-4f;
+        const bool hillDirect = nMoving || !lutValid || std::fabs(n - lutN) > 1e-4f;
 
         // ── 3.4 pitch = simulation speed; adaptive substepping ──
         float pitchTotal = clamp(params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage(),
@@ -266,7 +272,7 @@ struct Operon : Module {
             outputs[GATE1_OUTPUT + k].setVoltage(gateGen[k].process(args.sampleTime) ? GATE_LEVEL : 0.f);
 
         // ── display scope: record the 3 centered proteins into a history ring at
-        // ~45 Hz and publish a full copy — a slowed time plot a few seconds wide
+        // ~25 Hz and publish a full copy — a slowed time plot ~10 s wide
         // (clean at LFO/clock rates; an audio-rate tone naturally aliases here) ──
         if (fs != lastDisplayFs) {
             lastDisplayFs = fs;
@@ -297,8 +303,8 @@ namespace opl {
 }
 
 // Display: the three protein levels over time — three ~120°-staggered traces on
-// one centreline, so the phase chase reads directly. Recorded at ~45 Hz (a few
-// seconds wide); reads only the published history, never the integrator.
+// one centreline, so the phase chase reads directly. Recorded at ~25 Hz (~10 s
+// wide); reads only the published history, never the integrator.
 struct OperonScope : widget::TransparentWidget {
     Operon* module = nullptr;
     std::shared_ptr<Font> font;

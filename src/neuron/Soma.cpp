@@ -447,7 +447,7 @@ struct SomaDisplay : Widget {
 
                 // Voice-count badge when polyphonic.
                 if (nv > 1) {
-                    char buf[8];
+                    char buf[16];
                     snprintf(buf, sizeof(buf), "%dv", nv);
                     nvgFontSize(args.vg, mm2px(2.2f));
                     nvgFillColor(args.vg, nvgRGBA(0xb0, 0x80, 0x60, 0xcc));
