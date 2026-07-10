@@ -261,7 +261,7 @@ struct Bunnies : Module {
 
 // ── Panel layout (mm) ────────────────────────────────────────────────────────
 namespace bpl {
-    static const float KNOB_Y = 56.f, ATT_Y = 68.f, IN_Y = 84.f, OUT_Y = 100.f, POP_Y = 114.f;
+    static const float KNOB_Y = 58.f, ATT_Y = 70.f, IN_Y = 84.f, OUT_Y = 100.f, POP_Y = 114.f;  // rows match Operon
     static const float KNOB_X[3] = {11.f, 25.5f, 40.f};   // RATE, BALANCE, WILD
     static const float MODE_X = 52.f;
     static const float IN_X[4] = {11.f, 25.5f, 40.f, 52.f};
