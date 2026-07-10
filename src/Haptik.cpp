@@ -625,7 +625,7 @@ struct HaptikWidget : ModuleWidget {
     HaptikWidget(Haptik* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Haptik.svg")));
-        addFramebufferedLabels<HaptikLabels>(this);
+        addPanelLabels<HaptikLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f,   1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(85.42f, 1.0f))));

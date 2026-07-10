@@ -624,7 +624,7 @@ struct GENDYWidget : ModuleWidget {
     GENDYWidget(GENDYN* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/GENDYN.svg")));
-        addFramebufferedLabels<GENDYNLabels>(this);
+        addPanelLabels<GENDYNLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f,   1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(54.96f, 1.0f))));

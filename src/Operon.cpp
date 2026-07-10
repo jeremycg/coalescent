@@ -424,7 +424,7 @@ struct OperonWidget : ModuleWidget {
     OperonWidget(Operon* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Operon.svg")));
-        addFramebufferedLabels<OperonLabels>(this);
+        addPanelLabels<OperonLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f, 1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(65.12f, 1.0f))));

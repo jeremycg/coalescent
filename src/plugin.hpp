@@ -13,17 +13,15 @@ extern Model* modelSoma;     // Hindmarsh–Rose neuron
 extern Model* modelOperon;   // repressilator gene circuit (three-phase)
 extern Model* modelBunnies;  // predator-prey (Lotka-Volterra / Rosenzweig-MacArthur)
 
-// The static panel captions never change, so render them once into a
-// FramebufferWidget instead of laying out nvgText every frame. Each module
-// defines its labels in a `widget::Widget` subclass; this wires one up, sized to
-// the panel. Call after setPanel() (so the ModuleWidget's box.size is set).
+// The panel captions live in their own `widget::Widget` subclass (one per module)
+// added as a child, rather than drawn inline in ModuleWidget::draw(). Fonts are
+// loaded per-frame inside it (see the widget). Call after setPanel() so the
+// ModuleWidget's box.size is set.
+// (A FramebufferWidget wrapper would cache the unchanging text, but it rendered the
+// labels at the wrong scale here, so the labels draw normally each frame.)
 template <typename TLabels>
-inline void addFramebufferedLabels(ModuleWidget* mw) {
-    auto* fb = new widget::FramebufferWidget;
-    fb->oversample = 2.f;                 // crisp small text when Rack zooms in
-    fb->box.size = mw->box.size;
+inline void addPanelLabels(ModuleWidget* mw) {
     auto* labels = new TLabels;
     labels->box.size = mw->box.size;
-    fb->addChild(labels);
-    mw->addChild(fb);
+    mw->addChild(labels);
 }

@@ -524,7 +524,7 @@ struct SomaWidget : ModuleWidget {
     SomaWidget(Soma* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Soma.svg")));
-        addFramebufferedLabels<SomaLabels>(this);
+        addPanelLabels<SomaLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f,   1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(54.96f, 1.0f))));

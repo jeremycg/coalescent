@@ -374,7 +374,7 @@ struct BunniesWidget : ModuleWidget {
     BunniesWidget(Bunnies* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Bunnies.svg")));
-        addFramebufferedLabels<BunniesLabels>(this);
+        addPanelLabels<BunniesLabels>(this);
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f, 1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(54.96f, 1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f, 122.0f))));

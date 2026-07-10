@@ -559,7 +559,7 @@ struct AxonWidget : ModuleWidget {
     AxonWidget(Axon* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Axon.svg")));
-        addFramebufferedLabels<AxonLabels>(this);
+        addPanelLabels<AxonLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f,   1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(54.96f, 1.0f))));

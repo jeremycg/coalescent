@@ -9,11 +9,10 @@
   `coalescent::DisplaySnapshot<T>`): the UI holds a stable, complete frame even if
   audio publishes repeatedly during a slow draw. Each module now defines only its
   payload `DisplayFrame`; the concurrency lives in one place.
-- **UI — fonts & label caching**: fonts are now loaded per-frame as locals instead
-  of cached in a member (a retained `Font` can dangle when Rack recreates its
-  Window); and the static panel captions render once into a `FramebufferWidget`
-  instead of being laid out with `nvgText` every frame. No visual change; lower
-  UI-thread cost, especially at high voice counts.
+- **UI — font lifecycle**: fonts are now loaded per-frame as locals instead of
+  cached in a member (a retained `Font` can dangle when Rack recreates its Window).
+  Panel captions moved into a dedicated child widget (per module) rather than being
+  drawn inline in `ModuleWidget::draw()`. No visual change.
 - **Haptik — EXT sums polyphony**: the external-force input read only channel 0 of
   a polyphonic cable; it now sums all channels (Rack's convention for feeding poly
   audio into a monophonic processor).
