@@ -16,7 +16,12 @@
 - **Haptik — Slow-mode FREEZE click**: engaging FREEZE in Slow mode jumped the
   readout from the interpolated inter-frame shape to the raw frame endpoint (a
   click). FREEZE now captures the shape currently being heard, so it holds
-  seamlessly (and un-freezes cleanly).
+  seamlessly (and un-freezes cleanly). Loading a patch saved with Slow+FREEZE is
+  handled too: the reinit seeds `yPrev` from the lattice so the load-time capture
+  can't blank it to silence.
+- **Haptik — malformed-CV guard**: RATE and scan-pitch CV are now sanitized
+  (NaN→C4, bounds ±inf/huge) before the fast `exp2`, matching Axon/Soma — its
+  internal float→int shift was UB on a non-finite CV.
 - **GENDYN — scope alignment**: the waveform display now pairs each duration with
   the segment it actually plays (`amp[i-1]→amp[i]` over `dur[i]`, cycle starting at
   `amp[N-1]`). With unequal durations the polygon now matches the audio instead of

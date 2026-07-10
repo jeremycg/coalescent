@@ -190,6 +190,9 @@ struct Haptik : Module {
             divCounter = 0;
             wasFrozen = false;
             applyExcite(1, 1.f, N);            // always a full bump (ignores EXCITE/INJECT) so it sounds on load
+            std::copy(y, y + N, yPrev);        // yPrev must mirror a real frame: if a patch loads with Slow+FREEZE
+                                               // already on, the FREEZE-edge capture runs at fr=0 and would otherwise
+                                               // replace y with a zero yPrev → silence. Seeding yPrev=y makes it a no-op.
             last_N = N;
         }
 
@@ -197,6 +200,8 @@ struct Haptik : Module {
         // RATE_PARAM stores log2(Hz); CV adds in the log domain, att·CV_DEPTH scaled.
         float rateLog = params[RATE_PARAM].getValue()
                       + inputs[RATE_INPUT].getVoltage() * params[RATE_ATT_PARAM].getValue() * CV_DEPTH;
+        // Guard approxExp2's internal float->int shift against a non-finite/absurd CV.
+        rateLog = std::isfinite(rateLog) ? clamp(rateLog, -30.f, 30.f) : 0.f;
         bool  slow = params[MODE_PARAM].getValue() > 0.5f;
         int   D    = slow ? SLOW_DIV : 1;   // lattice steps every D samples
 
@@ -290,8 +295,9 @@ struct Haptik : Module {
         }
 
         // ── scan readout (always) ──
-        float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(
-                            params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage());
+        float pexp = params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage();
+        pexp = std::isfinite(pexp) ? clamp(pexp, -30.f, 30.f) : 0.f;   // guard approxExp2's int-convert
+        float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pexp);
         scanPhase += pitchHz / fs;
         // A NaN on V/OCT (from a misbehaving upstream module) would otherwise
         // stick scanPhase at NaN forever and make (int)p an out-of-bounds index.
