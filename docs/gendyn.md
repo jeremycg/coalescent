@@ -108,9 +108,11 @@ Right-click the module to change this:
   *and* durations). Selecting a shape re-seeds immediately.
 - **Re-seed waveform** — re-roll the seed on demand.
 
-The centre-frequency default is **C4** (261.6 Hz), and the seed choice is saved
-with the patch. (OUT is also DC-blocked internally at ~5 Hz, so the walk's mean
-drift can't offset the signal.)
+The centre-frequency default is **C4** (261.6 Hz). The seed choice **and the
+evolved waveform** (the current breakpoints plus their walk velocities) are saved
+with the patch, so a sound you let run reloads exactly where it was — not re-seeded.
+(OUT is also DC-blocked internally at ~5 Hz, so the walk's mean drift can't offset
+the signal.)
 
 ## Tuning notes
 

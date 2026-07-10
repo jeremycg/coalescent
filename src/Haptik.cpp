@@ -132,6 +132,46 @@ struct Haptik : Module {
         dcBlock.reset();    // clear DC-blocker filter state
     }
 
+    // Persist the lattice (displacement + velocity) and scan phase so an evolved /
+    // frozen sound reloads as itself instead of being re-plucked from scratch.
+    json_t* dataToJson() override {
+        json_t* root = json_object();
+        if (last_N > 0) {
+            int n = last_N;
+            json_object_set_new(root, "N", json_integer(n));
+            json_object_set_new(root, "scanPhase", json_real(scanPhase));
+            json_t *jy = json_array(), *jv = json_array();
+            for (int i = 0; i < n; i++) {
+                json_array_append_new(jy, json_real(y[i]));
+                json_array_append_new(jv, json_real(v[i]));
+            }
+            json_object_set_new(root, "y", jy);
+            json_object_set_new(root, "v", jv);
+        }
+        return root;
+    }
+    void dataFromJson(json_t* root) override {
+        json_t *jn = json_object_get(root, "N");
+        json_t *jy = json_object_get(root, "y"), *jv = json_object_get(root, "v");
+        if (!(jn && jy && jv)) return;                       // pre-serialization patch → reseed
+        int n = (int) json_integer_value(jn);
+        if (n < 8 || n > MAX_N) return;
+        if ((int) json_array_size(jy) != n || (int) json_array_size(jv) != n) return;
+        float Y[MAX_N], V[MAX_N];
+        for (int i = 0; i < n; i++) {
+            Y[i] = (float) json_number_value(json_array_get(jy, i));
+            V[i] = (float) json_number_value(json_array_get(jv, i));
+            if (!std::isfinite(Y[i]) || !std::isfinite(V[i])) return;   // malformed → reseed
+        }
+        for (int i = 0; i < n; i++) { y[i] = Y[i]; v[i] = V[i]; yPrev[i] = Y[i]; }
+        if (json_t* jp = json_object_get(root, "scanPhase")) {
+            float sp = (float) json_number_value(jp);
+            scanPhase = std::isfinite(sp) ? (sp - std::floor(sp)) : 0.f;
+        }
+        divCounter = 0; wasFrozen = false;                   // clean slow-mode frame; FREEZE edge no-ops (yPrev==y)
+        last_N = n;                                          // suppress the reinit re-pluck
+    }
+
     // Excitation writes displacement y[] (a "pluck"). amt is the inject amount.
     void applyExcite(int shape, float amt, int N) {
         float added = 0.f;   // total displacement injected, to remove its DC below

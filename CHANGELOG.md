@@ -2,6 +2,13 @@
 
 ## 2.2.1 (unreleased)
 
+- **GENDYN & Haptik — state is now saved with the patch**: GENDYN persists its
+  evolved breakpoints + walk velocities, and Haptik persists its lattice
+  (displacement/velocity) and scan phase, via `dataToJson`/`dataFromJson`. A sound
+  you evolve or freeze then save now reloads as *itself* instead of re-seeding to a
+  different sound. Pre-2.2.1 patches, or any with a wrong-length/malformed payload,
+  fall back to the old fresh-seed behaviour.
+
 - **GENDYN — DUR WID = 0 tuning fix**: a zero-width frequency barrier is
   documented to hold pitch fixed, but a stray `+1`-sample floor widened the window
   so the duration walk kept moving — playing ~41 cents flat at the default. Removed

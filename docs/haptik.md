@@ -124,8 +124,9 @@ rings forever) or EXCITE=3 (continuous drive).
 
 ## Notes
 
-- Lattice state (displacement / velocity / scan phase) is intentionally **not**
-  saved with the patch — a reloaded patch re-seeds with a bump. Params persist.
+- Lattice state (displacement / velocity / scan phase) **is saved** with the patch,
+  so an evolved or frozen sound reloads as itself. (Pre-2.2.1 patches, and any with
+  malformed data, fall back to a fresh bump.)
 - **FREEZE** holds the shape completely: while frozen, TRIG and excitation are
   ignored so plucking can't alter the held waveform (the scan keeps reading it).
 - Excitations are zero-mean, so a pluck adds shape but no DC step — no click/thump

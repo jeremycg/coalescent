@@ -126,11 +126,55 @@ struct GENDYN : Module {
     json_t* dataToJson() override {
         json_t* root = json_object();
         json_object_set_new(root, "initShape", json_integer(initShape));
+        // Persist the evolved waveform + walk velocities so a saved sound reloads as
+        // itself, not a fresh reseed. Only once the arrays are real (last_N > 0).
+        if (last_N > 0) {
+            int n = last_N;
+            json_object_set_new(root, "N", json_integer(n));
+            json_t *ja = json_array(), *jd = json_array(), *jsa = json_array(), *jsd = json_array();
+            for (int i = 0; i < n; i++) {
+                json_array_append_new(ja,  json_real(amp[i]));
+                json_array_append_new(jd,  json_real(dur[i]));
+                json_array_append_new(jsa, json_real(step_amp[i]));
+                json_array_append_new(jsd, json_real(step_dur[i]));
+            }
+            json_object_set_new(root, "amp", ja);
+            json_object_set_new(root, "dur", jd);
+            json_object_set_new(root, "stepAmp", jsa);
+            json_object_set_new(root, "stepDur", jsd);
+        }
         return root;
     }
     void dataFromJson(json_t* root) override {
         if (json_t* j = json_object_get(root, "initShape"))
             initShape = clamp((int) json_integer_value(j), 0, 4);
+        // Restore the evolved waveform if present and well-formed (length matches the
+        // saved N, durations >= 1, all finite); otherwise fall through to a reseed so
+        // pre-serialization patches still load.
+        json_t *jn = json_object_get(root, "N"),  *ja = json_object_get(root, "amp");
+        json_t *jd = json_object_get(root, "dur"), *jsa = json_object_get(root, "stepAmp");
+        json_t *jsd = json_object_get(root, "stepDur");
+        if (!(jn && ja && jd && jsa && jsd)) return;
+        int n = (int) json_integer_value(jn);
+        if (n < 2 || n > MAX_N) return;
+        if ((int) json_array_size(ja) != n || (int) json_array_size(jd) != n
+            || (int) json_array_size(jsa) != n || (int) json_array_size(jsd) != n) return;
+        float A[MAX_N], Dr[MAX_N], SA[MAX_N], SD[MAX_N];
+        for (int i = 0; i < n; i++) {
+            A[i]  = (float) json_number_value(json_array_get(ja,  i));
+            Dr[i] = (float) json_number_value(json_array_get(jd,  i));
+            SA[i] = (float) json_number_value(json_array_get(jsa, i));
+            SD[i] = (float) json_number_value(json_array_get(jsd, i));
+            if (!std::isfinite(A[i]) || !std::isfinite(Dr[i]) || Dr[i] < 1.f
+                || !std::isfinite(SA[i]) || !std::isfinite(SD[i])) return;   // malformed → reseed
+        }
+        float s = 0.f;
+        for (int i = 0; i < n; i++) { amp[i] = A[i]; dur[i] = Dr[i]; step_amp[i] = SA[i]; step_dur[i] = SD[i]; s += Dr[i]; }
+        sum_dur = s;
+        current_breakpoint = 0; current_sample = 0;          // clean cycle start from the restored shape
+        current_amp = amp[n - 1]; target_amp = amp[0];
+        current_dur = std::max(1, (int) dur[0]); dur_err = 0.f;
+        last_N = n; lastInitShape = initShape; reseedPending = false;   // suppress the reinit reseed
     }
 
     void onReset() override {
