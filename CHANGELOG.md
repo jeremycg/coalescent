@@ -2,6 +2,13 @@
 
 ## 2.2.1 (unreleased)
 
+- **UI — race-free display snapshots**: all six modules published their scope/trail
+  frames through an atomic-index double buffer, which the audio thread could reclaim
+  mid-draw (a benign display tear, but formally a data race). Replaced with a shared
+  single-producer/single-consumer **triple buffer** (`src/dsp/display_snapshot.hpp`,
+  `coalescent::DisplaySnapshot<T>`): the UI holds a stable, complete frame even if
+  audio publishes repeatedly during a slow draw. Each module now defines only its
+  payload `DisplayFrame`; the concurrency lives in one place.
 - **UI — fonts & label caching**: fonts are now loaded per-frame as locals instead
   of cached in a member (a retained `Font` can dangle when Rack recreates its
   Window); and the static panel captions render once into a `FramebufferWidget`

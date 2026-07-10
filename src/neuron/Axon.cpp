@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 #include "../dsp/rk4.hpp"
+#include "../dsp/display_snapshot.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
@@ -89,19 +90,19 @@ struct Axon : Module {
 
     // ─── Display trail (phase portrait) ─────────────────────────────────────
     // The audio thread appends decimated (v,w) points to a per-voice ring, then
-    // ~45 Hz publishes a coherent snapshot into a double buffer: it fills the
-    // back buffer and flips dispBuf with a release store; the UI reads the front
-    // buffer after an acquire load. Lock-free; a draw that spans two publishes can
-    // tear one frame (acceptable for a display). The head index, active-channel
-    // count and effective CURRENT travel *with* the arrays, so the trails, head
-    // dots and nullcline stay mutually consistent.
+    // ~45 Hz publishes a coherent snapshot into a lock-free triple buffer; the UI
+    // reads the latest complete frame. The head index, active-channel count and
+    // effective CURRENT travel *with* the arrays, so the trails, head dots and
+    // nullcline stay mutually consistent. See dsp/display_snapshot.hpp.
     float trailV[MAX_POLY][TRAIL] = {}, trailW[MAX_POLY][TRAIL] = {};
     int   trailIdx = 0, trailDecim = 0;
-    float dispV[2][MAX_POLY][TRAIL] = {}, dispW[2][MAX_POLY][TRAIL] = {};
-    int   dispHead[2] = {};
-    int   dispChannels[2] = {1, 1};
-    float dispCurr[2] = {0.6f, 0.6f};   // voice-0 effective CURRENT for the v-nullcline
-    std::atomic<int> dispBuf{0};
+    struct DisplayFrame {
+        float v[MAX_POLY][TRAIL] = {}, w[MAX_POLY][TRAIL] = {};
+        int   head = 0;
+        int   channels = 1;
+        float current = 0.6f;           // voice-0 effective CURRENT for the v-nullcline
+    };
+    coalescent::DisplaySnapshot<DisplayFrame> displaySnapshot;
     int   dispClock = 0;
     int   dispPeriod = 980;           // samples between snapshots (~45 Hz; refreshed on SR change)
 
@@ -345,15 +346,15 @@ struct Axon : Module {
         }
         if (++dispClock >= dispPeriod) {                 // publish display snapshot ~45 Hz
             dispClock = 0;
-            int next = 1 - dispBuf.load(std::memory_order_relaxed);
+            DisplayFrame& fr = displaySnapshot.writable();
             for (int c = 0; c < channels; c++) {
-                std::copy(trailV[c], trailV[c] + TRAIL, dispV[next][c]);
-                std::copy(trailW[c], trailW[c] + TRAIL, dispW[next][c]);
+                std::copy(trailV[c], trailV[c] + TRAIL, fr.v[c]);
+                std::copy(trailW[c], trailW[c] + TRAIL, fr.w[c]);
             }
-            dispHead[next] = trailIdx;
-            dispChannels[next] = channels;
-            dispCurr[next] = I0;
-            dispBuf.store(next, std::memory_order_release);
+            fr.head = trailIdx;
+            fr.channels = channels;
+            fr.current = I0;
+            displaySnapshot.publish();
         }
     }
 };
@@ -405,10 +406,11 @@ struct PhaseDisplay : Widget {
             auto X = [&](float v) { return (v - VMIN) / (VMAX - VMIN) * box.size.x; };
             auto Y = [&](float w) { return box.size.y - (w - WMIN) / (WMAX - WMIN) * box.size.y; };
 
-            int b = module ? module->dispBuf.load(std::memory_order_acquire) : 0;
+            static const Axon::DisplayFrame dummy;
+            const Axon::DisplayFrame& fr = module ? module->displaySnapshot.consume() : dummy;
             float a = module ? module->params[Axon::SHAPE_PARAM].getValue() : 0.7f;
-            float I = module ? module->dispCurr[b] : 0.6f;   // CV-included, coherent with the trail
-            int nv = module ? module->dispChannels[b] : 1;
+            float I = module ? fr.current : 0.6f;   // CV-included, coherent with the trail
+            int nv = module ? fr.channels : 1;
 
             // v-nullcline: w = v - v³/3 + I  (the cubic). Where dv/dt = 0.
             nvgBeginPath(args.vg);
@@ -436,12 +438,12 @@ struct PhaseDisplay : Widget {
             // The trajectory trails, one per active voice, oldest→newest brightening
             // along their length. More voices → dimmer trails so they don't overwhelm.
             if (module) {
-                int idx = module->dispHead[b];   // newest just before idx (coherent with arrays)
+                int idx = fr.head;   // newest just before idx (coherent with arrays)
                 float trailA = clamp(204.f - (nv - 1) * 6.f, 112.f, 204.f);  // 0x70..0xcc
                 nvgLineCap(args.vg, NVG_ROUND);
                 for (int v = 0; v < nv; v++) {
-                    const float* dv = module->dispV[b][v];
-                    const float* dw = module->dispW[b][v];
+                    const float* dv = fr.v[v];
+                    const float* dw = fr.w[v];
                     float hue = voiceHue(v, nv);
                     for (int k = 1; k < TRAIL; k++) {
                         int i0 = (idx + k - 1) % TRAIL;

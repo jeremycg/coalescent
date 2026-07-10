@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 #include "dsp/rk4.hpp"
+#include "dsp/display_snapshot.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
@@ -71,8 +72,7 @@ struct Bunnies : Module {
     // cycles kills audio-rate aliasing. Phase 0 = centered prey crossing 0 upward.
     struct Loop { float pt[LOOP_N][2] = {}; float peak = 1e-3f; };
     Loop liveLoop;                   // audio-thread only (running phase-average)
-    Loop snap[2];                    // published copies
-    std::atomic<int> snapIndex{0};
+    coalescent::DisplaySnapshot<Loop> displaySnapshot;
     dsp::ClockDivider pubDiv;
     float lastDisplayFs = 0.f;
     float vPhase = 0.f, vInc = 0.002f, vPrev = 0.f;   // cycle-phase tracker
@@ -253,9 +253,8 @@ struct Bunnies : Module {
             for (int i = 0; i < LOOP_N; ++i)
                 mx = std::max(mx, std::max(std::fabs(liveLoop.pt[i][0]), std::fabs(liveLoop.pt[i][1])));
             liveLoop.peak = std::max(mx, liveLoop.peak * 0.99f + 1e-4f);
-            int back = 1 - snapIndex.load(std::memory_order_relaxed);
-            snap[back] = liveLoop;
-            snapIndex.store(back, std::memory_order_release);
+            displaySnapshot.writable() = liveLoop;
+            displaySnapshot.publish();
         }
     }
 };
@@ -298,9 +297,8 @@ struct OrbitView : widget::TransparentWidget {
         Vec ctr = box.size.div(2);
         float R = std::min(box.size.x, box.size.y) * 0.42f;
 
-        int read = module ? module->snapIndex.load(std::memory_order_acquire) : 0;
-        const Bunnies::Loop dummy;
-        const Bunnies::Loop& lp = module ? module->snap[read] : dummy;
+        static const Bunnies::Loop dummy;
+        const Bunnies::Loop& lp = module ? module->displaySnapshot.consume() : dummy;
         float peak = std::max(lp.peak, 1e-3f);
         auto P = [&](float cx, float cy) {
             return ctr.plus(Vec(clamp(cx / peak, -1.1f, 1.1f) * R, -clamp(cy / peak, -1.1f, 1.1f) * R));

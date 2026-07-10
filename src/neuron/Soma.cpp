@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 #include "../dsp/rk4.hpp"
+#include "../dsp/display_snapshot.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
@@ -84,16 +85,18 @@ struct Soma : Module {
     float antiDenorm = 1e-18f;        // alternating sub-LSB dither, anti-denormal on dcBlock
 
     // ─── Display trail (x,z phase portrait) ─────────────────────────────────
-    // Double-buffered, lock-free snapshot (see Axon): the audio thread fills the
-    // back buffer and flips dispBuf with a release store; the UI reads the front
-    // buffer after an acquire load, with the head index and active-voice count
-    // carried alongside so trails and head dots stay coherent.
+    // Lock-free triple-buffer snapshot (see Axon / dsp/display_snapshot.hpp): the
+    // audio thread appends to a per-voice ring and ~45 Hz publishes a complete
+    // frame; the head index and active-voice count travel with the arrays so
+    // trails and head dots stay coherent.
     float trailX[MAX_POLY][TRAIL] = {}, trailZ[MAX_POLY][TRAIL] = {};
     int   trailIdx = 0, trailDecim = 0;
-    float dispX[2][MAX_POLY][TRAIL] = {}, dispZ[2][MAX_POLY][TRAIL] = {};
-    int   dispHead[2] = {};
-    int   dispChannels[2] = {1, 1};
-    std::atomic<int> dispBuf{0};
+    struct DisplayFrame {
+        float x[MAX_POLY][TRAIL] = {}, z[MAX_POLY][TRAIL] = {};
+        int   head = 0;
+        int   channels = 1;
+    };
+    coalescent::DisplaySnapshot<DisplayFrame> displaySnapshot;
     int   dispClock = 0;
     int   dispPeriod = 980;           // samples between snapshots (~45 Hz; refreshed on SR change)
 
@@ -338,14 +341,14 @@ struct Soma : Module {
         }
         if (++dispClock >= dispPeriod) {                 // publish display snapshot ~45 Hz
             dispClock = 0;
-            int next = 1 - dispBuf.load(std::memory_order_relaxed);
+            DisplayFrame& fr = displaySnapshot.writable();
             for (int c = 0; c < channels; c++) {
-                std::copy(trailX[c], trailX[c] + TRAIL, dispX[next][c]);
-                std::copy(trailZ[c], trailZ[c] + TRAIL, dispZ[next][c]);
+                std::copy(trailX[c], trailX[c] + TRAIL, fr.x[c]);
+                std::copy(trailZ[c], trailZ[c] + TRAIL, fr.z[c]);
             }
-            dispHead[next] = trailIdx;
-            dispChannels[next] = channels;
-            dispBuf.store(next, std::memory_order_release);
+            fr.head = trailIdx;
+            fr.channels = channels;
+            displaySnapshot.publish();
         }
     }
 };
@@ -391,8 +394,9 @@ struct SomaDisplay : Widget {
             auto Y = [&](float z) { return box.size.y - (z - ZMIN) / (ZMAX - ZMIN) * box.size.y; };
 
             float s = module ? module->params[Soma::ADAPT_PARAM].getValue() : 4.f;
-            int b  = module ? module->dispBuf.load(std::memory_order_acquire) : 0;
-            int nv = module ? module->dispChannels[b] : 1;
+            static const Soma::DisplayFrame dummy;
+            const Soma::DisplayFrame& fr = module ? module->displaySnapshot.consume() : dummy;
+            int nv = module ? fr.channels : 1;
 
             // z-nullcline: z = s·(x − x_R).
             nvgBeginPath(args.vg);
@@ -403,12 +407,12 @@ struct SomaDisplay : Widget {
             nvgStroke(args.vg);
 
             if (module) {
-                int idx = module->dispHead[b];   // coherent with arrays
+                int idx = fr.head;   // coherent with arrays
                 float trailA = clamp(204.f - (nv - 1) * 6.f, 112.f, 204.f);  // 0x70..0xcc
                 nvgLineCap(args.vg, NVG_ROUND);
                 for (int v = 0; v < nv; v++) {
-                    const float* dx = module->dispX[b][v];
-                    const float* dz = module->dispZ[b][v];
+                    const float* dx = fr.x[v];
+                    const float* dz = fr.z[v];
                     float hue = voiceHue(v, nv);
                     for (int k = 1; k < TRAIL; k++) {
                         int i0 = (idx + k - 1) % TRAIL;

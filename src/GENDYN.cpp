@@ -1,4 +1,5 @@
 #include "plugin.hpp"
+#include "dsp/display_snapshot.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -74,15 +75,15 @@ struct GENDYN : Module {
     float lastFs = 0.f;
 
     // Display snapshot: ~45 Hz the audio thread publishes the breakpoints into a
-    // lock-free double buffer (fill the back buffer, flip dispBuf with a release
-    // store); the UI reads the front buffer after an acquire load. The walk drifts
-    // slowly, so the polygon morphs smoothly, and the read no longer races the
-    // per-cycle writer.
-    float dispAmp[2][MAX_N] = {};
-    float dispDur[2][MAX_N] = {};
-    int   dispN[2]    = {13, 13};
-    float dispBAmp[2] = {0.8f, 0.8f};
-    std::atomic<int> dispBuf{0};
+    // lock-free triple buffer; the UI reads the latest complete frame, so it never
+    // races the per-cycle writer. See dsp/display_snapshot.hpp.
+    struct DisplayFrame {
+        float amp[MAX_N] = {};
+        float dur[MAX_N] = {};
+        int   n = 13;
+        float bAmp = 0.8f;
+    };
+    coalescent::DisplaySnapshot<DisplayFrame> displaySnapshot;
     int   dispClock = 0;
     int   dispPeriod = 980;         // samples between snapshots (~45 Hz; refreshed on SR change)
 
@@ -440,12 +441,12 @@ struct GENDYN : Module {
         // ── Refresh display snapshot (~45 Hz) ─────────────────────────────────
         if (++dispClock >= dispPeriod) {                          // publish snapshot ~45 Hz
             dispClock = 0;
-            int next = 1 - dispBuf.load(std::memory_order_relaxed);
-            std::copy(amp, amp + N, dispAmp[next]);
-            std::copy(dur, dur + N, dispDur[next]);
-            dispN[next]    = N;
-            dispBAmp[next] = bAmp;
-            dispBuf.store(next, std::memory_order_release);
+            DisplayFrame& fr = displaySnapshot.writable();
+            std::copy(amp, amp + N, fr.amp);
+            std::copy(dur, dur + N, fr.dur);
+            fr.n    = N;
+            fr.bAmp = bAmp;
+            displaySnapshot.publish();
         }
     }
 };
@@ -481,10 +482,11 @@ struct GENDYScope : Widget {
             const float halfH = Hh * 0.40f;      // amp = ±1 maps to ±halfH
             auto Y = [&](float a) { return mid - clamp(a, -1.1f, 1.1f) * halfH; };
 
-            int b = module ? module->dispBuf.load(std::memory_order_acquire) : 0;
+            static const GENDYN::DisplayFrame dummy;
+            const GENDYN::DisplayFrame& fr = module ? module->displaySnapshot.consume() : dummy;
 
             // Amplitude-barrier band (±B AMP): the reflecting walls of the amp walk.
-            float bAmp = module ? module->dispBAmp[b] : 0.8f;
+            float bAmp = module ? fr.bAmp : 0.8f;
             for (float sgn : {-1.f, 1.f}) {
                 nvgBeginPath(args.vg);
                 nvgMoveTo(args.vg, 0, Y(sgn * bAmp));
@@ -495,18 +497,18 @@ struct GENDYScope : Widget {
             }
 
             // Build the polygon from the snapshot (or a demo shape in the browser).
-            int N = (module && module->dispN[b] >= 2) ? module->dispN[b] : 13;
+            int N = (module && fr.n >= 2) ? fr.n : 13;
             float total = 0.f;
             for (int i = 0; i < N; i++)
-                total += module ? std::max(1.f, module->dispDur[b][i]) : 1.f;
+                total += module ? std::max(1.f, fr.dur[i]) : 1.f;
             if (total <= 0.f) total = 1.f;
 
             auto ampAt = [&](int i) {
-                if (module) return module->dispAmp[b][i];
+                if (module) return fr.amp[i];
                 return 0.7f * std::sin(2.f * (float)M_PI * 2.f * i / N);   // demo
             };
             auto durAt = [&](int i) {
-                return module ? std::max(1.f, module->dispDur[b][i]) : 1.f;
+                return module ? std::max(1.f, fr.dur[i]) : 1.f;
             };
 
             // Match the audio's segment/duration pairing: segment i interpolates

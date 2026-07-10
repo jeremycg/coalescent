@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 #include "dsp/rk4.hpp"
+#include "dsp/display_snapshot.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
@@ -97,7 +98,7 @@ struct Operon : Module {
         return hillLut[i] + (f - i) * (hillLut[i + 1] - hillLut[i]);
     }
 
-    // ─── Display scope: the 3 protein levels over time (lock-free double buffer) ──
+    // ─── Display scope: the 3 protein levels over time (lock-free triple buffer) ──
     static const int HIST_N = 256;
     struct OperonScope {
         float p[3][HIST_N] = {};         // centered protein history (ring)
@@ -105,8 +106,7 @@ struct Operon : Module {
         float peak = 1e-3f;              // smoothed y-scale
     };
     OperonScope liveScope;               // audio-thread only
-    OperonScope scope[2];                // published copies
-    std::atomic<int> scopeIndex{0};
+    coalescent::DisplaySnapshot<OperonScope> displaySnapshot;
     dsp::ClockDivider dispDiv;
     float lastDisplayFs = 0.f;
 
@@ -309,9 +309,8 @@ struct Operon : Module {
             }
             liveScope.head = (liveScope.head + 1) % HIST_N;
             liveScope.peak = std::max(mx, liveScope.peak * 0.999f + 1e-4f);
-            int back = 1 - scopeIndex.load(std::memory_order_relaxed);
-            scope[back] = liveScope;
-            scopeIndex.store(back, std::memory_order_release);
+            displaySnapshot.writable() = liveScope;
+            displaySnapshot.publish();
         }
     }
 };
@@ -345,9 +344,8 @@ struct OperonScope : widget::TransparentWidget {
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1) return;
         const int N = Operon::HIST_N;
-        int read = module ? module->scopeIndex.load(std::memory_order_acquire) : 0;
-        const Operon::OperonScope dummy;
-        const Operon::OperonScope& sc = module ? module->scope[read] : dummy;
+        static const Operon::OperonScope dummy;
+        const Operon::OperonScope& sc = module ? module->displaySnapshot.consume() : dummy;
         float peak = std::max(sc.peak, 1e-3f);
         const float W = box.size.x, H = box.size.y;
         // three stacked lanes (title occupies the top ~20%), one protein each

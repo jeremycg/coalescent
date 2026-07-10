@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 #include "tanh_approx.hpp"
+#include "dsp/display_snapshot.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -64,15 +65,14 @@ struct Haptik : Module {
     float lastFs = 0.f;             // detects SR change to refresh dcBlock cutoff
 
     // Display snapshot: ~45 Hz the audio thread publishes the lattice into a
-    // lock-free double buffer (fill the back buffer, flip dispBuf with a release
-    // store); the UI reads the front buffer after an acquire load instead of the
-    // live y[] (which churns every sample). The acquire/release ordering keeps a
-    // published frame internally consistent; it is NOT fully race-free — two audio
-    // publications during one UI read could still reclaim the buffer being drawn
-    // (benign tear at 45 Hz; a proper fix — triple-buffer or seqlock — is deferred).
-    float dispY[2][MAX_N] = {};
-    int   dispN[2] = {64, 64}, dispDriver[2] = {0, 0};
-    std::atomic<int> dispBuf{0};
+    // lock-free triple buffer; the UI reads the latest complete frame instead of
+    // the live y[] (which churns every sample). See dsp/display_snapshot.hpp.
+    struct DisplayFrame {
+        float y[MAX_N] = {};
+        int   n = 64;
+        int   driver = 0;
+    };
+    coalescent::DisplaySnapshot<DisplayFrame> displaySnapshot;
     int   dispClock = 0;
     int   dispPeriod = 980;         // samples between snapshots (~45 Hz; refreshed on SR change)
 
@@ -376,11 +376,11 @@ struct Haptik : Module {
         // ── refresh display snapshot (~45 Hz) ──
         if (++dispClock >= dispPeriod) {
             dispClock = 0;
-            int next = 1 - dispBuf.load(std::memory_order_relaxed);
-            std::copy(y, y + N, dispY[next]);
-            dispN[next] = N;
-            dispDriver[next] = driverIdx;
-            dispBuf.store(next, std::memory_order_release);
+            DisplayFrame& fr = displaySnapshot.writable();
+            std::copy(y, y + N, fr.y);
+            fr.n = N;
+            fr.driver = driverIdx;
+            displaySnapshot.publish();
         }
     }
 };
@@ -422,8 +422,9 @@ struct RingDisplay : Widget {
             const float R = halfmin * 0.66f, targetAmp = halfmin * 0.31f;
             const float rmin = halfmin * 0.10f, rmax = halfmin * 0.97f;
 
-            int b = module ? module->dispBuf.load(std::memory_order_acquire) : 0;
-            int N = (module && module->dispN[b] >= 2) ? module->dispN[b] : 64;
+            static const Haptik::DisplayFrame dummy;
+            const Haptik::DisplayFrame& fr = module ? module->displaySnapshot.consume() : dummy;
+            int N = (module && fr.n >= 2) ? fr.n : 64;
             bool freeze = module && module->params[Haptik::FREEZE_PARAM].getValue() > 0.5f;
 
             // Auto-scale: normalise the ring to a smoothed peak displacement so it stays
@@ -433,11 +434,11 @@ struct RingDisplay : Widget {
             // but the display reads raw y[], and the near-free spatially-uniform mode lets
             // keepalive kicks pump a large slow mean. Show shape (deviation), not that drift.
             float mean = 0.f;
-            for (int i = 0; i < N; i++) mean += module ? module->dispY[b][i] : demoShape(i, N);
+            for (int i = 0; i < N; i++) mean += module ? fr.y[i] : demoShape(i, N);
             mean /= (float) N;
             float peak = 1e-4f;
             for (int i = 0; i < N; i++) {
-                float yi = (module ? module->dispY[b][i] : demoShape(i, N)) - mean;
+                float yi = (module ? fr.y[i] : demoShape(i, N)) - mean;
                 peak = std::max(peak, std::fabs(yi));
             }
             double t = system::getTime();
@@ -454,7 +455,7 @@ struct RingDisplay : Widget {
             float ringAlpha = 0.25f + 0.75f * act;
 
             auto radiusAt = [&](int i) {
-                float yi = (module ? module->dispY[b][i] : demoShape(i, N)) - mean;
+                float yi = (module ? fr.y[i] : demoShape(i, N)) - mean;
                 float norm = clamp(yi / dispPeak, -1.4f, 1.4f);
                 return clamp(R + norm * targetAmp, rmin, rmax);
             };
@@ -509,7 +510,7 @@ struct RingDisplay : Widget {
                 }
 
             // Driver mass node (orange: glow + core).
-            int drv = clamp(module ? module->dispDriver[b] : N / 4, 0, N - 1);
+            int drv = clamp(module ? fr.driver : N / 4, 0, N - 1);
             {
                 float th = ang((float)drv), r = radiusAt(drv);
                 float px = cx + r * std::cos(th), py = cy + r * std::sin(th);
