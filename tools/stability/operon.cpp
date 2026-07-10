@@ -12,6 +12,27 @@
 
 static constexpr float HSUB_MAX = 0.05f, STATE_MAX = 1e3f, BIAS_EPS = 1e-6f;
 static constexpr int   MIN_SUB = 2, MAX_SUB = 64;
+static constexpr int   CENTER_ITERS = 16, NEWTON_ITERS = 4;   // mirror src/Operon.cpp
+
+// pStar solvers. `bisect(iters)` is the reference; the module uses CENTER_ITERS as
+// its fallback but a 40-iter bisection here gives a near-exact root to compare against.
+static float pStarBisect(float alpha, float n, float a0, int iters) {
+    float lo = 0.f, hi = std::max(1.f, alpha + a0 + 1.f);
+    for (int i = 0; i < iters; ++i) { float mid = 0.5f * (lo + hi);
+        float g = mid - alpha / (1.f + std::pow(std::max(mid, 0.f), n)) - a0; if (g > 0.f) hi = mid; else lo = mid; }
+    return 0.5f * (lo + hi);
+}
+// Warm-started Newton — mirrors src/Operon.cpp exactly (falls back to bisection on a
+// bracket exit or non-convergence within NEWTON_ITERS).
+static float pStarNewton(float alpha, float n, float a0, float guess) {
+    const float hi = std::max(1.f, alpha + a0 + 1.f);
+    if (guess > 0.f && guess < hi) { float x = guess;
+        for (int i = 0; i < NEWTON_ITERS; ++i) { float xn = std::pow(std::max(x, 1e-6f), n); float d = 1.f + xn;
+            float g = x - alpha / d - a0; float gp = 1.f + alpha * n * (xn / std::max(x, 1e-6f)) / (d * d);
+            float step = g / gp; x -= step; if (!(x > 0.f && x < hi)) break; if (std::fabs(step) < 1e-5f) return x; }
+    }
+    return pStarBisect(alpha, n, a0, CENTER_ITERS);
+}
 
 struct Par { float alpha, n, beta, a0; };
 
@@ -104,8 +125,23 @@ int main() {
     }
     printf("Hill LUT max |error| vs pow (n up to 8): %.2e\n", lutMax);
 
+    // Warm-started Newton must converge to the accurate root when seeded from a
+    // nearby root (the per-sample-modulation case the module hits). Seed from the
+    // root at a 1%-different ALPHA and require convergence to the 40-iter reference.
+    double pStarMax = 0;
+    for (float a0 : {0.f, 0.05f, 0.5f, 1.5f})
+        for (float alpha = 0.5f; alpha <= 80.f; alpha *= 1.05f)
+            for (float nn = 1.01f; nn <= 10.f; nn += 0.13f) {
+                float ref    = pStarBisect(alpha, nn, a0, 40);
+                float warm   = pStarBisect(alpha * 0.99f, nn, a0, 40);   // "previous sample" root
+                float got    = pStarNewton(alpha, nn, a0, warm);
+                pStarMax = std::max(pStarMax, (double) std::fabs(got - ref));
+            }
+    printf("pStar warm Newton vs accurate root: max |Δ| = %.2e\n", pStarMax);
+
     if (fails) { printf("FAIL: %d unbounded runs\n", fails); return 1; }
     if (lutMax > 1e-3) { printf("FAIL: Hill LUT error too large\n"); return 1; }
-    printf("PASS: repressilator finite and bounded; Hill LUT within 1e-3 of pow\n");
+    if (pStarMax > 1e-4) { printf("FAIL: warm-started Newton pStar does not converge\n"); return 1; }
+    printf("PASS: repressilator finite and bounded; Hill LUT within 1e-3 of pow; warm Newton pStar converges\n");
     return 0;
 }

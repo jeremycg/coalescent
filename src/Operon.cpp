@@ -122,7 +122,8 @@ struct Operon : Module {
     static constexpr float BIAS_EPS     = 1e-6f;   // zero-sum self-start symmetry breaker
     static constexpr float GATE_LEVEL   = 10.f, GATE_TIME = 1e-3f;
     static constexpr float GATE_LOW     = -0.05f, GATE_HIGH = 0.05f;  // centered units
-    static constexpr int   CENTER_ITERS = 16;
+    static constexpr int   CENTER_ITERS = 16;   // bisection fallback iterations
+    static constexpr int   NEWTON_ITERS = 4;     // warm-started Newton (1 pow/iter)
     // Separate CV depths — the parameter scales differ a lot.
     static constexpr float ALPHA_CV_DEPTH = 6.f;
     static constexpr float HILL_CV_DEPTH  = 0.6f;
@@ -172,15 +173,35 @@ struct Operon : Module {
     }
 
     // Symmetric fixed point pStar (= mStar): the monotonic g(x) = x - alpha/(1+x^n)
-    // - alpha0 has one root; bisection. max(mid,0) before pow — n is non-integer.
-    static float solvePStar(float alpha, float n, float alpha0) {
-        float lo = 0.f, hi = std::max(1.f, alpha + alpha0 + 1.f);
-        for (int i = 0; i < CENTER_ITERS; ++i) {
-            float mid = 0.5f * (lo + hi);
-            float g = mid - alpha / (1.f + std::pow(std::max(mid, 0.f), n)) - alpha0;
-            if (g > 0.f) hi = mid; else lo = mid;
+    // - alpha0 has one root in (0, hi). g is strictly increasing (g' > 1), so Newton
+    // warm-started from the previous root converges in 1–2 steps under per-sample
+    // modulation — one pow() per step vs bisection's 16. Fall back to bisection on a
+    // cold start (guess<0) or if a step leaves the bracket. max(x,eps) before pow —
+    // n is non-integer, and x^(n-1) is reused from x^n as xn/x.
+    static float solvePStar(float alpha, float n, float alpha0, float guess) {
+        const float hi = std::max(1.f, alpha + alpha0 + 1.f);
+        if (guess > 0.f && guess < hi) {
+            float x = guess;
+            for (int i = 0; i < NEWTON_ITERS; ++i) {
+                float xn = std::pow(std::max(x, 1e-6f), n);
+                float d  = 1.f + xn;
+                float g  = x - alpha / d - alpha0;
+                float gp = 1.f + alpha * n * (xn / std::max(x, 1e-6f)) / (d * d);   // g'(x) > 1
+                float step = g / gp;
+                x -= step;
+                if (!(x > 0.f && x < hi)) break;                   // left the bracket → bisection
+                if (std::fabs(step) < 1e-5f) return x;             // converged
+            }
+            // Did not converge within NEWTON_ITERS (a big jump) → fall through to bisection.
         }
-        return 0.5f * (lo + hi);
+        // Cold start / fallback: robust bisection.
+        float lo = 0.f, h = hi;
+        for (int i = 0; i < CENTER_ITERS; ++i) {
+            float mid = 0.5f * (lo + h);
+            float g = mid - alpha / (1.f + std::pow(std::max(mid, 0.f), n)) - alpha0;
+            if (g > 0.f) h = mid; else lo = mid;
+        }
+        return 0.5f * (lo + h);
     }
 
     void process(const ProcessArgs& args) override {
@@ -202,7 +223,7 @@ struct Operon : Module {
 
         // ── 3.2 symmetric fixed point for centering (cached on alpha/n/alpha0) ──
         if (!pStarValid || alpha != pStarA || n != pStarN || alpha0 != pStarL) {
-            pStar = solvePStar(alpha, n, alpha0);
+            pStar = solvePStar(alpha, n, alpha0, pStarValid ? pStar : -1.f);   // warm-start Newton from the cached root
             pStarA = alpha; pStarN = n; pStarL = alpha0; pStarValid = true;
         }
 

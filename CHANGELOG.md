@@ -54,9 +54,13 @@
   LUT would lag and detune), rebuilding at most once every ~2048 samples. Measured
   ~80× less transcendental work in the patched-but-**static** case (≈2.1M → 27k
   `pow`/s at default pitch); the rate-limiter backstops the knob-smoothing tail.
-  A moving DRIVE/HILL is still ~40 `pow`/sample (the fixed-point centre solve +
-  direct Hill) — a control-rate/Newton centre is possible future work. No
-  behaviour change.
+- **Operon — moving-modulation centre solve**: the symmetric fixed point (`pStar`,
+  the output-centering value) is re-solved whenever DRIVE/HILL/LEAK move, and was a
+  16-iteration bisection (16 `pow`/sample). It now warm-starts a Newton step from
+  the previous root — 1 `pow`/iteration, converging in ~2 — with the bisection kept
+  as the cold-start/divergence fallback. Measured ~8× fewer `pow` under DRIVE
+  modulation (16 → ~2/sample) and ~6× under audio-rate HILL; the result matches the
+  bisection root to ~1e-6 (asserted in `make check`). No behaviour change.
 - **Manifest / docs housekeeping**: `keywords` changed from arrays to the
   spec-compliant space-separated strings (VCV Manifest); README now points at
   `src/dsp/rk4.hpp`/`coalescent::rk4`; Operon scope comments corrected to ~25 Hz;
