@@ -68,6 +68,8 @@ struct GENDYN : Module {
     int   initShape = 0;
     int   lastInitShape = -1;        // forces a reseed when the shape changes
     bool  reseedPending = false;
+    bool  restoredPending = false;   // dataFromJson set the arrays; process() must recompute
+                                     // the SR-dependent caches (norm_k / freq_cv / current_dur)
     dsp::TRCFilter<float> dcBlock;   // gentle ~5 Hz DC blocker on OUT (walk mean drifts)
     float lastFs = 0.f;
 
@@ -175,6 +177,7 @@ struct GENDYN : Module {
         current_amp = amp[n - 1]; target_amp = amp[0];
         current_dur = std::max(1, (int) dur[0]); dur_err = 0.f;
         last_N = n; lastInitShape = initShape; reseedPending = false;   // suppress the reinit reseed
+        restoredPending = true;   // first process() recomputes norm_k / freq_cv / current_dur (needs sampleRate)
     }
 
     void onReset() override {
@@ -182,6 +185,7 @@ struct GENDYN : Module {
         // the next process() (covers the case where N didn't change).
         initShape = 0;
         reseedPending = true;
+        restoredPending = false;
         dcBlock.reset();
     }
 
@@ -368,6 +372,15 @@ struct GENDYN : Module {
             updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
             last_N = N; lastInitShape = initShape; reseedPending = false;
+            restoredPending = false;                 // reinit already recomputed the caches
+        } else if (restoredPending) {
+            // Just restored from a patch: dataFromJson set the arrays but couldn't
+            // compute the sample-rate-dependent caches. Do it now (without reseeding
+            // the restored waveform) so the first cycle — pitch under LOCK and the
+            // FREQ output — is correct from sample 0, not one cycle late.
+            updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
+            current_dur = std::max(1, (int)(dur[0] * norm_k));
+            restoredPending = false;
         }
 
         // ── Generate output sample ────────────────────────────────────────────
