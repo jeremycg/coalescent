@@ -105,7 +105,7 @@ struct Axon : Module {
     int   dispClock = 0;
     int   dispPeriod = 980;           // samples between snapshots (~45 Hz; refreshed on SR change)
 
-    // ─── Tunable constants (set by ear/scope at M7; RATE_CAL from tools/) ────
+    // ─── Tunable constants (set by ear/scope; RATE_CAL from tools/stability/) ─
     static constexpr float RATE_CAL    = 37.899004f; // dimensionless period at default → C4 at 0 V
     static constexpr float B_FIXED     = 0.8f;       // recovery linear coefficient b
     static constexpr float HSUB_MAX    = 0.05f;      // max dimensionless substep size

@@ -22,8 +22,8 @@
 // needs no servo. Both integrate on the shared coalescent::rk4<2>.
 //
 // Servo constants (STAB_K, STAB_FLOOR, and the LV V0 range) were set by offline
-// simulation: the plan's originals collapsed large orbits into the positivity
-// floor; STAB_K=0.5 / STAB_FLOOR=0.2 / V0≤Vmin+3.5 is the stable, monotonic envelope.
+// simulation to keep large orbits off the positivity floor: STAB_K=0.5 /
+// STAB_FLOOR=0.2 / V0≤Vmin+3.5 is the stable, monotonic envelope.
 
 static const int LOOP_N = 128;    // phase bins for the averaged orbit loop
 
@@ -78,7 +78,7 @@ struct Bunnies : Module {
     float vPhase = 0.f, vInc = 0.002f, vPrev = 0.f;   // cycle-phase tracker
     int   vSince = 0;                                 // samples since last phase-0
 
-    // ─── Tunable constants (final values at M8) ─────────────────────────────
+    // ─── Tunable constants ──────────────────────────────────────────────────
     static constexpr float RATE_CAL  = 7.33f;  // measured LV default period × √gamma (tools/stability/bunnies.cpp) → C4 (261.6 Hz)
     static constexpr float HSUB_MAX  = 0.05f;
     static constexpr int   MIN_SUB   = 2;   // profiled: adaptive wants K=1 at default; 2 keeps 0-cent + floor margin, halves RK4
@@ -87,10 +87,10 @@ struct Bunnies : Module {
     static constexpr float OUT_GAIN  = 0.9f;
     static constexpr float STATE_MAX = 1e3f;
     static constexpr float POS_FLOOR = 1e-4f;
-    static constexpr float STAB_K       = 0.5f;   // servo gain (sim-time units) — retuned
-    static constexpr float STAB_FLOOR   = 0.2f;   // reciprocal floor in the V-gradient — retuned
+    static constexpr float STAB_K       = 0.5f;   // servo gain (sim-time units)
+    static constexpr float STAB_FLOOR   = 0.2f;   // reciprocal floor in the V-gradient
     static constexpr float MAX_STAB_STEP = 0.25f;
-    static constexpr float LV_V0_RANGE  = 3.5f;   // WILD → V0 = Vmin + [0, 3.5]; keeps max WILD off the positivity floor (retuned from plan 8)
+    static constexpr float LV_V0_RANGE  = 3.5f;   // WILD → V0 = Vmin + [0, 3.5]; keeps max WILD off the positivity floor
     static constexpr float KICK_GAIN = 0.5f;
     static constexpr float BALANCE_CV_DEPTH = 0.1f, WILD_CV_DEPTH = 0.1f;
     static constexpr float POP_MIN = 0.05f;
@@ -148,7 +148,7 @@ struct Bunnies : Module {
     void process(const ProcessArgs& args) override {
         const float fs = args.sampleRate;
 
-        // ── 3.1 read + map params ──
+        // ── read + map params ──
         float balance = clamp(params[BALANCE_PARAM].getValue()
             + inputs[BALANCE_INPUT].getVoltage() * params[BALANCE_ATT_PARAM].getValue() * BALANCE_CV_DEPTH, 0.f, 1.f);
         float wild = clamp(params[WILD_PARAM].getValue()
@@ -165,7 +165,7 @@ struct Bunnies : Module {
             K = rack::math::rescale(wild, 0.f, 1.f, 1.2f, 12.f);
         }
 
-        // ── 3.2 center (analytic) ──
+        // ── center (analytic) ──
         if (mode == LV) { cx = 1.f; cy = 1.f; }
         else {
             if (!rmValid || K != rmA || RM_B != rmB || c != rmC) {
@@ -179,10 +179,10 @@ struct Bunnies : Module {
             }
         }
 
-        // ── 3.3 MODE change → recenter + reseed ──
+        // ── MODE change → recenter + reseed ──
         if (mode != lastMode) { reseed(); resetPeakMemory(); lastMode = mode; }
 
-        // ── 3.4 pitch (+ LV √gamma compensation), adaptive substepping ──
+        // ── pitch (+ LV √gamma compensation), adaptive substepping ──
         float pitchTotal = clamp(params[RATE_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage(),
                                  PITCH_TOTAL_MIN, PITCH_TOTAL_MAX);
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pitchTotal);
@@ -224,7 +224,7 @@ struct Bunnies : Module {
         }
         x = st[0]; y = st[1];
 
-        // ── 3.5 outputs + peak gates ──
+        // ── outputs + peak gates ──
         float cX = x - cx, cY = y - cy;
         outputs[PREY_OUTPUT].setVoltage(5.f * coalescent::fastTanh(cX * OUT_GAIN));
         outputs[PRED_OUTPUT].setVoltage(5.f * coalescent::fastTanh(cY * OUT_GAIN));

@@ -90,9 +90,9 @@ struct GENDYN : Module {
         configParam(N_PARAM,            2.f,   64.f,   13.f,  "Breakpoints (N)");
         getParamQuantity(N_PARAM)->snapEnabled = true;
 
-        // Defaults retuned 2026-06 for the second-order walk: steps persist
-        // across cycles, so net drift is ~8x faster at equal scale. 0.35x the
-        // old first-order values preserves the same evolution timescale.
+        // Defaults for the second-order walk: steps persist across cycles, so net
+        // drift is ~8x faster than an uncorrelated walk at equal scale; the 0.35
+        // scaling holds a musical evolution timescale.
         configParam(SCALE_AMP_PARAM,    0.f,   1.f,    0.002f, "Amplitude step scale");
         configParam(SCALE_DUR_PARAM,    0.f,   1.f,    0.0035f,"Duration step scale");
         configParam(B_AMP_PARAM,        0.f,   1.f,    0.8f,  "Amplitude barrier");

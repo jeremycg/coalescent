@@ -63,7 +63,7 @@ struct Operon : Module {
 
     // ─── State (transient; not saved) ───────────────────────────────────────
     // Seeded ASYMMETRICALLY — with equal ICs the system stays on the symmetric
-    // subspace and never oscillates. See §1 of the plan.
+    // subspace and never oscillates.
     float m[3] = {0.2f, 0.1f, 0.3f};
     float p[3] = {0.1f, 0.4f, 0.15f};
     float lastCentered[3] = {};          // upward-crossing detection on p[k] - pStar
@@ -110,7 +110,7 @@ struct Operon : Module {
     dsp::ClockDivider dispDiv;
     float lastDisplayFs = 0.f;
 
-    // ─── Tunable constants (final values set at M7) ─────────────────────────
+    // ─── Tunable constants ──────────────────────────────────────────────────
     static constexpr float RATE_CAL     = 12.46f;  // measured default period (tools/stability/operon.cpp) → C4 at 0 V
     static constexpr float HSUB_MAX     = 0.05f;
     static constexpr int   MIN_SUB      = 2;   // profiled: K=2 holds 0-cent + bounded at default (adaptive wants 2; the 4-floor doubled the pow count)
@@ -207,7 +207,7 @@ struct Operon : Module {
     void process(const ProcessArgs& args) override {
         const float fs = args.sampleRate;
 
-        // ── 3.1 read + clamp params (per-sample; CV added with separate depths) ──
+        // ── read + clamp params (per-sample; CV added with separate depths) ──
         float alpha  = clamp(params[ALPHA_PARAM].getValue()
                            + inputs[ALPHA_INPUT].getVoltage() * params[ALPHA_ATT_PARAM].getValue() * ALPHA_CV_DEPTH,
                              0.f, 80.f);
@@ -221,7 +221,7 @@ struct Operon : Module {
         float perturb = inputs[PERTURB_INPUT].isConnected()
                       ? inputs[PERTURB_INPUT].getVoltage() * PERTURB_GAIN : 0.f;
 
-        // ── 3.2 symmetric fixed point for centering (cached on alpha/n/alpha0) ──
+        // ── symmetric fixed point for centering (cached on alpha/n/alpha0) ──
         if (!pStarValid || alpha != pStarA || n != pStarN || alpha0 != pStarL) {
             pStar = solvePStar(alpha, n, alpha0, pStarValid ? pStar : -1.f);   // warm-start Newton from the cached root
             pStarA = alpha; pStarN = n; pStarL = alpha0; pStarValid = true;
@@ -245,7 +245,7 @@ struct Operon : Module {
         }
         const bool hillDirect = nMoving || !lutValid || std::fabs(n - lutN) > 1e-4f;
 
-        // ── 3.4 pitch = simulation speed; adaptive substepping ──
+        // ── pitch = simulation speed; adaptive substepping ──
         float pitchTotal = clamp(params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage(),
                                  PITCH_TOTAL_MIN, PITCH_TOTAL_MAX);
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pitchTotal);
@@ -254,7 +254,7 @@ struct Operon : Module {
         int   K = clamp((int) std::ceil(dtau / HSUB_MAX), MIN_SUB, MAX_SUB);
         float h = dtau / K;
 
-        // ── 3.3 derivative over y = [m0,m1,m2,p0,p1,p2]; rep_i = protein of prev gene ──
+        // ── derivative over y = [m0,m1,m2,p0,p1,p2]; rep_i = protein of prev gene ──
         auto deriv = [&](const float* Y, float* D) {
             for (int i = 0; i < 3; ++i) {
                 float rep = std::max(Y[3 + ((i + 2) % 3)], 0.f);   // required: n non-integer
@@ -287,7 +287,7 @@ struct Operon : Module {
         }
         for (int i = 0; i < 3; ++i) { m[i] = y[i]; p[i] = y[3 + i]; }
 
-        // ── 3.5 outputs: centered, soft-clipped proteins + per-sample phase gates ──
+        // ── outputs: centered, soft-clipped proteins + per-sample phase gates ──
         for (int k = 0; k < 3; ++k)
             outputs[OUT1_OUTPUT + k].setVoltage(5.f * coalescent::fastTanh((p[k] - pStar) * OUT_GAIN));
         for (int k = 0; k < 3; ++k)

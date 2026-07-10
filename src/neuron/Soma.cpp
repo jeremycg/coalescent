@@ -21,8 +21,8 @@
 //
 // a,b,c,d,x_R are fixed at the standard values; CURRENT=I, BURST=r, ADAPT=s are
 // the exposed bifurcation controls. The integrator (RK4 + pitch-adaptive
-// substepping) is the same engine as Axon, with one extra equation — the
-// factoring the Axon plan called for.
+// substepping) is the same engine as Axon, with one extra equation for the slow
+// adaptation variable z.
 //
 // Polyphonic: up to 16 independent HR voices, voice count from V/OCT (falling
 // back to TRIG). The display traces every active voice on its own hue, stepped

@@ -12,7 +12,7 @@
 // scalar h, i.e. accuracy is preserved lane-by-lane.
 //
 // The k1..k4 arithmetic (weights 1, 2, 2, 1 over 6) is byte-for-byte the original
-// hand-written step from Axon/Soma; see tools/integrator_equiv.cpp for the proof.
+// hand-written step from Axon/Soma; see tools/integrator_equiv.cpp for the equivalence check.
 
 namespace coalescent {
 

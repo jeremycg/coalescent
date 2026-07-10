@@ -295,7 +295,7 @@ struct Haptik : Module {
             applyExcite(shape, amt, N);
 
         float drive = inputs[EXT_INPUT].isConnected()
-                    ? inputs[EXT_INPUT].getVoltage() * EXT_GAIN * amt : 0.f;
+                    ? inputs[EXT_INPUT].getVoltageSum() * EXT_GAIN * amt : 0.f;   // sum poly channels → mono force
         if (shape == 3 && !freeze)
             drive += amt * DRIVE_KEEPALIVE * (2.f * random::uniform() - 1.f);   // continuous keep-alive
 
@@ -323,7 +323,7 @@ struct Haptik : Module {
             // Driver force folded in here: (v+a)·gamma + drive·gamma == (v+a+drive)·gamma.
             v[driverIdx] += drive * gamma;
 
-            // Bound the state itself. The ω_max<2 proof only covers the homogeneous
+            // Bound the state itself. The ω_max<2 stability bound only covers the homogeneous
             // system; external forcing (TRIG, EXT IN) with DAMP=0 (lossless) can pump
             // energy without bound. This generous clamp is never reached in normal play
             // (|y|~1-2) and degrades runaway to bounded saturation instead of NaN.

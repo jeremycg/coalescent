@@ -2,6 +2,9 @@
 
 ## 2.2.1 (unreleased)
 
+- **Haptik — EXT sums polyphony**: the external-force input read only channel 0 of
+  a polyphonic cable; it now sums all channels (Rack's convention for feeding poly
+  audio into a monophonic processor).
 - **GENDYN & Haptik — state is now saved with the patch**: GENDYN persists its
   evolved breakpoints + walk velocities, and Haptik persists its lattice
   (displacement/velocity) and scan phase, via `dataToJson`/`dataFromJson`. A sound
