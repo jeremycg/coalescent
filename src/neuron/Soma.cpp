@@ -477,10 +477,9 @@ struct SomaDisplay : Widget {
 
 // ─── Widget ─────────────────────────────────────────────────────────────────
 
-struct SomaWidget : ModuleWidget {
+struct SomaLabels : widget::Widget {
 
     void draw(const DrawArgs& args) override {
-        ModuleWidget::draw(args);
         std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
@@ -514,10 +513,14 @@ struct SomaWidget : ModuleWidget {
 
         nvgRestore(args.vg);
     }
+};
+
+struct SomaWidget : ModuleWidget {
 
     SomaWidget(Soma* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Soma.svg")));
+        addFramebufferedLabels<SomaLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f,   1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(54.96f, 1.0f))));

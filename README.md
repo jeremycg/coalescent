@@ -132,8 +132,10 @@ These are intended behaviours, called out so they don't read as defects:
   their pitch is open-loop (CURRENT/EPS/BURST/ADAPT pull it a little).
 - **Soma's chaotic region** sits *around* the documented CURRENT; nearby values
   shift with rate, drive, and modulation — chaos isn't a fixed point on the dial.
-- **Module state isn't saved** with the patch (oscillators re-seed at rest on
-  load); knob/menu settings persist.
+- **GENDYN and Haptik preserve their evolved internal state** with the patch (the
+  running waveform / frozen lattice), so a sound you let run or freeze reloads as
+  itself. Axon, Soma, Operon and Bunnies restart from their defined initial
+  conditions; all knob and menu settings persist everywhere.
 
 ## License
 

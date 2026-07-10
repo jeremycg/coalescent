@@ -2,6 +2,11 @@
 
 ## 2.2.1 (unreleased)
 
+- **UI — fonts & label caching**: fonts are now loaded per-frame as locals instead
+  of cached in a member (a retained `Font` can dangle when Rack recreates its
+  Window); and the static panel captions render once into a `FramebufferWidget`
+  instead of being laid out with `nvgText` every frame. No visual change; lower
+  UI-thread cost, especially at high voice counts.
 - **Haptik — EXT sums polyphony**: the external-force input read only channel 0 of
   a polyphonic cable; it now sums all channels (Rack's convention for feeding poly
   audio into a monophonic processor).

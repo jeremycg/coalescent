@@ -571,11 +571,9 @@ struct GENDYScope : Widget {
 
 // ─── Widget ───────────────────────────────────────────────────────────────────
 
-struct GENDYWidget : ModuleWidget {
+struct GENDYNLabels : widget::Widget {
 
     void draw(const DrawArgs& args) override {
-        ModuleWidget::draw(args);
-
         std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
@@ -612,10 +610,14 @@ struct GENDYWidget : ModuleWidget {
 
         nvgRestore(args.vg);
     }
+};
+
+struct GENDYWidget : ModuleWidget {
 
     GENDYWidget(GENDYN* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/GENDYN.svg")));
+        addFramebufferedLabels<GENDYNLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f,   1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(54.96f, 1.0f))));

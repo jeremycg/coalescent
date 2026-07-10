@@ -395,11 +395,38 @@ struct OperonScope : widget::TransparentWidget {
     }
 };
 
+// Control labels (nanosvg ignores <text>, so labels live here on the panel).
+struct OperonLabels : widget::Widget {
+    void draw(const DrawArgs& args) override {
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFillColor(args.vg, nvgRGB(0xe6, 0xe6, 0xf2));   // near-white, ~13:1 (house legibility spec)
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        auto label = [&](float xmm, float ymm, const char* s, float sz = 2.0f) {
+            nvgFontSize(args.vg, mm2px(sz * 1.72f));       // Nunito Bold, sized up for legibility
+            nvgText(args.vg, mm2px(xmm), mm2px(ymm), s, nullptr);
+        };
+        using namespace opl;
+        const char* knobL[5] = {"PITCH", "DRIVE", "HILL", "DECAY", "LEAK"};
+        for (int i = 0; i < 5; ++i) label(COL5[i], KNOB_Y - 6.f, knobL[i]);
+        const char* inL[5] = {"V/OCT", "DRIVE", "HILL", "DECAY", "PERT"};
+        for (int i = 0; i < 5; ++i) label(COL5[i], IN_Y - 5.5f, inL[i], 1.7f);
+        const char* outL[3] = {"OUT1", "OUT2", "OUT3"};
+        const char* gateL[3] = {"GATE1", "GATE2", "GATE3"};
+        for (int i = 0; i < 3; ++i) {
+            label(COL3[i], OUT_Y - 5.5f, outL[i], 1.8f);
+            label(COL3[i], GATE_Y - 5.5f, gateL[i], 1.8f);
+        }
+    }
+};
+
 struct OperonWidget : ModuleWidget {
 
     OperonWidget(Operon* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Operon.svg")));
+        addFramebufferedLabels<OperonLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f, 1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(65.12f, 1.0f))));
@@ -433,31 +460,6 @@ struct OperonWidget : ModuleWidget {
         for (int i = 0; i < 3; ++i) {
             addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(COL3[i], OUT_Y)), module, outId[i]));
             addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(COL3[i], GATE_Y)), module, gateId[i]));
-        }
-    }
-
-    // Control labels (nanosvg ignores <text>, so labels live here on the panel).
-    void draw(const DrawArgs& args) override {
-        ModuleWidget::draw(args);
-        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
-        if (!font) return;
-        nvgFontFaceId(args.vg, font->handle);
-        nvgFillColor(args.vg, nvgRGB(0xe6, 0xe6, 0xf2));   // near-white, ~13:1 (house legibility spec)
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        auto label = [&](float xmm, float ymm, const char* s, float sz = 2.0f) {
-            nvgFontSize(args.vg, mm2px(sz * 1.72f));       // Nunito Bold, sized up for legibility
-            nvgText(args.vg, mm2px(xmm), mm2px(ymm), s, nullptr);
-        };
-        using namespace opl;
-        const char* knobL[5] = {"PITCH", "DRIVE", "HILL", "DECAY", "LEAK"};
-        for (int i = 0; i < 5; ++i) label(COL5[i], KNOB_Y - 6.f, knobL[i]);
-        const char* inL[5] = {"V/OCT", "DRIVE", "HILL", "DECAY", "PERT"};
-        for (int i = 0; i < 5; ++i) label(COL5[i], IN_Y - 5.5f, inL[i], 1.7f);
-        const char* outL[3] = {"OUT1", "OUT2", "OUT3"};
-        const char* gateL[3] = {"GATE1", "GATE2", "GATE3"};
-        for (int i = 0; i < 3; ++i) {
-            label(COL3[i], OUT_Y - 5.5f, outL[i], 1.8f);
-            label(COL3[i], GATE_Y - 5.5f, gateL[i], 1.8f);
         }
     }
 };

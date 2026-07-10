@@ -575,11 +575,9 @@ struct RingDisplay : Widget {
 
 // ─── Widget ─────────────────────────────────────────────────────────────────
 
-struct HaptikWidget : ModuleWidget {
+struct HaptikLabels : widget::Widget {
 
     void draw(const DrawArgs& args) override {
-        ModuleWidget::draw(args);
-
         std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
@@ -619,10 +617,14 @@ struct HaptikWidget : ModuleWidget {
 
         nvgRestore(args.vg);
     }
+};
+
+struct HaptikWidget : ModuleWidget {
 
     HaptikWidget(Haptik* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Haptik.svg")));
+        addFramebufferedLabels<HaptikLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f,   1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(85.42f, 1.0f))));

@@ -511,11 +511,9 @@ struct PhaseDisplay : Widget {
 
 // ─── Widget ─────────────────────────────────────────────────────────────────
 
-struct AxonWidget : ModuleWidget {
+struct AxonLabels : widget::Widget {
 
     void draw(const DrawArgs& args) override {
-        ModuleWidget::draw(args);
-
         std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
         if (!font) return;
 
@@ -552,10 +550,14 @@ struct AxonWidget : ModuleWidget {
 
         nvgRestore(args.vg);
     }
+};
+
+struct AxonWidget : ModuleWidget {
 
     AxonWidget(Axon* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Axon.svg")));
+        addFramebufferedLabels<AxonLabels>(this);
 
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f,   1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(54.96f, 1.0f))));

@@ -348,11 +348,35 @@ struct OrbitView : widget::TransparentWidget {
     }
 };
 
+// Control labels (nanosvg ignores <text>, so labels live here on the panel).
+struct BunniesLabels : widget::Widget {
+    void draw(const DrawArgs& args) override {
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
+        if (!font) return;
+        nvgFontFaceId(args.vg, font->handle);
+        nvgFillColor(args.vg, nvgRGB(0xe6, 0xe6, 0xf2));   // near-white, ~13:1 (house legibility spec)
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        auto label = [&](float xmm, float ymm, const char* s, float sz = 1.9f) {
+            nvgFontSize(args.vg, mm2px(sz * 1.72f));       // Nunito Bold, sized up for legibility
+            nvgText(args.vg, mm2px(xmm), mm2px(ymm), s, nullptr);
+        };
+        using namespace bpl;
+        const char* kl[3] = {"RATE", "BALANCE", "WILD"};
+        for (int i = 0; i < 3; ++i) label(KNOB_X[i], KNOB_Y - 6.f, kl[i]);
+        label(MODE_X, KNOB_Y - 6.f, "LV/RM", 1.5f);
+        const char* il[4] = {"V/OCT", "BAL", "WILD", "KICK"};
+        for (int i = 0; i < 4; ++i) label(IN_X[i], IN_Y - 5.5f, il[i], 1.55f);
+        label(OUT_X[0], OUT_Y - 5.5f, "PREY", 1.6f);  label(OUT_X[1], OUT_Y - 5.5f, "PRED", 1.6f);
+        label(OUT_X[0], POP_Y - 5.5f, "PREY↑", 1.5f); label(OUT_X[1], POP_Y - 5.5f, "PRED↑", 1.5f);
+    }
+};
+
 struct BunniesWidget : ModuleWidget {
 
     BunniesWidget(Bunnies* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Bunnies.svg")));
+        addFramebufferedLabels<BunniesLabels>(this);
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f, 1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(54.96f, 1.0f))));
         addChild(createWidget<ScrewSilver>(mm2px(Vec(1.0f, 122.0f))));
@@ -381,26 +405,6 @@ struct BunniesWidget : ModuleWidget {
         addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(OUT_X[1], POP_Y)), module, Bunnies::PRED_POP_OUTPUT));
     }
 
-    void draw(const DrawArgs& args) override {
-        ModuleWidget::draw(args);
-        std::shared_ptr<Font> font = APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
-        if (!font) return;
-        nvgFontFaceId(args.vg, font->handle);
-        nvgFillColor(args.vg, nvgRGB(0xe6, 0xe6, 0xf2));   // near-white, ~13:1 (house legibility spec)
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        auto label = [&](float xmm, float ymm, const char* s, float sz = 1.9f) {
-            nvgFontSize(args.vg, mm2px(sz * 1.72f));       // Nunito Bold, sized up for legibility
-            nvgText(args.vg, mm2px(xmm), mm2px(ymm), s, nullptr);
-        };
-        using namespace bpl;
-        const char* kl[3] = {"RATE", "BALANCE", "WILD"};
-        for (int i = 0; i < 3; ++i) label(KNOB_X[i], KNOB_Y - 6.f, kl[i]);
-        label(MODE_X, KNOB_Y - 6.f, "LV/RM", 1.5f);
-        const char* il[4] = {"V/OCT", "BAL", "WILD", "KICK"};
-        for (int i = 0; i < 4; ++i) label(IN_X[i], IN_Y - 5.5f, il[i], 1.55f);
-        label(OUT_X[0], OUT_Y - 5.5f, "PREY", 1.6f);  label(OUT_X[1], OUT_Y - 5.5f, "PRED", 1.6f);
-        label(OUT_X[0], POP_Y - 5.5f, "PREY↑", 1.5f); label(OUT_X[1], POP_Y - 5.5f, "PRED↑", 1.5f);
-    }
 };
 
 Model* modelBunnies = createModel<Bunnies, BunniesWidget>("Bunnies");
