@@ -5,8 +5,8 @@ scanned physical bodies, and spiking neuron voices.
 Built around one idea: let a small dynamical system run, and listen to it.
 Each module is a different system —
 stochastic, physical, or neural — driven hard enough to make sound. They're
-grouped as the **Fluctuations** series (a label used throughout the docs and
-panels, not a separate brand); the same plugin has room for other series later.
+grouped as the **Fluctuations** series (a label used throughout the docs, not a
+separate brand); the same plugin has room for other series later.
 
 | Module | System | Character |
 | --- | --- | --- |
@@ -69,7 +69,13 @@ python3 tools/make_patch_gallery.py         # gallery view
 
 ## Install
 
-Download the `.vcvplugin` bundle for your platform from the
+**From the VCV Library (recommended).** Coalescent is in the official
+[VCV Library](https://library.vcvrack.com/) — subscribe there, then in Rack use
+*Library → Update all* (or *Sync* on Rack Pro). This keeps the plugin updated
+automatically and is the easiest path for most users.
+
+**Manual (development builds / unreleased changes).** Download the `.vcvplugin`
+bundle for your platform from the
 [latest GitHub Release](https://github.com/jeremycg/coalescent/releases/latest),
 drop it into your Rack user folder's `plugins/` directory (Rack → *Library →
 Open user folder*), and restart Rack.
