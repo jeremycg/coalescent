@@ -162,13 +162,18 @@ struct GENDYN : Module {
         if (n < 2 || n > MAX_N) return;
         if ((int) json_array_size(ja) != n || (int) json_array_size(jd) != n
             || (int) json_array_size(jsa) != n || (int) json_array_size(jsd) != n) return;
+        // Durations are floored at 1 and capped well below INT_MAX so the float→int
+        // conversions in playback (dur[0]*norm_k, error-diffused fd) can't overflow
+        // on a corrupt/hand-edited patch — that would be undefined behaviour. Any
+        // real duration is at most a few thousand samples.
+        constexpr float DUR_MAX = 1e6f;
         float A[MAX_N], Dr[MAX_N], SA[MAX_N], SD[MAX_N];
         for (int i = 0; i < n; i++) {
             A[i]  = (float) json_number_value(json_array_get(ja,  i));
             Dr[i] = (float) json_number_value(json_array_get(jd,  i));
             SA[i] = (float) json_number_value(json_array_get(jsa, i));
             SD[i] = (float) json_number_value(json_array_get(jsd, i));
-            if (!std::isfinite(A[i]) || !std::isfinite(Dr[i]) || Dr[i] < 1.f
+            if (!std::isfinite(A[i]) || !std::isfinite(Dr[i]) || Dr[i] < 1.f || Dr[i] > DUR_MAX
                 || !std::isfinite(SA[i]) || !std::isfinite(SD[i])) return;   // malformed → reseed
         }
         float s = 0.f;
