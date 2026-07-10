@@ -407,7 +407,7 @@ struct OperonLabels : widget::Widget {
         };
         using namespace opl;
         const char* knobL[5] = {"PITCH", "DRIVE", "HILL", "DECAY", "LEAK"};
-        for (int i = 0; i < 5; ++i) label(COL5[i], KNOB_Y - 6.f, knobL[i]);
+        for (int i = 0; i < 5; ++i) label(COL5[i], KNOB_Y - 8.f, knobL[i]);   // match the 8mm knob-label gap of the other modules
         const char* inL[5] = {"V/OCT", "DRIVE", "HILL", "DECAY", "PERT"};
         for (int i = 0; i < 5; ++i) label(COL5[i], IN_Y - 5.5f, inL[i], 1.7f);
         const char* outL[3] = {"OUT1", "OUT2", "OUT3"};

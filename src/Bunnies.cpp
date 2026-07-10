@@ -360,8 +360,8 @@ struct BunniesLabels : widget::Widget {
         };
         using namespace bpl;
         const char* kl[3] = {"RATE", "BALANCE", "WILD"};
-        for (int i = 0; i < 3; ++i) label(KNOB_X[i], KNOB_Y - 6.f, kl[i]);
-        label(MODE_X, KNOB_Y - 6.f, "LV/RM", 1.5f);
+        for (int i = 0; i < 3; ++i) label(KNOB_X[i], KNOB_Y - 8.f, kl[i]);   // match the 8mm knob-label gap of the other modules
+        label(MODE_X, KNOB_Y - 8.f, "LV/RM", 1.5f);
         const char* il[4] = {"V/OCT", "BAL", "WILD", "KICK"};
         for (int i = 0; i < 4; ++i) label(IN_X[i], IN_Y - 5.5f, il[i], 1.55f);
         label(OUT_X[0], OUT_Y - 5.5f, "PREY", 1.6f);  label(OUT_X[1], OUT_Y - 5.5f, "PRED", 1.6f);
