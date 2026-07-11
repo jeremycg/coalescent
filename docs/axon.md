@@ -140,6 +140,14 @@ a silent voice's *oscillator state* is frozen and resumes where it left off;
 small DSP helper state (edge detectors, DC filter) may still warm in the
 background, which is inaudible.
 
+One consequence of the four-lane grouping: the whole group runs at the substep
+count of its **fastest** lane, so a single very-high-pitched voice pulls its three
+groupmates up to the same integration rate. As a rough budget (44.1 kHz, ×4, 16
+voices): ~3–4% of one core at moderate pitch, rising to ~30–50% at the very top of
+the V/OCT range. If you sequence a poly patch into the extreme high register and
+CPU matters, drop anti-aliasing to ×2 / Off, or split extreme pitches onto a
+separate instance.
+
 ## Patches
 
 `tools/make_patches_neuron.py` writes nine Axon smoke-test patches into `patches/`

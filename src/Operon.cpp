@@ -113,7 +113,7 @@ struct Operon : Module {
     // ─── Tunable constants ──────────────────────────────────────────────────
     static constexpr float RATE_CAL     = 12.46f;  // measured default period (tools/stability/operon.cpp) → C4 at 0 V
     static constexpr float HSUB_MAX     = 0.05f;
-    static constexpr int   MIN_SUB      = 2;   // profiled: K=2 holds 0-cent + bounded at default (adaptive wants 2; the 4-floor doubled the pow count)
+    static constexpr int   MIN_SUB      = 2;   // substep floor: K=2 holds 0-cent and stays bounded at default
     static constexpr int   MAX_SUB      = 64;
     static constexpr float PITCH_TOTAL_MIN = -8.f, PITCH_TOTAL_MAX = 8.f;
     static constexpr float OUT_GAIN     = 0.3f;   // set offline: default RMS ~3.2V, peaks lightly saturate, high drive grits

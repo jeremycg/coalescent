@@ -2,6 +2,14 @@
 
 ## 2.2.1 (unreleased)
 
+**What you'll notice.** Two changes affect how *saved patches* sound: **Bunnies**
+now plays in tune (was ~37¢ sharp) and **Haptik's DAMP** knob is musical across its
+whole travel (saved Haptik patches play back more resonant). **GENDYN `DUR WID = 0`**
+holds pitch exactly, **Haptik FREEZE** no longer clicks (and a Slow+FREEZE patch
+reloads audibly), and **GENDYN/Haptik now save their evolved or frozen sound** with
+the patch. The rest below is the full record, including internal robustness,
+performance, and concurrency work with no audible effect.
+
 - **Concurrency & robustness pass** (from an external review):
   - **Race-free saves**: GENDYN/Haptik `dataToJson()` read live state arrays while
     `process()` could mutate them (Rack only share-locks on save). The audio thread

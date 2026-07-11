@@ -96,7 +96,11 @@ only when aliasing is audible on high notes.
 As in [Axon](axon.md#cpu), voices are processed in **groups of four SIMD lanes**
 (measured ~4x on the integration chain at 16 voices; CPU steps at 1->5->9->13
 voices; inactive lanes are masked so a silent voice's oscillator state is frozen
-— helper state like edge detectors may still warm, inaudibly).
+— helper state like edge detectors may still warm, inaudibly). The group runs at
+its **fastest** lane's substep count, so one very-high-pitched voice pulls its
+groupmates up with it. Rough budget (44.1 kHz, ×4, 16 voices): ~4% of a core at
+moderate pitch, ~50% at the top of the range — Soma is a little heavier than Axon.
+Drop anti-aliasing or split extreme pitches onto another instance if it matters.
 
 ## Patches
 

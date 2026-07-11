@@ -103,10 +103,10 @@ struct Soma : Module {
     // ─── Fixed HR parameters ────────────────────────────────────────────────
     static constexpr float A = 1.f, B = 3.f, C = 1.f, D = 5.f, XR = -1.6f;
 
-    // ─── Tunable constants (RATE_CAL from tools/soma_stability_test.cpp) ─────
+    // ─── Tunable constants (RATE_CAL from tools/stability/soma.cpp) ──────────
     static constexpr float RATE_CAL    = 55.364003f; // tonic spike period (I=2.0, r=0.03) → C4 at 0 V
     static constexpr float HSUB_MAX    = 0.05f;
-    static constexpr int   MIN_SUB     = 2;   // substep floor: profiled, halves RK4 CPU vs 4 with 0-cent, ~-74dB change
+    static constexpr int   MIN_SUB     = 2;   // substep floor: 2 holds 0-cent accuracy at default (half the RK4 cost of a 4-floor)
     static constexpr int   MAX_SUB     = 64;
     static constexpr float TRIG_AMP    = 1.0f;        // injected current pulse (kicks a burst from rest)
     static constexpr float TRIG_TAU_MS = 5.f;

@@ -81,7 +81,7 @@ struct Bunnies : Module {
     // ─── Tunable constants ──────────────────────────────────────────────────
     static constexpr float RATE_CAL  = 7.33f;  // measured LV default period × √gamma (tools/stability/bunnies.cpp) → C4 (261.6 Hz)
     static constexpr float HSUB_MAX  = 0.05f;
-    static constexpr int   MIN_SUB   = 2;   // profiled: adaptive wants K=1 at default; 2 keeps 0-cent + floor margin, halves RK4
+    static constexpr int   MIN_SUB   = 2;   // substep floor: 2 keeps 0-cent with margin above the positivity floor
     static constexpr int   MAX_SUB   = 64;
     static constexpr float PITCH_TOTAL_MIN = -8.f, PITCH_TOTAL_MAX = 8.f;
     static constexpr float OUT_GAIN  = 0.9f;
