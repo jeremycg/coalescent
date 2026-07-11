@@ -84,16 +84,23 @@ concurrency work with no audible effect.
 - **GENDYN — scope alignment**: the waveform display now pairs each duration with
   the segment it actually plays (`amp[i-1]→amp[i]` over `dur[i]`, cycle starting at
   `amp[N-1]`). With unequal durations the polygon now matches the audio instead of
-  being rotated by one segment.
+  being rotated by one segment. The scope also uses the LOCK-normalized, floored,
+  and rounded durations playback realizes, so near the sample floor it shows the
+  actual reshaped waveform rather than the raw (un-normalized) breakpoint walk.
 - **Bunnies — NaN backstop**: the reseed check now runs before the state clamp
   (the fmin/fmax clamp mapped NaN to a bound, hiding it from the backstop).
 - **Tests / CI**: new GENDYN stability test — it derives the barriers and runs the
   duration walk, so it genuinely catches the DUR WID regression (verified: the old
   widened barrier drifts, the fix stays pinned). The SDK-free `make check` and the
   Rack-header `make check-simd` (now covering Soma's 3-state HR path, 0.000 cents)
-  are separate targets so the SDK-free CI guardrail stays SDK-free. Offline WAV
-  renderers use current production constants (Soma `RATE_CAL` 14.9→55.36, `MIN_SUB`
-  4→2) and no longer overstate output-stage parity.
+  are separate targets so the SDK-free CI guardrail stays SDK-free. The GENDYN
+  suite also covers the LOCK servo near the sample floor (hits reachable targets
+  within a sample; saturates cleanly below the `fs/N` floor). New Haptik test
+  asserts Slow-mode **FREEZE** holds the currently-heard interpolated frame (a
+  raw-endpoint read would jump ~0.22 — an audible click — which the test's
+  discrimination check confirms it would catch). Offline WAV renderers use current
+  production constants (Soma `RATE_CAL` 14.9→55.36, `MIN_SUB` 4→2) and now mirror
+  the production `subTau` cap, so they don't overstate parity at extreme pitch.
 - **Docs**: GENDYN scope is sampled at ~45 Hz, not low-pass filtered (claim
   corrected); documented GENDYN's `fs/N` frequency ceiling; Axon manual lists all
   nine patches (adds polytrig/polyvoice) and describes poly CV normalling correctly

@@ -1,4 +1,5 @@
-// Regression test for Haptik's core safety invariant and pitch accuracy.
+// Regression test for Haptik's core safety invariant, pitch accuracy, and the
+// Slow-mode FREEZE readout continuity (the captured interpolated frame).
 //
 // Replicates the src/Haptik.cpp dynamics kernel (modulo-free symplectic Euler
 // with the +1e-20f denormal guard) in plain C++ so the invariant can be checked
@@ -102,6 +103,68 @@ int main() {
     }
     printf("    %s\n", sb ? "PASS (bounded with divider + kCtr clamp)" : "FAIL");
     ok = ok && sb;
+
+    // [6] Slow-mode FREEZE captures the frame currently being *heard* (the
+    //     interpolated shape between yPrev and y), so engaging FREEZE mid-frame
+    //     doesn't jump the readout — the click the fix removed. Mirror the module:
+    //     step every D samples keeping yPrev; the live readout lerps yPrev->y by
+    //     fr = divCounter/D (src/Haptik.cpp:398). The FREEZE edge collapses that same
+    //     interpolated frame into y (and yPrev) (src/Haptik.cpp:324), after which the
+    //     frozen readout reads y directly — and must equal the live value. The old
+    //     bug read the raw y endpoint instead, jumping by (1-fr)x the frame delta.
+    {
+        const int   N = 64, D = 256;                 // D = SLOW_DIV
+        const float kSpr = 0.3f, fEvo = 3.f, drive = 0.5f, gamma = 1.f;  // DAMP=0
+        const float wc = 2.f*(float)M_PI*fEvo*D/fs;
+        const float kCtr = std::min(wc*wc, 0.35f);
+        const int   targetDiv = D/2;                 // freeze halfway through a frame
+
+        seedBump(N);
+        static float yPrev[MAX_N]; std::fill(yPrev, yPrev + MAX_N, 0.f);
+        int divc = 0;
+        for (long n = 0; n < 5L*D + targetDiv; n++) { // evolve so yPrev and y differ
+            if (divc == 0) {
+                std::copy(y, y + N, yPrev);            // pre-step snapshot (module:352)
+                v[0] = (v[0] + kSpr*(y[N-1]-2*y[0]+y[1]) - kCtr*y[0]) * gamma + 1e-20f;
+                for (int i = 1; i < N-1; i++)
+                    v[i] = (v[i] + kSpr*(y[i-1]-2*y[i]+y[i+1]) - kCtr*y[i]) * gamma + 1e-20f;
+                v[N-1] = (v[N-1] + kSpr*(y[N-2]-2*y[N-1]+y[0]) - kCtr*y[N-1]) * gamma + 1e-20f;
+                v[driverIdx] += drive * gamma;
+                for (int i = 0; i < N; i++) {
+                    y[i] = std::max(-STATE_MAX, std::min(STATE_MAX, y[i] + v[i]));
+                    v[i] = std::max(-STATE_MAX, std::min(STATE_MAX, v[i]));
+                }
+            }
+            divc = (divc + 1) % D;
+        }
+        // divc == targetDiv; yPrev = last pre-step frame, y = current frame.
+        float fr = (float) divc / (float) D;
+        float ycap[MAX_N];                            // FREEZE capture (module:324-329)
+        for (int i = 0; i < N; i++) ycap[i] = yPrev[i] + fr*(y[i] - yPrev[i]);
+
+        double maxJumpFixed = 0.0, maxJumpBug = 0.0;
+        for (int i0 = 0; i0 < N; i0++) {
+            int i1 = (i0 + 1) % N;
+            for (float f : {0.0f, 0.37f, 0.5f, 0.83f}) {
+                float a0 = yPrev[i0] + fr*(y[i0] - yPrev[i0]);   // live slow readout
+                float a1 = yPrev[i1] + fr*(y[i1] - yPrev[i1]);
+                float live        = a0 + f*(a1 - a0);
+                float frozenFixed = ycap[i0] + f*(ycap[i1] - ycap[i0]);  // reads captured frame
+                float frozenBug   = y[i0]    + f*(y[i1]    - y[i0]);     // old: reads raw endpoint
+                maxJumpFixed = std::max(maxJumpFixed, (double) std::fabs(frozenFixed - live));
+                maxJumpBug   = std::max(maxJumpBug,   (double) std::fabs(frozenBug   - live));
+            }
+        }
+        bool contOk = maxJumpFixed < 1e-5;            // capture holds the heard shape
+        bool discOk = maxJumpBug   > 1e-2;            // raw-endpoint read really would click
+        printf("[6] Slow-mode FREEZE readout continuity (freeze at fr=%.2f)\n", fr);
+        printf("    captured-frame jump=%.2e (raw-endpoint jump would be %.3f)\n",
+               maxJumpFixed, maxJumpBug);
+        if (!contOk) printf("    FAIL: FREEZE capture jumps the readout\n");
+        if (!discOk) printf("    FAIL discrimination: raw-endpoint read wouldn't jump — test vacuous\n");
+        printf("    %s\n", (contOk && discOk) ? "PASS" : "FAIL");
+        ok = ok && contOk && discOk;
+    }
 
     printf("%s\n", ok ? "ALL PASS" : "FAILURES PRESENT");
     return ok ? 0 : 1;

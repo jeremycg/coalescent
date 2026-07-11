@@ -86,6 +86,8 @@ struct GENDYN : Module {
         float dur[MAX_N] = {};
         int   n = 13;
         float bAmp = 0.8f;
+        float normK = 1.f;   // LOCK playback scale, so the scope draws the durations
+                             // playback actually realizes (floored + rounded near the floor)
     };
     coalescent::DisplaySnapshot<DisplayFrame> displaySnapshot;
     int   dispClock = 0;
@@ -513,8 +515,9 @@ struct GENDYN : Module {
             DisplayFrame& fr = displaySnapshot.writable();
             std::copy(amp, amp + N, fr.amp);
             std::copy(dur, dur + N, fr.dur);
-            fr.n    = N;
-            fr.bAmp = bAmp;
+            fr.n     = N;
+            fr.bAmp  = bAmp;
+            fr.normK = norm_k;
             displaySnapshot.publish();
         }
     }
@@ -567,18 +570,23 @@ struct GENDYScope : Widget {
 
             // Build the polygon from the snapshot (or a demo shape in the browser).
             int N = (module && fr.n >= 2) ? fr.n : 13;
-            float total = 0.f;
-            for (int i = 0; i < N; i++)
-                total += module ? std::max(1.f, fr.dur[i]) : 1.f;
-            if (total <= 0.f) total = 1.f;
 
             auto ampAt = [&](int i) {
                 if (module) return fr.amp[i];
                 return 0.7f * std::sin(2.f * (float)M_PI * 2.f * i / N);   // demo
             };
+            // The played length of segment i: dur[i] scaled by the LOCK norm, floored
+            // at 1 sample and rounded — exactly what playback realizes. norm_k is a
+            // common factor so it cancels in the cum/total proportions everywhere the
+            // floor doesn't bite; near the sample floor the floor+round genuinely
+            // reshape the polygon, and the scope now shows that instead of the raw walk.
             auto durAt = [&](int i) {
-                return module ? std::max(1.f, fr.dur[i]) : 1.f;
+                return module ? std::max(1.f, std::round(fr.dur[i] * fr.normK)) : 1.f;
             };
+
+            float total = 0.f;
+            for (int i = 0; i < N; i++) total += durAt(i);
+            if (total <= 0.f) total = 1.f;
 
             // Match the audio's segment/duration pairing: segment i interpolates
             // amp[i-1] -> amp[i] over dur[i], and a cycle begins from amp[N-1]. So

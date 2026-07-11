@@ -74,6 +74,7 @@ static std::vector<float> render(float fs, double dur, float I, float eps, float
         float oct = octStart + (octEnd-octStart)*(float)i/N;
         float pitchHz = FREQ_C4*std::exp2(oct);
         float dtau = RATE_CAL*pitchHz/fs;
+        dtau = std::min(dtau, HSUB_MAX*MAX_SUB);   // mirror the production subTau cap: keeps h<=HSUB_MAX at extreme pitch
         int K = clampi((int)std::ceil(dtau/HSUB_MAX), MIN_SUB, MAX_SUB);
         float h = dtau/K;
         for (int k = 0; k < K; k++) rk4(v, w, h, Itot, eps, a);

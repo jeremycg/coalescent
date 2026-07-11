@@ -48,6 +48,7 @@ static std::vector<float> render(float fs,double dur,float I,float r,float s,flo
     long N=(long)(dur*fs); std::vector<float> out; out.reserve(N);
     long ts=trigPeriodS>0?(long)(trigPeriodS*fs):0;
     float pitchHz=FREQ_C4*std::exp2(oct); float dtau=RATE_CAL*pitchHz/fs;
+    dtau=std::min(dtau,HSUB_MAX*MAX_SUB);   // mirror the production subTau cap: keeps h<=HSUB_MAX at extreme pitch
     int K=clampi((int)std::ceil(dtau/HSUB_MAX),MIN_SUB,MAX_SUB); float h=dtau/K;
     for(long i=0;i<N;i++){
         if(ts&&(i%ts==0)) trig=TRIG_AMP;
