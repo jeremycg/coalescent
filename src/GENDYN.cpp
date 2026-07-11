@@ -54,6 +54,7 @@ struct GENDYN : Module {
     float current_amp        = 0.f; // amplitude at the start of the current segment
     float target_amp         = 0.f; // amplitude at the end   of the current segment
     int   current_dur        = 1;   // length of the current segment in samples
+    long  cycleAcc           = 0;   // samples played so far this cycle (→ measured FREQ)
     float sum_dur            = 1.f; // cached sum of dur[0..N-1], updated per cycle
     float freq_cv            = 0.f; // cached FREQ output voltage, updated with sum_dur
     float norm_k             = 1.f; // playback duration scale; LOCK mode sets it so
@@ -181,7 +182,7 @@ struct GENDYN : Module {
         float s = 0.f;
         for (int i = 0; i < n; i++) { amp[i] = A[i]; dur[i] = Dr[i]; step_amp[i] = SA[i]; step_dur[i] = SD[i]; s += Dr[i]; }
         sum_dur = s;
-        current_breakpoint = 0; current_sample = 0;          // clean cycle start from the restored shape
+        current_breakpoint = 0; current_sample = 0; cycleAcc = 0;   // clean cycle start from the restored shape
         current_amp = amp[n - 1]; target_amp = amp[0];
         current_dur = std::max(1, (int) dur[0]); dur_err = 0.f;
         last_N = n; lastInitShape = initShape; reseedPending = false;   // suppress the reinit reseed
@@ -270,6 +271,7 @@ struct GENDYN : Module {
         }
         current_breakpoint = 0;
         current_sample     = 0;
+        cycleAcc           = 0;
         current_amp        = amp[N - 1];   // wrap value → the first cycle is exactly periodic
         target_amp         = amp[0];
         current_dur        = std::max(1, (int)dur[0]);
@@ -318,11 +320,14 @@ struct GENDYN : Module {
         norm_k = 1.f;
         if (lockPitch && sum_dur > 0.f) {
             norm_k = (sampleRate / centerFreq) / sum_dur;
-            // Playback floors each segment at 1 sample, so a cycle can't be
-            // shorter than N samples. Clamp norm_k to keep the FREQ CV honest
-            // when the LOCK target (fs/centerFreq) is below that reachable floor.
+            // Playback floors each segment at 1 sample, so a cycle can't be shorter
+            // than N samples. Clamp norm_k so a below-floor LOCK target can't run
+            // norm_k away. The realized period the per-segment floor and error-diffused
+            // rounding actually produce is *measured* per cycle (see freq_cv below), so
+            // FREQ stays honest even when unequal durations near the floor inflate it.
             norm_k = std::max(norm_k, (float) N / sum_dur);
         }
+        // Initial estimate; the per-cycle measurement overrides this once playing.
         freq_cv = computeFreqCV(sampleRate, sum_dur * norm_k);
     }
 
@@ -416,11 +421,17 @@ struct GENDYN : Module {
 
         // ── Advance oscillator state ──────────────────────────────────────────
         if (++current_sample >= current_dur) {
+            cycleAcc          += current_dur;      // count the segment that just finished
             current_amp        = target_amp;
             current_sample     = 0;
             current_breakpoint = (current_breakpoint + 1) % N;
 
             if (current_breakpoint == 0) {
+                // FREQ from the period playback *actually* realized this cycle (each
+                // segment ≥ 1, error-diffused rounding). Overrides the theoretical
+                // estimate below, so unequal durations near the sample floor under
+                // LOCK report their true pitch instead of the requested one.
+                float realized = (float) cycleAcc; cycleAcc = 0;
                 // PERSIST knob -> step-walk draw spread, exponential: 0 -> 1.0
                 // (near-white steps, first-order feel), 0.3 -> 0.25 (default),
                 // 1 -> 0.01 (long steady glides). Needed once per cycle, so
@@ -430,6 +441,7 @@ struct GENDYN : Module {
                 runCycleUpdate(N, scaleAmp, scaleDur, bAmp, bDurMin, bDurMax,
                                dist, persistSpread);
                 updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
+                if (realized > 0.f) freq_cv = computeFreqCV(args.sampleRate, realized);
                 // Continuity at the cycle boundary is inherent: every segment
                 // starts from current_amp (the value just reached), so the
                 // wrap segment interpolates from the old amp[N-1] to the
