@@ -42,11 +42,13 @@ static double playHz(const float* dur, int N, float norm_k, float fs, int cycles
     return fs * cycles / (double) total;
 }
 
-// src/GENDYN.cpp updateNormAndFreq(): LOCK scales the cycle to fs/centreFreq, but
-// never below the N-sample floor.
+// src/GENDYN.cpp updateNormAndFreq() feed-forward scale: LOCK scales the cycle to
+// fs/centreFreq (lockCorr = 1). Production no longer clamps norm_k to the floor —
+// the per-cycle servo bounds the loop instead (exercised in test [5]); well above
+// the floor (test [4]'s cases) the scale is simply fs/centreFreq/sum_dur.
 static float lockNorm(float sum_dur, int N, float fs, float centerFreq) {
-    float k = (fs / centerFreq) / sum_dur;
-    return std::max(k, (float) N / sum_dur);
+    (void) N;
+    return (fs / centerFreq) / sum_dur;
 }
 
 // Mode selector for the servo mirror below: the shipped fix, and the two historical
@@ -103,8 +105,9 @@ static std::vector<long> servoRun(const float* dur, int N, float fs,
         // ── advance to the next cycle ──
         auto nx = (c + 1 < sched.size()) ? sched[c+1] : sched[c];
         float newTarget = nx.second ? fs / nx.first : 0.f;
-        if (mode == SERVO_FIXED && (newTarget != cycleTarget || newTarget <= (float) N))
-            lockCorr = 1.f;                                  // reset-on-target-change / unreachable
+        if (mode == SERVO_FIXED && (newTarget != cycleTarget || newTarget <= (float) N)) {
+            lockCorr = 1.f; dur_err = 0.f;                   // reset-on-target-change / unreachable
+        }
         if (nx.second) norm_k = (fs / nx.first) / sum * lockCorr;
         else { norm_k = 1.f; lockCorr = 1.f; }
         cycleTarget = newTarget;
@@ -350,10 +353,13 @@ int main() {
             float cf5k = 5000.f, cfC4 = fs / 168.56f;      // below floor, then a reachable C4
             std::vector<std::pair<float,bool>> sched(40, {cf5k, true});
             for (int i = 0; i < 8; i++) sched.push_back({cfC4, true});
-            double fixedC = cents(fs / servoRun(dHi, N, fs, sched, SERVO_FIXED).at(40), 261.626);
-            double staleC = cents(fs / servoRun(dHi, N, fs, sched, BUG_STALE ).at(40), 261.626);
-            if (std::fabs(fixedC) > 50.0) { ok = false;
-                printf("  [5e] FAIL below-floor->C4 first cycle %.0f cents off (want <50)\n", fixedC); }
+            long fixedP = servoRun(dHi, N, fs, sched, SERVO_FIXED).at(40);
+            double fixedC = cents(fs / fixedP, 261.626);
+            double staleC = cents(fs / servoRun(dHi, N, fs, sched, BUG_STALE).at(40), 261.626);
+            // reset-on-target-change clears both lockCorr AND dur_err, so the first C4
+            // cycle lands within ~1 sample of 168.56 (≈±10 cents at this period).
+            if (std::fabs(fixedP - 168.56) > 1.1) { ok = false;
+                printf("  [5e] FAIL below-floor->C4 first cycle %ld samples (%.0f cents), want within 1 of 168.56\n", fixedP, fixedC); }
             if (std::fabs(staleC) < 1000.0) { ok = false;  // discrimination: the stale bug was huge
                 printf("  [5e] FAIL discrimination: stale-correction only %.0f cents — test vacuous\n", staleC); }
         }

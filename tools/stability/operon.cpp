@@ -149,41 +149,48 @@ int main() {
     {
         const int   LN = 8192, SLICE = 256;
         const float EPS = 1e-4f;   // N_MOVE_EPS
-        auto gate = [&](float fs, float lfoHz, double secs, long& slices, long& completions) {
+        auto gate = [&](float fs, float lfoHz, float amp, double secs, long& slices, long& completions) {
             float lutN = -1.f, nSettleRef = -1e9f, buildN = -1.f;
             int rebuildClock = 0, buildPos = -1; bool lutValid = false;
             slices = 0; completions = 0;
             long ns = (long) (secs * fs);
             for (long s = 0; s < ns; s++) {
-                float n = 4.5f + 2.f * std::sin(2.0 * M_PI * lfoHz * s / fs);   // 2.5..6.5, in HILL range
+                float n = 4.5f + amp * std::sin(2.0 * M_PI * lfoHz * s / fs);   // centred in the HILL range
                 if (std::fabs(n - nSettleRef) > EPS) { nSettleRef = n; rebuildClock = 0; buildPos = -1; }
                 else if (rebuildClock < 2048) ++rebuildClock;
-                if (buildPos < 0 && rebuildClock >= 2048 && std::fabs(n - lutN) > 1e-4f) {
-                    buildPos = 0; buildN = n; lutValid = false;
+                // build for the settle anchor and gate on |nSettleRef - lutN| (consistent band)
+                if (buildPos < 0 && rebuildClock >= 2048 && std::fabs(nSettleRef - lutN) > 1e-4f) {
+                    buildPos = 0; buildN = nSettleRef; lutValid = false;
                 }
                 if (buildPos >= 0) {
                     int end = std::min(buildPos + SLICE, LN + 1);
                     if (end > buildPos) ++slices;
                     buildPos = end;
-                    if (buildPos > LN) { lutN = buildN; lutValid = true; buildPos = -1; ++completions; }
+                    if (buildPos > LN) { lutN = buildN; lutValid = true; buildPos = -1; rebuildClock = 0; ++completions; }
                 }
             }
         };
         long slices, comps;
+        bool gateOk = true;
         // (a) slow LFOs over 10 s: at most a few builds (turning-point settling), never
         //     the tens-of-thousands-of-slices-per-second thrash. Bound generously at the
         //     equivalent of ~20 full rebuilds (a full rebuild is ~33 slices).
-        bool gateOk = true;
         for (float fs : {48000.f, 192000.f})
             for (float hz : {0.1f, 0.25f, 1.0f}) {
-                gate(fs, hz, 10.0, slices, comps);
+                gate(fs, hz, 2.f, 10.0, slices, comps);
                 if (slices > 20 * 33) { gateOk = false;
                     printf("  LUT gate THRASH: fs=%.0f lfo=%.2f -> %ld slices in 10 s\n", fs, hz, slices); }
             }
+        // (a') an in-band micro-oscillation (±0.9·N_MOVE_EPS at 1 kHz — n never leaves the
+        //      settle window) must build once and then let the LUT absorb the wobble, not
+        //      rebuild every time n crosses the old build point. Bound at ~2 rebuilds.
+        gate(48000.f, 1000.f, 0.9e-4f, 5.0, slices, comps);
+        if (slices > 2 * 33) { gateOk = false;
+            printf("  LUT gate micro-oscillation thrash: %ld slices in 5 s\n", slices); }
         // (b) a static n must still build the table.
-        gate(48000.f, 0.0f, 1.0, slices, comps);
+        gate(48000.f, 0.0f, 0.f, 1.0, slices, comps);
         if (comps < 1) { gateOk = false; printf("  LUT gate: static n never completed a build\n"); }
-        printf("Hill LUT gate: slow-LFO no-thrash + static completes: %s\n", gateOk ? "PASS" : "FAIL");
+        printf("Hill LUT gate: slow-LFO + micro-oscillation no-thrash, static completes: %s\n", gateOk ? "PASS" : "FAIL");
         if (!gateOk) ++fails;
     }
 

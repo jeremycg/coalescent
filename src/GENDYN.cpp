@@ -57,8 +57,8 @@ struct GENDYN : Module {
     long  cycleAcc           = 0;   // samples played so far this cycle (→ measured FREQ)
     float sum_dur            = 1.f; // cached sum of dur[0..N-1], updated per cycle
     float freq_cv            = 0.f; // cached FREQ output voltage, updated with sum_dur
-    float norm_k             = 1.f; // playback duration scale; LOCK mode sets it so
-                                    // the cycle length is exactly sampleRate/centerFreq
+    float norm_k             = 1.f; // playback duration scale; LOCK mode servos it so
+                                    // the measured cycle length tracks sampleRate/centerFreq
     float lockCorr           = 1.f; // LOCK servo: multiplies norm_k so the *measured*
                                     // realized period tracks the target (the per-segment
                                     // floor + error-diffused rounding otherwise inflate it)
@@ -361,10 +361,11 @@ struct GENDYN : Module {
         return clamp(std::log2(sampleRate / period / dsp::FREQ_C4), -5.f, 5.f);
     }
 
-    // LOCK mode (SC Gendy3-style): scale playback durations so each cycle
-    // sums to exactly sampleRate/centerFreq. The duration *walk* stays in
-    // its barriers untouched — relative durations keep evolving (timbre)
-    // while pitch holds — so toggling LOCK is clean and stateless.
+    // LOCK mode (SC Gendy3-style): scale playback durations so each cycle's
+    // *measured* period tracks sampleRate/centerFreq. The duration *walk* stays in
+    // its barriers untouched — relative durations keep evolving (timbre) while pitch
+    // holds. A reachable target is tracked to within a sample; only below the physical
+    // N-sample floor is it best-effort (see the servo at the cycle boundary).
     void updateNormAndFreq(bool lockPitch, float sampleRate, float centerFreq) {
         norm_k = 1.f;
         if (lockPitch && sum_dur > 0.f) {
@@ -377,9 +378,10 @@ struct GENDYN : Module {
             // No floor clamp on norm_k here: playback still floors each segment at 1
             // sample (so a cycle can't be shorter than N samples and a below-floor
             // target is physically unreachable), but the servo — not a norm_k clamp —
-            // now bounds the loop. lockCorr is clamped to [0.25,4], so norm_k can't run
-            // away; when the target is unreachable lockCorr simply saturates and the
-            // realized period bottoms out at the N-sample floor (best-effort LOCK).
+            // bounds the loop. lockCorr is clamped to [0.25,4], so norm_k can't run away;
+            // the servo's anti-windup keeps it from integrating below the floor, and a
+            // target change resets it to unity (see the cycle boundary), so it never
+            // carries a stale/wound value into a new target.
         } else {
             lockCorr = 1.f;   // idle: re-enabling LOCK re-converges from unity
         }
@@ -520,12 +522,16 @@ struct GENDYN : Module {
                                dist, persistSpread);
                 // A correction is only valid for the target/shape it converged on. If the
                 // target changed (B DUR CTR moved, LOCK toggled) or is now unreachable, drop
-                // to unity so a stale/wound value can't detune the new cycle — the servo then
-                // re-trims from 1, which for a reachable target is already within ~1 sample
-                // of pitch via feed-forward alone.
+                // to unity so a stale/wound value can't detune the new cycle — and clear the
+                // error-diffusion remainder too, since a leftover dur_err (anywhere in
+                // [-4,4]) from the old regime would otherwise cost the first cycle up to a
+                // few samples. With both reset, feed-forward alone lands the first cycle
+                // within ~1 sample of pitch for a reachable target.
                 const float newTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
-                if (newTarget != cycleTarget || newTarget <= (float) N)
+                if (newTarget != cycleTarget || newTarget <= (float) N) {
                     lockCorr = 1.f;
+                    dur_err  = 0.f;
+                }
                 updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
                 cycleTarget = newTarget;                 // target the NEW cycle aims at
                 if (realized > 0.f) freq_cv = computeFreqCV(args.sampleRate, realized);

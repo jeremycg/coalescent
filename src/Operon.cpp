@@ -257,13 +257,20 @@ struct Operon : Module {
         // rebuild spreads over ~33 samples (<1 ms). Safe to fill in place: the table is
         // only read when hillDirect is false, which requires a *matching* live LUT
         // (lutValid && n≈lutN) — impossible mid-build, since starting a build clears lutValid.
-        if (buildPos < 0 && rebuildClock >= 2048 && std::fabs(n - lutN) > 1e-4f) {
-            buildPos = 0; buildN = n; lutValid = false;        // start; old LUT is now stale/unreadable
+        //
+        // Build for nSettleRef (the settle *anchor*), not the instantaneous n, and gate the
+        // start on |nSettleRef - lutN|. Anchoring everything to the same band means an
+        // in-band micro-oscillation (n wobbling within N_MOVE_EPS of the anchor) can't span
+        // the 1e-4 rebuild threshold relative to a build-time n and thrash — it builds once
+        // for the anchor and then the LUT covers the whole wobble. rebuildClock is also
+        // cleared on completion so a fresh settle window is required before any next build.
+        if (buildPos < 0 && rebuildClock >= 2048 && std::fabs(nSettleRef - lutN) > 1e-4f) {
+            buildPos = 0; buildN = nSettleRef; lutValid = false;   // start; old LUT is now stale/unreadable
         }
         if (buildPos >= 0) {
             int end = std::min(buildPos + HILL_LUT_SLICE, HILL_LUT_N + 1);
             for (; buildPos < end; ++buildPos) hillLut[buildPos] = hillEntry(buildPos, buildN);
-            if (buildPos > HILL_LUT_N) { lutN = buildN; lutValid = true; buildPos = -1; }   // complete → go live
+            if (buildPos > HILL_LUT_N) { lutN = buildN; lutValid = true; buildPos = -1; rebuildClock = 0; }  // go live
         }
         const bool hillDirect = !lutValid || std::fabs(n - lutN) > 1e-4f;
 
