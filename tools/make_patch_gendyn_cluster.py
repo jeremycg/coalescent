@@ -22,6 +22,7 @@ stochastic parameters are set to the SuperCollider Gendy defaults
 """
 
 import json, os, sys, io, tempfile, tarfile, subprocess, random
+VER = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "plugin.json")))["version"]  # Coalescent version from the manifest
 
 random.seed(77)
 
@@ -67,7 +68,7 @@ for i, (track, imax, rall, note) in enumerate(VOICES):
         "id": mid,
         "plugin": "Coalescent",
         "model": "GENDYN",
-        "version": "2.0.0",
+        "version": VER,
         "params": [
             {"id": 0,  "value": float(imax)},    # N = Imax (Xenakis Table 1)
             {"id": 1,  "value": 0.035},           # SCALE_AMP (0.35x: retuned for the second-order walk)

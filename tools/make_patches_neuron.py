@@ -18,7 +18,8 @@ random.seed(11)
 def uid():
     return random.randint(1_000_000_000_000_000, 9_007_199_254_740_991)
 
-PLUGIN_VERSION = "2.0.0"
+ROOT = os.path.dirname(os.path.abspath(__file__))
+PLUGIN_VERSION = json.load(open(os.path.join(ROOT, "..", "plugin.json")))["version"]  # Coalescent version from the manifest
 
 def axon(params, pos):
     return {"id": uid(), "plugin": "Coalescent", "model": "Axon",

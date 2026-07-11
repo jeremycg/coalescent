@@ -14,6 +14,8 @@ Fundamental VCO (from source): FREQ_PARAM=2, PITCH_INPUT=0, SAW_OUTPUT=2.
 """
 
 import json, math, os, io, glob, shutil, subprocess, sys, tarfile, tempfile, random
+ROOT = os.path.dirname(os.path.abspath(__file__))
+VER = json.load(open(os.path.join(ROOT, "..", "plugin.json")))["version"]  # Coalescent version from the manifest
 
 random.seed(7)
 def uid():
@@ -23,7 +25,7 @@ LOG2_3 = math.log2(3.0)   # RATE = 3 Hz expressed as log2(Hz)
 
 def haptik(params, pos):
     return {"id": uid(), "plugin": "Coalescent", "model": "Haptik",
-            "version": "2.0.0", "params": params, "pos": pos}
+            "version": VER, "params": params, "pos": pos}
 
 def hp(N=64, pitch=0.0, rate=LOG2_3, couple=0.3, damp=0.35, inject=0.6,
        excite=1, freeze=0.0, driver=0.25, mode=0.0):

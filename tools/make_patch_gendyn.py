@@ -2,6 +2,7 @@
 """Generate GENDY3_16voice.vcv patch file for VCV Rack 2."""
 
 import json, random, struct, subprocess, os, sys
+VER = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "plugin.json")))["version"]  # Coalescent version from the manifest
 
 random.seed(42)
 
@@ -54,7 +55,7 @@ for i, (N, center_hz) in enumerate(VOICES):
         "id": mid,
         "plugin": "Coalescent",
         "model": "GENDYN",
-        "version": "2.0.0",
+        "version": VER,
         "params": [
             {"id": 0,  "value": float(N)},          # N (breakpoints)
             {"id": 1,  "value": 0.004},            # SCALE_AMP (slower, stately morph)

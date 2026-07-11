@@ -13,6 +13,7 @@ Wide barriers (0.5) so drift is audible when it happens.
 """
 
 import json, os, sys, io, tempfile, tarfile, subprocess, random
+VER = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "plugin.json")))["version"]  # Coalescent version from the manifest
 
 random.seed(99)
 
@@ -37,7 +38,7 @@ for i, (center_hz, s_amp, s_dur) in enumerate(VOICES):
         "id": mid,
         "plugin": "Coalescent",
         "model": "GENDYN",
-        "version": "2.0.0",
+        "version": VER,
         "params": [
             {"id": 0,  "value": 7.0},           # N (breakpoints)
             {"id": 1,  "value": s_amp},          # SCALE_AMP
