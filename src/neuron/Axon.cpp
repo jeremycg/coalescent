@@ -440,7 +440,7 @@ struct PhaseDisplay : Widget {
             // The fade is quantized into TRAIL_BANDS constant-alpha bands: each band is
             // one connected polyline stroked once, instead of a separate stroke per
             // TRAIL segment. At 16 voices that is ~32 strokes/voice rather than ~511 —
-            // a ~16× cut in NanoVG calls for a visually identical stepped gradient.
+            // a ~16× cut in NanoVG calls for a visually indistinguishable (at panel scale) stepped gradient.
             if (module) {
                 const int TRAIL_BANDS = 32;
                 int idx = fr.head;   // newest just before idx (coherent with arrays)

@@ -50,11 +50,11 @@ all N breakpoints.
 | Control | Description |
 |---------|-------------|
 | N | Number of breakpoints (integer, 2–64) |
-| SCALE AMP | Step scale for amplitude random walk (0–1) |
-| SCALE DUR | Step scale for duration random walk (0–1) |
+| S AMP (SCALE AMP) | Step scale for amplitude random walk (0–1) |
+| S DUR (SCALE DUR) | Step scale for duration random walk (0–1) |
 | B AMP | Amplitude barrier half-width (0=frozen, 1=full ±5V range) |
-| B DUR CTR | Center frequency for duration barriers (20–5000 Hz; default C4 = 261.6) |
-| B DUR WID | Duration barrier half-width around center (0=fixed pitch, 1=wide) |
+| FREQ (B DUR CTR) | Center frequency for duration barriers (20–5000 Hz; default C4 = 261.6) |
+| B WID (B DUR WID) | Duration barrier half-width around center (0=fixed pitch, 1=wide) |
 | DIST | Distribution (named switch): Cauchy / Gaussian / Uniform / Logistic (default) |
 | PERSIST | Glide persistence: how many cycles a step keeps its direction. 0% ≈ uncorrelated jitter (first-order / SC Gendy feel), 30% (default) ≈ 16 cycles, 100% = very long steady glides |
 | LOCK | Pitch lock: a per-cycle servo scales the durations so the *measured* period tracks B DUR CTR while the waveform keeps evolving (SC `Gendy3` behaviour). Tracking is essentially exact through most of the range; very close to the sample floor (very high B DUR CTR and/or high N) each segment bottoms out at 1 sample and the lock becomes best-effort, holding as close as the integer segment lengths allow. |
@@ -145,7 +145,7 @@ DC-blocked internally at ~5 Hz, so the walk's mean drift can't offset the signal
   with N = 64 the ceiling is ~689 Hz even though B DUR CTR reaches 5 kHz. For high
   pitches use a small N (N = 8 → ~5.5 kHz), or raise the sample rate. Under LOCK
   the FREQ output reports the *actual* (floored) pitch, not the requested one.
-- Logistic distribution (DIST=3) is the closest match to Xenakis's original and is the default.
+- Logistic distribution (DIST = Logistic) is the closest match to Xenakis's original and is the default.
 - **SuperCollider Gendy mode:** PERSIST 0%, SCALE ≈ 0.1, DIST Cauchy,
   B DUR CTR ≈ 520 Hz with B DUR WID ≈ 0.2 lands close to `Gendy1.ar()`
   at its defaults.

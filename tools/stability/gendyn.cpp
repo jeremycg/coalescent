@@ -54,9 +54,11 @@ static float lockNorm(float sum_dur, int N, float fs, float centerFreq) {
 // Mode selector for the servo mirror below: the shipped fix, and the two historical
 // regressions the tests must still discriminate against.
 enum ServoMode {
-    SERVO_FIXED,        // cycleTarget feedback + anti-windup (>N) + reset-on-target-change
+    SERVO_FIXED,        // cycleTarget feedback + anti-windup (>N) + reset lockCorr AND dur_err
     BUG_FEEDBACK,       // pre-fix #1: feed the completed cycle back against the *next* target
     BUG_STALE,          // pre-fix #2: no anti-windup, no reset — carry lockCorr across targets
+    BUG_NO_DURERR,      // like SERVO_FIXED but resets only lockCorr, NOT dur_err — isolates the
+                        // error-diffusion-remainder reset from the (larger) stale-correction fix
 };
 
 // Faithful mirror of the src/GENDYN.cpp LOCK servo (updateNormAndFreq + the cycle-
@@ -98,15 +100,17 @@ static std::vector<long> servoRun(const float* dur, int N, float fs,
         float fbT = cycleTarget;
         if (mode == BUG_FEEDBACK && c + 1 < sched.size())    // #1: feed back against the NEXT target
             fbT = sched[c+1].second ? fs / sched[c+1].first : 0.f;
-        bool reachable = (mode == SERVO_FIXED) ? (fbT > (float) N) : (fbT > 0.f);  // anti-windup only when fixed
+        const bool guarded = (mode == SERVO_FIXED || mode == BUG_NO_DURERR);   // anti-windup + reset
+        bool reachable = guarded ? (fbT > (float) N) : (fbT > 0.f);   // anti-windup only when guarded
         if (fbT > 0.f && reachable && realized > 0)
             lockCorr = std::clamp(lockCorr * std::clamp(fbT / (float) realized, 0.8f, 1.25f), 0.25f, 4.f);
 
         // ── advance to the next cycle ──
         auto nx = (c + 1 < sched.size()) ? sched[c+1] : sched[c];
         float newTarget = nx.second ? fs / nx.first : 0.f;
-        if (mode == SERVO_FIXED && (newTarget != cycleTarget || newTarget <= (float) N)) {
-            lockCorr = 1.f; dur_err = 0.f;                   // reset-on-target-change / unreachable
+        if (guarded && (newTarget != cycleTarget || newTarget <= (float) N)) {
+            lockCorr = 1.f;
+            if (mode == SERVO_FIXED) dur_err = 0.f;          // FIXED resets the remainder too; BUG_NO_DURERR carries it
         }
         if (nx.second) norm_k = (fs / nx.first) / sum * lockCorr;
         else { norm_k = 1.f; lockCorr = 1.f; }
@@ -362,6 +366,34 @@ int main() {
                 printf("  [5e] FAIL below-floor->C4 first cycle %ld samples (%.0f cents), want within 1 of 168.56\n", fixedP, fixedC); }
             if (std::fabs(staleC) < 1000.0) { ok = false;  // discrimination: the stale bug was huge
                 printf("  [5e] FAIL discrimination: stale-correction only %.0f cents — test vacuous\n", staleC); }
+
+            // (e') isolate the dur_err reset specifically. BUG_NO_DURERR applies every
+            //      SERVO_FIXED guard EXCEPT clearing the remainder, so the difference from
+            //      SERVO_FIXED is attributable to the dur_err reset alone (not the larger
+            //      lockCorr fix, which BUG_STALE above conflates). Below the floor dur_err
+            //      winds to its -4 bound; carrying it costs the first C4 cycle several
+            //      samples, while resetting it (FIXED) lands within one.
+            long noDurErrP = servoRun(dHi, N, fs, sched, BUG_NO_DURERR).at(40);
+            if (std::fabs(noDurErrP - 168.56) < 2.5) { ok = false;   // must be materially worse than FIXED
+                printf("  [5e'] FAIL discrimination: carrying dur_err only %ld samples off — not isolated\n", noDurErrP); }
+
+            // (f) documented best-effort boundary: a *highly clustered* shape at the immediate
+            //     sample floor (42×1.0 + 22×2.03125, the legal max-width range at target 65)
+            //     can't be within one sample on the first cycle from a clean start — the
+            //     floored integer schedule realizes ~72 samples (~177 cents flat). This is the
+            //     corner the manual/changelog call best-effort; the servo must still CONVERGE
+            //     to 65 within a handful of cycles. (Away from the floor, [5a] holds the
+            //     stronger within-one-sample property.)
+            float dClust[64];
+            for (int i = 0; i < N; i++) dClust[i] = (i < 42) ? 1.0f : 2.03125f;
+            float cf65 = 44100.f / 65.f;
+            long ff65 = servoRun(dClust, N, 44100.f, {{cf65, true}}).front();       // clean-start first cycle
+            std::vector<std::pair<float,bool>> hold65(60, {cf65, true});
+            long conv65 = servoRun(dClust, N, 44100.f, hold65).back();              // after convergence
+            if (std::fabs(conv65 - 65.0) > 1.1) { ok = false;
+                printf("  [5f] FAIL clustered near-floor didn't converge: %ld samples (target 65)\n", conv65); }
+            if (std::fabs(ff65 - 65.0) < 3.0)                                        // sanity: this really is the hard corner
+                printf("  [5f] note: clean-start first cycle only %ld — corner milder than expected\n", ff65);
         }
 
         printf("[5] LOCK servo: near-floor trim, below-floor saturation, no double-correct or stale-correction on target/LOCK change, restore recall: %s\n",

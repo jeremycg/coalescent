@@ -408,7 +408,7 @@ struct SomaDisplay : Widget {
 
             // Trails batched into TRAIL_BANDS constant-alpha bands (one polyline stroke
             // each) rather than a stroke per TRAIL segment — ~16× fewer NanoVG calls at
-            // 16 voices for a visually identical stepped fade. (See Axon for the rationale.)
+            // 16 voices for a stepped fade indistinguishable at panel scale. (See Axon for the rationale.)
             if (module) {
                 const int TRAIL_BANDS = 32;
                 int idx = fr.head;   // coherent with arrays

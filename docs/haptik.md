@@ -111,7 +111,7 @@ The VCA+ADSR lets key-release cut the sound; without it, notes ring out per DAMP
 For reliable re-plucking on legato passages, drive TRIG from the MIDI→CV
 **RETRIGGER** output. Haptik is **monophonic**, so set the MIDI module to one
 voice; for chords, run one instance per voice. For drones, use DAMP=0 (one bump
-rings forever) or EXCITE=3 (continuous drive).
+rings forever) or EXCITE = Continuous.
 
 ## Patches
 

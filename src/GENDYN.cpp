@@ -80,6 +80,8 @@ struct GENDYN : Module {
     std::atomic<bool> reseedPending{false};   // UI menu sets; DSP reads-and-clears (exchange), so a reseed can't be lost
     bool  restoredPending = false;   // dataFromJson set the arrays; process() must recompute
                                      // the SR-dependent caches (norm_k / freq_cv / current_dur)
+    float restoredDurErr = 0.f;      // LOCK controller state from dataFromJson, applied in the
+    float restoredFs     = 0.f;      // restore branch only if restoredFs == current sample rate
     dsp::TRCFilter<float> dcBlock;   // gentle ~5 Hz DC blocker on OUT (walk mean drifts)
     float lastFs = 0.f;
 
@@ -105,8 +107,14 @@ struct GENDYN : Module {
     struct SaveFrame {
         float amp[MAX_N] = {}, dur[MAX_N] = {}, stepAmp[MAX_N] = {}, stepDur[MAX_N] = {};
         int   n = 0;
-        float lockCorr = 1.f;   // converged LOCK servo correction, so a restored near-floor
-                                // shape recalls its pitch immediately instead of re-converging
+        // The full LOCK controller state: the converged servo correction, the error-
+        // diffusion remainder, and the sample rate they converged for. Saving all three
+        // lets a near-floor shape reloaded at the *same* rate recall its pitch on the
+        // first cycle; a load at a different rate (where the correction is invalid)
+        // deliberately resets instead — see dataFromJson / the restore branch.
+        float lockCorr = 1.f;
+        float durErr   = 0.f;
+        float saveFs   = 0.f;
     };
     coalescent::DisplaySnapshot<SaveFrame> saveSnapshot;
 
@@ -149,12 +157,14 @@ struct GENDYN : Module {
     }
 
     // Audio thread: publish a coherent copy of the serializable state for dataToJson.
-    void publishSaveFrame(int N) {
+    void publishSaveFrame(int N, float fs) {
         SaveFrame& sf = saveSnapshot.writable();
         std::copy(amp, amp + N, sf.amp);               std::copy(dur, dur + N, sf.dur);
         std::copy(step_amp, step_amp + N, sf.stepAmp); std::copy(step_dur, step_dur + N, sf.stepDur);
         sf.n = N;
         sf.lockCorr = lockCorr;
+        sf.durErr   = dur_err;
+        sf.saveFs   = fs;
         saveSnapshot.publish();
     }
 
@@ -179,6 +189,8 @@ struct GENDYN : Module {
             json_object_set_new(root, "stepAmp", jsa);
             json_object_set_new(root, "stepDur", jsd);
             json_object_set_new(root, "lockCorr", json_real(f.lockCorr));
+            json_object_set_new(root, "durErr", json_real(f.durErr));
+            json_object_set_new(root, "saveFs", json_real(f.saveFs));
         }
         return root;
     }
@@ -222,14 +234,24 @@ struct GENDYN : Module {
         current_breakpoint = 0; current_sample = 0; cycleAcc = 0;   // clean cycle start from the restored shape
         current_amp = amp[n - 1]; target_amp = amp[0];
         current_dur = std::max(1, (int) dur[0]); dur_err = 0.f;
-        // Recall the converged LOCK servo correction so a near-floor shape holds pitch
-        // from cycle 0 (older patches without it, or a malformed value, default to 1 —
-        // the servo then re-converges over a few cycles). Deterministic: a load always
-        // sets lockCorr, so it can't inherit an unrelated value from a reused module.
-        lockCorr = 1.f;
+        // Recall the LOCK controller (servo correction + error-diffusion remainder) so a
+        // near-floor shape holds pitch from cycle 0. The correction is only valid for the
+        // sample rate it converged at (norm_k, and therefore the floor/rounding bias it
+        // compensates, are SR-dependent), so the restore branch in process() applies these
+        // only if the current rate matches restoredFs — otherwise it resets to a clean
+        // start. Older patches without these fields, or malformed values, default to unity.
+        lockCorr = 1.f; restoredDurErr = 0.f; restoredFs = 0.f;
         if (json_t* jc = json_object_get(root, "lockCorr")) {
             float lc = (float) json_number_value(jc);
             if (std::isfinite(lc)) lockCorr = clamp(lc, 0.25f, 4.f);
+        }
+        if (json_t* je = json_object_get(root, "durErr")) {
+            float de = (float) json_number_value(je);
+            if (std::isfinite(de)) restoredDurErr = clamp(de, -4.f, 4.f);
+        }
+        if (json_t* jf = json_object_get(root, "saveFs")) {
+            float sf = (float) json_number_value(jf);
+            if (std::isfinite(sf)) restoredFs = sf;
         }
         last_N = n; lastInitShape = initShape; reseedPending = false;   // suppress the reinit reseed
         restoredPending = true;   // first process() recomputes norm_k / freq_cv / current_dur (needs sampleRate)
@@ -448,17 +470,32 @@ struct GENDYN : Module {
             cycleTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
             last_N = N; lastInitShape = initShape;
             restoredPending = false;                 // reinit already recomputed the caches
-            publishSaveFrame(N);                     // seeded state is immediately saveable
+            publishSaveFrame(N, args.sampleRate);    // seeded state is immediately saveable
         } else if (restoredPending) {
             // Just restored from a patch: dataFromJson set the arrays but couldn't
             // compute the sample-rate-dependent caches. Do it now (without reseeding
             // the restored waveform) so the first cycle — pitch under LOCK and the
             // FREQ output — is correct from sample 0, not one cycle late.
+            //
+            // The saved LOCK controller (lockCorr + dur_err) is only valid for the rate
+            // it converged at. Apply it only when the current rate matches; at a different
+            // rate the correction would detune the first cycle (norm_k differs), so start
+            // clean and let the servo re-converge over a few cycles instead.
+            if (restoredFs == args.sampleRate) {
+                dur_err = restoredDurErr;            // lockCorr already restored in dataFromJson
+            } else {
+                lockCorr = 1.f; dur_err = 0.f;
+            }
             updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
-            current_dur = std::max(1, (int)(dur[0] * norm_k));
+            // Initialize the first segment with the same rounded, error-diffused path
+            // ordinary segment boundaries use, so playback resumes exactly as it saves
+            // (truncating here would cost up to a sample vs. uninterrupted playback).
+            const float fd0 = dur[0] * norm_k + dur_err;
+            current_dur = std::max(1, (int)(fd0 + 0.5f));
+            dur_err     = clamp(fd0 - (float) current_dur, -4.f, 4.f);
             cycleTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
             restoredPending = false;
-            publishSaveFrame(N);                     // restored state is immediately re-saveable
+            publishSaveFrame(N, args.sampleRate);    // restored state is immediately re-saveable
         }
 
         // ── Generate output sample ────────────────────────────────────────────
@@ -525,8 +562,11 @@ struct GENDYN : Module {
                 // to unity so a stale/wound value can't detune the new cycle — and clear the
                 // error-diffusion remainder too, since a leftover dur_err (anywhere in
                 // [-4,4]) from the old regime would otherwise cost the first cycle up to a
-                // few samples. With both reset, feed-forward alone lands the first cycle
-                // within ~1 sample of pitch for a reachable target.
+                // few samples. With both reset, feed-forward lands the first cycle within
+                // ~1 sample of pitch for a reachable target away from the immediate floor;
+                // a *highly clustered* shape right at the floor can still be several samples
+                // off for a cycle, then the servo converges in a handful of cycles (the
+                // best-effort corner the manual describes).
                 const float newTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
                 if (newTarget != cycleTarget || newTarget <= (float) N) {
                     lockCorr = 1.f;
@@ -535,7 +575,7 @@ struct GENDYN : Module {
                 updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
                 cycleTarget = newTarget;                 // target the NEW cycle aims at
                 if (realized > 0.f) freq_cv = computeFreqCV(args.sampleRate, realized);
-                publishSaveFrame(N);                     // coherent copy for a race-free save
+                publishSaveFrame(N, args.sampleRate);    // coherent copy for a race-free save
                 // Continuity at the cycle boundary is inherent: every segment
                 // starts from current_amp (the value just reached), so the
                 // wrap segment interpolates from the old amp[N-1] to the
