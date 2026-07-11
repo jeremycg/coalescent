@@ -66,7 +66,8 @@
       "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/operon.md",
       "tags": [
         "Oscillator",
-        "LFO"
+        "Low-frequency oscillator",
+        "Clock generator"
       ],
       "keywords": "repressilator Elowitz Leibler gene genetic circuit three phase 3 phase clock biological synthetic biology"
     },
@@ -77,7 +78,8 @@
       "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/bunnies.md",
       "tags": [
         "Oscillator",
-        "LFO"
+        "Low-frequency oscillator",
+        "Clock generator"
       ],
       "keywords": "predator prey Lotka Volterra Rosenzweig MacArthur population ecology two phase limit cycle"
     }

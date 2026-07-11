@@ -86,8 +86,9 @@ DRIVE or HILL.
 The screen plots the **three protein levels over time** — three traces in stacked
 lanes (one gene each), scrolling right to left. Because the genes run ~120° apart,
 the chase reads directly: protein 1 crests, then 2, then 3. Faint vertical guides
-help you eyeball whether the traces are in or out of phase. It's recorded over a
-few-second window, so the phase relationship is clear at LFO / clock rates; an
+help you eyeball whether the traces are in or out of phase. It's recorded at
+~25 Hz over a ~10-second window, so the phase relationship is clear at LFO / clock
+rates; an
 audio-rate tone naturally aliases here (as on any slow scope). Read lock-free.
 
 ## Patches

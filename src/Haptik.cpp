@@ -161,7 +161,10 @@ struct Haptik : Module {
         for (int i = 0; i < n; i++) {
             Y[i] = (float) json_number_value(json_array_get(jy, i));
             V[i] = (float) json_number_value(json_array_get(jv, i));
-            if (!std::isfinite(Y[i]) || !std::isfinite(V[i])) return;   // malformed → reseed
+            // Bound to the model's state clamp (the DSP holds |y|,|v| ≤ STATE_MAX);
+            // a finite-but-out-of-model corrupt patch falls back to a reseed.
+            if (!std::isfinite(Y[i]) || std::fabs(Y[i]) > STATE_MAX
+                || !std::isfinite(V[i]) || std::fabs(V[i]) > STATE_MAX) return;   // malformed → reseed
         }
         for (int i = 0; i < n; i++) { y[i] = Y[i]; v[i] = V[i]; yPrev[i] = Y[i]; }
         if (json_t* jp = json_object_get(root, "scanPhase")) {

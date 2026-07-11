@@ -1,7 +1,8 @@
 # Coalescent
 
 Coalescent is a set of strange oscillators for **VCV Rack 2**: gliding stochastic tones,
-scanned physical bodies, and spiking neuron voices. 
+scanned physical bodies, spiking neuron voices, three-phase genetic circuits, and
+predator–prey ecologies. 
 Built around one idea: let a small dynamical system run, and listen to it.
 Each module is a different system —
 stochastic, physical, or neural — driven hard enough to make sound. They're

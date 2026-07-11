@@ -239,7 +239,7 @@ struct Operon : Module {
         //     which otherwise thrashes 8192 pow per change and spikes CPU.
         const bool nMoving = std::fabs(n - nPrev) > N_MOVE_EPS;
         nPrev = n;
-        ++rebuildClock;
+        if (rebuildClock < 2048) ++rebuildClock;   // saturate: only the >=2048 threshold matters, and this avoids signed overflow after hours
         if (!nMoving && std::fabs(n - lutN) > 1e-4f && rebuildClock >= 2048) {
             buildHillLut(n); lutN = n; lutValid = true; rebuildClock = 0;
         }
