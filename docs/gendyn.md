@@ -127,11 +127,15 @@ DC-blocked internally at ~5 Hz, so the walk's mean drift can't offset the signal
   settings decorrelate the steps every cycle (rough, noisy, close to
   the classic SuperCollider Gendy texture), high settings hold a
   direction for hundreds of cycles (steady glissandi).
-- **LOCK** rescales each cycle's durations to sum to exactly
-  `sampleRate / B DUR CTR`: pitch is constant, but the *relative*
-  durations keep walking, so the waveform — and therefore timbre —
-  still evolves. This matches SuperCollider's `Gendy3.ar`. The wider
-  B DUR WID, the more timbral duration variety under the locked pitch.
+- **LOCK** rescales each cycle's durations to sum to a target period of
+  `sampleRate / B DUR CTR`, and a per-cycle servo trims the residual left
+  by integer segment rounding so the *measured* period tracks that target:
+  pitch holds constant while the *relative* durations keep walking, so the
+  waveform — and therefore timbre — still evolves. This matches
+  SuperCollider's `Gendy3.ar`. The wider B DUR WID, the more timbral
+  duration variety under the locked pitch. (Very close to the sample floor —
+  very high B DUR CTR and/or high N — segments bottom out at one sample and
+  the lock becomes best-effort; see the LOCK row above.)
 - **B DUR WID = 0** also fixes pitch (all durations equal) but kills
   duration-walk timbre with it; LOCK with a wide B DUR WID is how
   Xenakis got the "beautiful clear tones" — stable pitch, living

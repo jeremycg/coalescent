@@ -20,22 +20,26 @@ concurrency work with no audible effect.
     audio thread clearing the flag).
   - **Haptik Fast/Slow** transitions reconcile the interpolation state, so a mode
     switch doesn't click.
-  - **GENDYN LOCK now actually holds pitch near the sample floor.** LOCK previously
-    set a *theoretical* duration scale; with unequal durations near the 1-sample
-    floor the per-segment rounding inflated the real period (sharply flat — the
-    reviewer's case ran ~140 cents off, pathological shapes far more). A per-cycle
-    servo now measures the realized period and nudges the scale until it tracks the
-    target, so LOCK holds pitch through the whole reachable range and degrades to
-    best-effort only *below* the physical `fs/N` floor (where no integer-length
-    playback can go faster). FREQ still reports the measured period, so it stays
-    honest either way.
+  - **GENDYN LOCK holds pitch near the sample floor.** LOCK previously set a purely
+    *theoretical* duration scale; near the 1-sample floor the per-segment rounding
+    left a residual (flat) bias. A per-cycle servo now measures the realized period
+    and trims the scale until it tracks the target, so LOCK holds pitch through the
+    whole reachable range and degrades to best-effort only *below* the physical
+    `fs/N` floor (where no integer-length playback can go faster). The servo feeds
+    the realized period back against the target the *completed* cycle was rendered
+    against — not the live knob — so changing B DUR CTR or toggling LOCK retargets
+    cleanly in one cycle instead of overshooting ~386 cents for a cycle. The
+    converged correction is saved with the patch, so a near-floor sound recalls its
+    pitch immediately on load rather than briefly re-converging. FREQ still reports
+    the measured period, so it stays honest either way.
   - **Operon PERTURB** input is sanitized (NaN/inf flushed, range-clamped) before it
     enters the integrator, and the Hill lookup flushes a non-finite argument to 0 —
     a corrupt CV could otherwise reach the lookup's array index (out-of-bounds read).
   - **Operon** LUT-rebuild counter saturates (was signed-overflow UB after hours).
   - **Corrupt-patch bounds**: restored GENDYN amplitudes/walk steps and Haptik
     lattice values are range-checked, not just finiteness-checked (GENDYN amplitude
-    bound tightened to the model's true ±1.5 V range). GENDYN **Initialize** also
+    bound tightened from ±10 to ±1.5 — headroom over the dimensionless ±1 the walk
+    actually produces, not a claim about output volts). GENDYN **Initialize** also
     clears any in-flight cycle pulse so OUT/CYCLE restart clean.
 - **Manifest/docs**: Operon/Bunnies tag `LFO`→`Low-frequency oscillator`+`Clock
   generator`; Operon scope window documented as ~25 Hz / ~10 s; README taxonomy
@@ -84,9 +88,10 @@ concurrency work with no audible effect.
 - **GENDYN — scope alignment**: the waveform display now pairs each duration with
   the segment it actually plays (`amp[i-1]→amp[i]` over `dur[i]`, cycle starting at
   `amp[N-1]`). With unequal durations the polygon now matches the audio instead of
-  being rotated by one segment. The scope also uses the LOCK-normalized, floored,
-  and rounded durations playback realizes, so near the sample floor it shows the
-  actual reshaped waveform rather than the raw (un-normalized) breakpoint walk.
+  being rotated by one segment. The scope also approximates the LOCK-normalized,
+  floored, error-diffused segment schedule playback renders (a clean-start
+  approximation, not a bit-exact copy of the running error accumulator), so near
+  the sample floor it reflects the reshaped waveform rather than the raw walk.
 - **Bunnies — NaN backstop**: the reseed check now runs before the state clamp
   (the fmin/fmax clamp mapped NaN to a bound, hiding it from the backstop).
 - **Tests / CI**: new GENDYN stability test — it derives the barriers and runs the

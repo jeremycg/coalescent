@@ -4,8 +4,8 @@ Coalescent is a set of strange oscillators for **VCV Rack 2**: gliding stochasti
 scanned physical bodies, spiking neuron voices, three-phase genetic circuits, and
 predator–prey ecologies. 
 Built around one idea: let a small dynamical system run, and listen to it.
-Each module is a different system —
-stochastic, physical, or neural — driven hard enough to make sound. They're
+Each module is a different system — stochastic, physical, neural, genetic, or
+ecological — driven hard enough to make sound. They're
 grouped as the **Fluctuations** series (a label used throughout the docs, not a
 separate brand); the same plugin has room for other series later.
 
@@ -81,7 +81,7 @@ bundle for your platform from the
 drop it into your Rack user folder's platform-specific plugins directory — since
 Rack 2.5 this is `plugins-<os>-<cpu>/` (for example `plugins-lin-x64/`,
 `plugins-win-x64/`, `plugins-mac-arm64/`), not a bare `plugins/` — which you can
-open via Rack → *Library → Open user folder*. Then restart Rack.
+open via Rack → *Help → Open user folder*. Then restart Rack.
 
 ## Build
 
@@ -104,9 +104,9 @@ bundles to a GitHub Release on a `v*` tag.
 
 ### Tests
 
-`make check` validates the manifest and runs every module's standalone kernel
-replica (stability/calibration) plus the RK4 equivalence check — no Rack SDK
-needed. It's the same guardrail CI gates releases on. A second target,
+`make check` parses `plugin.json` (a `jq` syntax check) and runs every module's
+standalone kernel replica (stability/calibration) plus the RK4 equivalence check
+— no Rack SDK needed. It's the same guardrail CI gates releases on. A second target,
 `make check-simd`, proves the float_4 (poly-SIMD) path matches the scalar kernel;
 it needs the Rack headers, so CI runs it after the SDK download.
 

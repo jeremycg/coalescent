@@ -62,6 +62,11 @@ struct GENDYN : Module {
     float lockCorr           = 1.f; // LOCK servo: multiplies norm_k so the *measured*
                                     // realized period tracks the target (the per-segment
                                     // floor + error-diffused rounding otherwise inflate it)
+    float cycleTarget        = 0.f; // target period (samples) the in-flight cycle is being
+                                    // rendered against; 0 = that cycle is unlocked. The servo
+                                    // feeds the realized period back against THIS, not the live
+                                    // knob, so a B DUR CTR change or a LOCK toggle can't double-
+                                    // correct one cycle (feed-forward already applied the new target)
     float dur_err            = 0.f; // error-diffusion remainder for int segment lengths
     int   last_N             = -1;  // -1 forces reinit on the first process() call
 
@@ -86,8 +91,8 @@ struct GENDYN : Module {
         float dur[MAX_N] = {};
         int   n = 13;
         float bAmp = 0.8f;
-        float normK = 1.f;   // LOCK playback scale, so the scope draws the durations
-                             // playback actually realizes (floored + rounded near the floor)
+        float normK = 1.f;   // LOCK playback scale, so the scope can approximate the
+                             // floored/error-diffused segment schedule playback renders
     };
     coalescent::DisplaySnapshot<DisplayFrame> displaySnapshot;
     int   dispClock = 0;
@@ -100,6 +105,8 @@ struct GENDYN : Module {
     struct SaveFrame {
         float amp[MAX_N] = {}, dur[MAX_N] = {}, stepAmp[MAX_N] = {}, stepDur[MAX_N] = {};
         int   n = 0;
+        float lockCorr = 1.f;   // converged LOCK servo correction, so a restored near-floor
+                                // shape recalls its pitch immediately instead of re-converging
     };
     coalescent::DisplaySnapshot<SaveFrame> saveSnapshot;
 
@@ -148,6 +155,7 @@ struct GENDYN : Module {
         std::copy(amp, amp + N, sf.amp);               std::copy(dur, dur + N, sf.dur);
         std::copy(step_amp, step_amp + N, sf.stepAmp); std::copy(step_dur, step_dur + N, sf.stepDur);
         sf.n = N;
+        sf.lockCorr = lockCorr;
         saveSnapshot.publish();
     }
 
@@ -171,6 +179,7 @@ struct GENDYN : Module {
             json_object_set_new(root, "dur", jd);
             json_object_set_new(root, "stepAmp", jsa);
             json_object_set_new(root, "stepDur", jsd);
+            json_object_set_new(root, "lockCorr", json_real(f.lockCorr));
         }
         return root;
     }
@@ -191,8 +200,11 @@ struct GENDYN : Module {
         // Bound restored values to the model's actual ranges so a corrupt/hand-edited
         // patch can't produce UB or absurd output: durations are floored at 1 and
         // capped well below INT_MAX (the playback float→int conversions would otherwise
-        // overflow); amplitudes are reflected into [-bAmp,bAmp] with bAmp ≤ 1, so ±1.5
-        // is the true model range plus a little headroom (not ±50 V); steps ~±1.
+        // overflow). Amplitudes are dimensionless: the walk reflects them into
+        // [-bAmp, bAmp] with bAmp ≤ 1, so |amp| ≤ 1 in normal use; AMP_MAX = 1.5 is
+        // validation *headroom*, not the model range. A corrupt-but-in-bounds patch can
+        // still momentarily drive OUT to ±7.5 V (amp·5 V) until the walk pulls it back —
+        // bounded and finite, which is all this guard promises. Steps reflect to ~±1.
         constexpr float DUR_MAX = 1e6f, AMP_MAX = 1.5f, STEP_MAX = 2.f;
         float A[MAX_N], Dr[MAX_N], SA[MAX_N], SD[MAX_N];
         for (int i = 0; i < n; i++) {
@@ -211,6 +223,15 @@ struct GENDYN : Module {
         current_breakpoint = 0; current_sample = 0; cycleAcc = 0;   // clean cycle start from the restored shape
         current_amp = amp[n - 1]; target_amp = amp[0];
         current_dur = std::max(1, (int) dur[0]); dur_err = 0.f;
+        // Recall the converged LOCK servo correction so a near-floor shape holds pitch
+        // from cycle 0 (older patches without it, or a malformed value, default to 1 —
+        // the servo then re-converges over a few cycles). Deterministic: a load always
+        // sets lockCorr, so it can't inherit an unrelated value from a reused module.
+        lockCorr = 1.f;
+        if (json_t* jc = json_object_get(root, "lockCorr")) {
+            float lc = (float) json_number_value(jc);
+            if (std::isfinite(lc)) lockCorr = clamp(lc, 0.25f, 4.f);
+        }
         last_N = n; lastInitShape = initShape; reseedPending = false;   // suppress the reinit reseed
         restoredPending = true;   // first process() recomputes norm_k / freq_cv / current_dur (needs sampleRate)
     }
@@ -423,6 +444,7 @@ struct GENDYN : Module {
             initBreakpoints(N, bAmp, durCenter, bDurMin, bDurMax);
             updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
+            cycleTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
             last_N = N; lastInitShape = initShape;
             restoredPending = false;                 // reinit already recomputed the caches
             publishSaveFrame(N);                     // seeded state is immediately saveable
@@ -433,6 +455,7 @@ struct GENDYN : Module {
             // FREQ output — is correct from sample 0, not one cycle late.
             updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
+            cycleTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
             restoredPending = false;
             publishSaveFrame(N);                     // restored state is immediately re-saveable
         }
@@ -474,11 +497,16 @@ struct GENDYN : Module {
                 // target. Multiplicative negative feedback (a long period wants a smaller
                 // norm_k), damped per-cycle to ±25% and bounded, so it converges in a few
                 // cycles and can't run away. Above the N-sample floor this reaches the
-                // target exactly; below it lockCorr saturates and LOCK is best-effort.
-                if (lockPitch && realized > 0.f) {
-                    const float target = args.sampleRate / centerFreq;
-                    const float step   = clamp(target / realized, 0.8f, 1.25f);
-                    lockCorr           = clamp(lockCorr * step, 0.25f, 4.f);
+                // target; below it lockCorr saturates and LOCK is best-effort.
+                //
+                // Feed back against cycleTarget — the target THIS just-finished cycle was
+                // rendered against — not the live knob. If B DUR CTR or LOCK changed since,
+                // the completed cycle never aimed at the new target, so servoing it against
+                // the new one would double-correct (feed-forward below already retargets).
+                // cycleTarget==0 means that cycle was unlocked → nothing to feed back.
+                if (cycleTarget > 0.f && realized > 0.f) {
+                    const float step = clamp(cycleTarget / realized, 0.8f, 1.25f);
+                    lockCorr         = clamp(lockCorr * step, 0.25f, 4.f);
                 }
                 // PERSIST knob -> step-walk draw spread, exponential: 0 -> 1.0
                 // (near-white steps, first-order feel), 0.3 -> 0.25 (default),
@@ -489,6 +517,7 @@ struct GENDYN : Module {
                 runCycleUpdate(N, scaleAmp, scaleDur, bAmp, bDurMin, bDurMax,
                                dist, persistSpread);
                 updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
+                cycleTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;   // target the NEW cycle aims at
                 if (realized > 0.f) freq_cv = computeFreqCV(args.sampleRate, realized);
                 publishSaveFrame(N);                     // coherent copy for a race-free save
                 // Continuity at the cycle boundary is inherent: every segment
@@ -575,14 +604,27 @@ struct GENDYScope : Widget {
                 if (module) return fr.amp[i];
                 return 0.7f * std::sin(2.f * (float)M_PI * 2.f * i / N);   // demo
             };
-            // The played length of segment i: dur[i] scaled by the LOCK norm, floored
-            // at 1 sample and rounded — exactly what playback realizes. norm_k is a
-            // common factor so it cancels in the cum/total proportions everywhere the
-            // floor doesn't bite; near the sample floor the floor+round genuinely
-            // reshape the polygon, and the scope now shows that instead of the raw walk.
-            auto durAt = [&](int i) {
-                return module ? std::max(1.f, std::round(fr.dur[i] * fr.normK)) : 1.f;
-            };
+            // Segment widths track what playback renders: dur[i]·normK, floored at one
+            // sample and rounded with the same error-diffusion carry the audio uses, so
+            // the drawn schedule has the same length and 1-vs-2-sample split rather than
+            // rounding each segment in isolation (which over-counts near the floor). This
+            // is a clean-start approximation — playback carries dur_err continuously
+            // across cycles, the scope restarts it each frame — not a bit-exact copy.
+            // norm_k is a common factor, so away from the floor it cancels in the
+            // cum/total proportions and the picture is unchanged.
+            float durSched[MAX_N];
+            if (module) {
+                float e = 0.f;
+                for (int i = 0; i < N; i++) {
+                    float fd = fr.dur[i] * fr.normK + e;
+                    float cd = std::max(1.f, std::round(fd));
+                    e = clamp(fd - cd, -4.f, 4.f);
+                    durSched[i] = cd;
+                }
+            } else {
+                for (int i = 0; i < N; i++) durSched[i] = 1.f;
+            }
+            auto durAt = [&](int i) { return durSched[i]; };
 
             float total = 0.f;
             for (int i = 0; i < N; i++) total += durAt(i);

@@ -143,7 +143,8 @@ background, which is inaudible.
 One consequence of the four-lane grouping: the whole group runs at the substep
 count of its **fastest** lane, so a single very-high-pitched voice pulls its three
 groupmates up to the same integration rate. As a rough budget (44.1 kHz, ×4, 16
-voices): ~3–4% of one core at moderate pitch, rising to ~30–50% at the top of the
+voices, integration-chain lower bounds on one i5-9600K — percentages aren't
+portable): ~3–4% of one core at moderate pitch, rising to ~30–50% at the top of the
 PITCH knob (+4 oct). Pushing higher still with V/OCT CV keeps climbing — around
 +6 oct a full 16-voice patch can saturate a core (~100%+). If you sequence a poly
 patch into the extreme high register and CPU matters, drop anti-aliasing to ×2 /

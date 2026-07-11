@@ -43,6 +43,16 @@ symmetric steady state is subtracted from each output so a resting ring reads ~0
 and a slow oscillation still swings around zero — there is **no fixed high-pass**,
 so the slow-LFO/clock use survives.
 
+**CPU.** Default Operon is light (~1% of a core on an i5-9600K at 48 kHz). Two
+things scale it up: pitch (the substep count `K` rises with V/OCT — roughly `K≈24`
+at the top of the PITCH knob) and, more sharply, **moving HILL**. A held HILL cable
+uses a fast lookup, but while HILL (or DRIVE) is *changing* the ring falls back to
+a runtime `pow()` in every RK4 substep — so high pitch plus active HILL modulation
+is by far the most expensive corner (order ~25% of a core at the top of the knob,
+versus ~8% with HILL static). Static or slow HILL is cheap; automate HILL hard only
+when you have the headroom. (These figures are integration-chain lower bounds on
+one specific CPU; percentages are not portable.)
+
 ### Symmetry breaking (why it always starts)
 
 With identical genes and identical initial conditions the system would stay

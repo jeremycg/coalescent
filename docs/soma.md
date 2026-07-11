@@ -98,7 +98,8 @@ As in [Axon](axon.md#cpu), voices are processed in **groups of four SIMD lanes**
 voices; inactive lanes are masked so a silent voice's oscillator state is frozen
 — helper state like edge detectors may still warm, inaudibly). The group runs at
 its **fastest** lane's substep count, so one very-high-pitched voice pulls its
-groupmates up with it. Rough budget (44.1 kHz, ×4, 16 voices): ~4% of a core at
+groupmates up with it. Rough budget (44.1 kHz, ×4, 16 voices, integration-chain
+lower bounds on one i5-9600K — percentages aren't portable): ~4% of a core at
 moderate pitch, ~50% at the top of the PITCH knob (+4 oct), and — pushed higher
 with V/OCT CV, around +6 oct — a full patch can saturate a core (Soma is a little
 heavier than Axon). Drop anti-aliasing, or move the fast voices to another
