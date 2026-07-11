@@ -406,25 +406,39 @@ struct SomaDisplay : Widget {
             nvgStrokeWidth(args.vg, 1.f);
             nvgStroke(args.vg);
 
+            // Trails batched into TRAIL_BANDS constant-alpha bands (one polyline stroke
+            // each) rather than a stroke per TRAIL segment — ~16× fewer NanoVG calls at
+            // 16 voices for a visually identical stepped fade. (See Axon for the rationale.)
             if (module) {
+                const int TRAIL_BANDS = 32;
                 int idx = fr.head;   // coherent with arrays
                 float trailA = clamp(204.f - (nv - 1) * 6.f, 112.f, 204.f);  // 0x70..0xcc
                 nvgLineCap(args.vg, NVG_ROUND);
+                nvgLineJoin(args.vg, NVG_ROUND);
+                nvgStrokeWidth(args.vg, 1.6f);
                 for (int v = 0; v < nv; v++) {
                     const float* dx = fr.x[v];
                     const float* dz = fr.z[v];
                     float hue = voiceHue(v, nv);
+                    int curBand = -1;
+                    auto strokeBand = [&](int band) {
+                        float alpha = (band + 0.5f) / TRAIL_BANDS;   // older = dimmer
+                        nvgStrokeColor(args.vg, nvgHSLA(hue, 0.95f, 0.60f, (int)(alpha * trailA)));
+                        nvgStroke(args.vg);
+                    };
                     for (int k = 1; k < TRAIL; k++) {
+                        int band = (k * TRAIL_BANDS) / TRAIL;
                         int i0 = (idx + k - 1) % TRAIL;
                         int i1 = (idx + k) % TRAIL;
-                        float alpha = (float) k / TRAIL;
-                        nvgBeginPath(args.vg);
-                        nvgMoveTo(args.vg, X(dx[i0]), Y(dz[i0]));
+                        if (band != curBand) {
+                            if (curBand >= 0) strokeBand(curBand);
+                            nvgBeginPath(args.vg);
+                            nvgMoveTo(args.vg, X(dx[i0]), Y(dz[i0]));
+                            curBand = band;
+                        }
                         nvgLineTo(args.vg, X(dx[i1]), Y(dz[i1]));
-                        nvgStrokeColor(args.vg, nvgHSLA(hue, 0.95f, 0.60f, (int)(alpha * trailA)));
-                        nvgStrokeWidth(args.vg, 1.6f);
-                        nvgStroke(args.vg);
                     }
+                    if (curBand >= 0) strokeBand(curBand);
                     int newest = (idx + TRAIL - 1) % TRAIL;
                     float hx = X(dx[newest]), hy = Y(dz[newest]);
                     nvgBeginPath(args.vg); nvgCircle(args.vg, hx, hy, 4.f);
