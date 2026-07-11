@@ -125,9 +125,8 @@ struct GENDYN : Module {
         configParam(B_DUR_CENTER_PARAM, 20.f,  5000.f, 261.626f, "Center frequency", " Hz");
         configParam(B_DUR_WIDTH_PARAM,  0.f,   1.f,    0.4f,  "Frequency barrier width");
 
-        configParam(DISTRIBUTION_PARAM, 0.f,   3.f,    3.f,
-            "Distribution (0=Cauchy  1=Gauss  2=Uniform  3=Logistic)");
-        getParamQuantity(DISTRIBUTION_PARAM)->snapEnabled = true;
+        configSwitch(DISTRIBUTION_PARAM, 0.f, 3.f, 3.f, "Distribution",
+            {"Cauchy", "Gaussian", "Uniform", "Logistic"});
 
         configParam(PERSIST_PARAM,      0.f,   1.f,    0.3f,  "Glide persistence", "%", 0.f, 100.f);
 

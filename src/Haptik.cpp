@@ -111,7 +111,8 @@ struct Haptik : Module {
         configParam(DAMP_PARAM, 0.f, 1.f, 0.30f, "Damping");   // ~44 ms decay under the quadratic taper → boots lively
         configParam(INJECT_PARAM, 0.f, 1.f, 0.6f, "Inject");
 
-        configParam(EXCITE_PARAM, 0.f, 3.f, 3.f, "Excitation")->snapEnabled = true;
+        configSwitch(EXCITE_PARAM, 0.f, 3.f, 3.f, "Excitation",
+            {"Impulse", "Bump", "Noise", "Continuous"});
 
         configSwitch(FREEZE_PARAM, 0.f, 1.f, 0.f, "Freeze", {"Run", "Freeze"});
         configSwitch(MODE_PARAM, 0.f, 1.f, 0.f, "Mode",
