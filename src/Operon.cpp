@@ -78,18 +78,20 @@ struct Operon : Module {
     // n=8 (8192 pts). Rebuilds are rate-limited (see process()) and fall back to
     // direct pow while n moves, so dialling HILL or CV'ing it can't thrash the
     // 8192-pow rebuild.
-    static constexpr int   HILL_LUT_N    = 8192;
-    static constexpr float HILL_LUT_XMAX = 64.f;
+    static constexpr int   HILL_LUT_N     = 8192;
+    static constexpr float HILL_LUT_XMAX  = 64.f;
+    static constexpr int   HILL_LUT_SLICE = 256;   // entries filled per sample during a rebuild
     float hillLut[HILL_LUT_N + 1];
-    float lutN = -1.f;      // n the LUT was built for
+    float lutN = -1.f;      // n the active LUT was built for
     float nPrev = -1.f;     // n from the previous sample (movement detector)
-    int   rebuildClock = 0; // rate-limit LUT rebuilds (samples since the last one)
+    int   rebuildClock = 0; // rate-limit LUT rebuilds (samples since the last completion)
     bool  lutValid = false;
+    int   buildPos = -1;    // incremental rebuild cursor: -1 idle, else next entry to fill
+    float buildN = -1.f;    // n the in-progress rebuild is filling for
     static constexpr float N_MOVE_EPS = 1e-4f;   // per-sample |Δn| above this = "actively modulated"
 
-    void buildHillLut(float n) {
-        for (int i = 0; i <= HILL_LUT_N; ++i)
-            hillLut[i] = 1.f / (1.f + std::pow(HILL_LUT_XMAX * i / HILL_LUT_N, n));
+    static float hillEntry(int i, float n) {
+        return 1.f / (1.f + std::pow(HILL_LUT_XMAX * i / HILL_LUT_N, n));
     }
     inline float hillLookup(float rep) const {   // rep already >= 0
         if (rep >= HILL_LUT_XMAX) return hillLut[HILL_LUT_N];
@@ -168,7 +170,7 @@ struct Operon : Module {
         reseedAsymmetric();
         pStarValid = false;
         pStar = 0.f; pStarA = pStarN = pStarL = -1.f;
-        lutValid = false; lutN = -1.f; nPrev = -1.f; rebuildClock = 0;
+        lutValid = false; lutN = -1.f; nPrev = -1.f; rebuildClock = 0; buildPos = -1;
         for (int k = 0; k < 3; ++k) { lastCentered[k] = 0.f; gateGen[k].reset(); }
     }
 
@@ -246,8 +248,25 @@ struct Operon : Module {
         const bool nMoving = std::fabs(n - nPrev) > N_MOVE_EPS;
         nPrev = n;
         if (rebuildClock < 2048) ++rebuildClock;   // saturate: only the >=2048 threshold matters, and this avoids signed overflow after hours
-        if (!nMoving && std::fabs(n - lutN) > 1e-4f && rebuildClock >= 2048) {
-            buildHillLut(n); lutN = n; lutValid = true; rebuildClock = 0;
+
+        // Rebuild the LUT incrementally rather than in one sample: the full 8192-pow
+        // table build measured ~60 µs on an audio callback (a real spike at high SR /
+        // many instances). Fill it HILL_LUT_SLICE entries per sample and publish only
+        // when complete — the whole rebuild is spread over ~33 samples (<1 ms), and no
+        // single callback pays more than a slice. Safe to fill in place: the table is
+        // only read when hillDirect is false, which requires a *matching* live LUT
+        // (lutValid && n≈lutN) — impossible mid-build, since a build clears lutValid.
+        if (nMoving) buildPos = -1;                                    // moving again → drop the partial build
+        else if (buildPos >= 0 && std::fabs(n - buildN) > 1e-4f) buildPos = -1;   // target moved → restart
+        if (buildPos < 0 && !nMoving && std::fabs(n - lutN) > 1e-4f && rebuildClock >= 2048) {
+            buildPos = 0; buildN = n; lutValid = false;               // start; old LUT is now stale/unreadable
+        }
+        if (buildPos >= 0) {
+            int end = std::min(buildPos + HILL_LUT_SLICE, HILL_LUT_N + 1);
+            for (; buildPos < end; ++buildPos) hillLut[buildPos] = hillEntry(buildPos, buildN);
+            if (buildPos > HILL_LUT_N) {                              // complete → go live
+                lutN = buildN; lutValid = true; buildPos = -1; rebuildClock = 0;
+            }
         }
         const bool hillDirect = nMoving || !lutValid || std::fabs(n - lutN) > 1e-4f;
 
