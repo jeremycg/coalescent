@@ -200,6 +200,46 @@ int main() {
         }
     }
 
+    // ── Haptik lattice state/clamp pass: scalar vs float_4, must be bit-identical.
+    // Unlike the RK4 oscillators (where SIMD rounding causes benign phase drift), this
+    // pass is a plain elementwise clamp with no accumulation, so the vectorized version
+    // must match the scalar loop *exactly* for every finite value. The module writes the
+    // clamp as fmax(fmin(x,hi),lo) to mirror rack::clamp's op order; verify that here,
+    // including the ragged tail (N not a multiple of 4). ──
+    {
+        const float SMAX_H = 16.f;          // Haptik STATE_MAX
+        const int   N = 130;                // 32 four-wide groups + a 2-wide tail
+        std::vector<float> y0(N), v0(N);
+        for (int i = 0; i < N; i++) {       // spread spans well past ±16 (exercise the clamp)
+            float t = -1.f + 2.f * (i / (float)(N - 1));
+            y0[i] = t * 20.f * (1.f + 0.3f * std::sin(i * 1.7f));
+            v0[i] = -t * 25.f * (1.f + 0.2f * std::cos(i * 2.3f));
+        }
+        std::vector<float> ys = y0, vs = v0;                 // scalar reference (mirrors module)
+        for (int i = 0; i < N; i++) {
+            ys[i] = rack::math::clamp(ys[i] + vs[i], -SMAX_H, SMAX_H);
+            vs[i] = rack::math::clamp(vs[i], -SMAX_H, SMAX_H);
+        }
+        std::vector<float> yv = y0, vv = v0;                 // vectorized (mirrors module)
+        const float_4 lo(-SMAX_H), hi(SMAX_H);
+        int i = 0;
+        for (; i + 4 <= N; i += 4) {
+            float_4 Y = float_4::load(&yv[i]);
+            float_4 V = float_4::load(&vv[i]);
+            Y = simd::fmax(simd::fmin(Y + V, hi), lo);
+            V = simd::fmax(simd::fmin(V, hi), lo);
+            Y.store(&yv[i]); V.store(&vv[i]);
+        }
+        for (; i < N; i++) {
+            yv[i] = rack::math::clamp(yv[i] + vv[i], -SMAX_H, SMAX_H);
+            vv[i] = rack::math::clamp(vv[i], -SMAX_H, SMAX_H);
+        }
+        int diffs = 0;
+        for (int j = 0; j < N; j++) { if (ys[j] != yv[j]) diffs++; if (vs[j] != vv[j]) diffs++; }
+        printf("Haptik clamp pass scalar vs float_4 (N=%d, incl. ragged tail): %d value diffs\n", N, diffs);
+        if (diffs) { printf("FAIL: Haptik vectorized clamp differs from scalar\n"); return 1; }
+    }
+
     // Oscillator equivalence = same pitch. The per-sample |Δv| is phase micro-drift
     // from float-vs-float_4 rounding (inherent to SIMD), not a difference in tone.
     const double CENT_TOL = 1.0;

@@ -371,7 +371,23 @@ struct Haptik : Module {
             // energy without bound. This generous clamp is never reached in normal play
             // (|y|~1-2) and degrades runaway to bounded saturation instead of NaN.
             // Both must be clamped: clamping y alone lets v keep integrating and snap.
-            for (int i = 0; i < N; i++) {
+            //
+            // Elementwise (no neighbour dependency), so it vectorizes 4-wide. The clamp is
+            // spelled fmax(fmin(x, hi), lo) to match rack::clamp's exact op order —
+            // simd::clamp reverses it (fmin(fmax(...))), which diverges on NaN — so this
+            // stays bit-identical to the scalar loop for every finite value (proven in
+            // tools/simd_equiv.cpp). A ragged tail (N not a multiple of 4) runs scalar.
+            const simd::float_4 lo(-STATE_MAX), hi(STATE_MAX);
+            int i = 0;
+            for (; i + 4 <= N; i += 4) {
+                simd::float_4 yv = simd::float_4::load(&y[i]);
+                simd::float_4 vv = simd::float_4::load(&v[i]);
+                yv = simd::fmax(simd::fmin(yv + vv, hi), lo);
+                vv = simd::fmax(simd::fmin(vv, hi), lo);
+                yv.store(&y[i]);
+                vv.store(&v[i]);
+            }
+            for (; i < N; i++) {
                 y[i] = clamp(y[i] + v[i], -STATE_MAX, STATE_MAX);
                 v[i] = clamp(v[i], -STATE_MAX, STATE_MAX);
             }
