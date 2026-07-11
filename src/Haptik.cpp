@@ -77,6 +77,16 @@ struct Haptik : Module {
     int   dispClock = 0;
     int   dispPeriod = 980;         // samples between snapshots (~45 Hz; refreshed on SR change)
 
+    // Save snapshot: the audio thread publishes a coherent copy of the lattice (~45 Hz,
+    // a ~22 ms-old frame is fine for a save) so dataToJson() (main thread, while
+    // stepBlock() may run) reads a consistent frame instead of racing the live y/v.
+    struct SaveFrame {
+        float y[MAX_N] = {}, v[MAX_N] = {};
+        float scanPhase = 0.f;
+        int   n = 0;
+    };
+    coalescent::DisplaySnapshot<SaveFrame> saveSnapshot;
+
     // ─── Tunable constants ──────────────────────────────────────────────────
     static constexpr float DAMP_MAX_HZ = 250.f;   // retaper (with quadratic knob): keep the whole knob musical
     static constexpr float OUT_GAIN    = 1.0f;
@@ -133,18 +143,30 @@ struct Haptik : Module {
         dcBlock.reset();    // clear DC-blocker filter state
     }
 
+    // Audio thread: publish a coherent copy of the lattice for dataToJson.
+    void publishSaveFrame(int N) {
+        SaveFrame& sf = saveSnapshot.writable();
+        std::copy(y, y + N, sf.y);
+        std::copy(v, v + N, sf.v);
+        sf.scanPhase = scanPhase;
+        sf.n = N;
+        saveSnapshot.publish();
+    }
+
     // Persist the lattice (displacement + velocity) and scan phase so an evolved /
-    // frozen sound reloads as itself instead of being re-plucked from scratch.
+    // frozen sound reloads as itself instead of being re-plucked from scratch. Read
+    // the audio thread's coherent snapshot, not the live lattice.
     json_t* dataToJson() override {
         json_t* root = json_object();
-        if (last_N > 0) {
-            int n = last_N;
+        const SaveFrame& f = saveSnapshot.consume();
+        if (f.n > 0) {
+            int n = f.n;
             json_object_set_new(root, "N", json_integer(n));
-            json_object_set_new(root, "scanPhase", json_real(scanPhase));
+            json_object_set_new(root, "scanPhase", json_real(f.scanPhase));
             json_t *jy = json_array(), *jv = json_array();
             for (int i = 0; i < n; i++) {
-                json_array_append_new(jy, json_real(y[i]));
-                json_array_append_new(jv, json_real(v[i]));
+                json_array_append_new(jy, json_real(f.y[i]));
+                json_array_append_new(jv, json_real(f.v[i]));
             }
             json_object_set_new(root, "y", jy);
             json_object_set_new(root, "v", jv);
@@ -239,6 +261,7 @@ struct Haptik : Module {
                                                // already on, the FREEZE-edge capture runs at fr=0 and would otherwise
                                                // replace y with a zero yPrev → silence. Seeding yPrev=y makes it a no-op.
             last_N = N;
+            publishSaveFrame(N);               // seeded/restored lattice is immediately saveable
         }
 
         // ── macros → physics ──
@@ -393,7 +416,7 @@ struct Haptik : Module {
         // MOTION taps mass 0 directly (audio-rate in this design); not high-passed.
         outputs[MOTION_OUTPUT].setVoltage(clamp(y[0] * MOTION_GAIN, -5.f, 5.f));
 
-        // ── refresh display snapshot (~45 Hz) ──
+        // ── refresh display + save snapshots (~45 Hz) ──
         if (++dispClock >= dispPeriod) {
             dispClock = 0;
             DisplayFrame& fr = displaySnapshot.writable();
@@ -401,6 +424,7 @@ struct Haptik : Module {
             fr.n = N;
             fr.driver = driverIdx;
             displaySnapshot.publish();
+            publishSaveFrame(N);                 // coherent copy for a race-free save
         }
     }
 };

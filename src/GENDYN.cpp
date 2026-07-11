@@ -88,6 +88,16 @@ struct GENDYN : Module {
     int   dispClock = 0;
     int   dispPeriod = 980;         // samples between snapshots (~45 Hz; refreshed on SR change)
 
+    // Save snapshot: the audio thread publishes a coherent copy of the serializable
+    // state each cycle, so dataToJson() (main thread, while stepBlock() may run —
+    // Rack's toJson only share-locks) reads a consistent generation instead of racing
+    // the live arrays. N=0 until the first cycle publishes (→ a fresh load reseeds).
+    struct SaveFrame {
+        float amp[MAX_N] = {}, dur[MAX_N] = {}, stepAmp[MAX_N] = {}, stepDur[MAX_N] = {};
+        int   n = 0;
+    };
+    coalescent::DisplaySnapshot<SaveFrame> saveSnapshot;
+
     GENDYN() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
 
@@ -127,20 +137,30 @@ struct GENDYN : Module {
         configOutput(FREQ_CV_OUTPUT,    "Frequency 1V/oct");
     }
 
+    // Audio thread: publish a coherent copy of the serializable state for dataToJson.
+    void publishSaveFrame(int N) {
+        SaveFrame& sf = saveSnapshot.writable();
+        std::copy(amp, amp + N, sf.amp);               std::copy(dur, dur + N, sf.dur);
+        std::copy(step_amp, step_amp + N, sf.stepAmp); std::copy(step_dur, step_dur + N, sf.stepDur);
+        sf.n = N;
+        saveSnapshot.publish();
+    }
+
     json_t* dataToJson() override {
         json_t* root = json_object();
         json_object_set_new(root, "initShape", json_integer(initShape));
         // Persist the evolved waveform + walk velocities so a saved sound reloads as
-        // itself, not a fresh reseed. Only once the arrays are real (last_N > 0).
-        if (last_N > 0) {
-            int n = last_N;
+        // itself. Read the audio thread's coherent snapshot, not the live arrays.
+        const SaveFrame& f = saveSnapshot.consume();
+        if (f.n > 0) {
+            int n = f.n;
             json_object_set_new(root, "N", json_integer(n));
             json_t *ja = json_array(), *jd = json_array(), *jsa = json_array(), *jsd = json_array();
             for (int i = 0; i < n; i++) {
-                json_array_append_new(ja,  json_real(amp[i]));
-                json_array_append_new(jd,  json_real(dur[i]));
-                json_array_append_new(jsa, json_real(step_amp[i]));
-                json_array_append_new(jsd, json_real(step_dur[i]));
+                json_array_append_new(ja,  json_real(f.amp[i]));
+                json_array_append_new(jd,  json_real(f.dur[i]));
+                json_array_append_new(jsa, json_real(f.stepAmp[i]));
+                json_array_append_new(jsd, json_real(f.stepDur[i]));
             }
             json_object_set_new(root, "amp", ja);
             json_object_set_new(root, "dur", jd);
@@ -389,6 +409,7 @@ struct GENDYN : Module {
             current_dur = std::max(1, (int)(dur[0] * norm_k));
             last_N = N; lastInitShape = initShape;
             restoredPending = false;                 // reinit already recomputed the caches
+            publishSaveFrame(N);                     // seeded state is immediately saveable
         } else if (restoredPending) {
             // Just restored from a patch: dataFromJson set the arrays but couldn't
             // compute the sample-rate-dependent caches. Do it now (without reseeding
@@ -397,6 +418,7 @@ struct GENDYN : Module {
             updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
             restoredPending = false;
+            publishSaveFrame(N);                     // restored state is immediately re-saveable
         }
 
         // ── Generate output sample ────────────────────────────────────────────
@@ -442,6 +464,7 @@ struct GENDYN : Module {
                                dist, persistSpread);
                 updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
                 if (realized > 0.f) freq_cv = computeFreqCV(args.sampleRate, realized);
+                publishSaveFrame(N);                     // coherent copy for a race-free save
                 // Continuity at the cycle boundary is inherent: every segment
                 // starts from current_amp (the value just reached), so the
                 // wrap segment interpolates from the old amp[N-1] to the
