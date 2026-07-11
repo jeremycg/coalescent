@@ -21,7 +21,7 @@ audible effect.
 - **Bunnies tuning**: `RATE_CAL` 7.49 → 7.33 (default was ~37¢ sharp); the stability test now asserts the constant tracks its measured value so it can't silently drift again.
 - **Haptik DAMP retaper**: `DAMP_MAX_HZ` 800 → 250 with a quadratic taper, so the top ~85% of the knob no longer collapses to a click.
 - **GENDYN `DUR WID = 0`**: removed a stray `+1`-sample floor that kept the walk moving (~41¢ flat); it now lands on the exact centre pitch.
-- **GENDYN LOCK**: a per-cycle servo trims the residual rounding bias so the *measured* period tracks the target through the whole reachable range (best-effort only below the physical `fs/N` floor). It feeds back against the target each cycle was rendered against — not the live knob — so a B DUR CTR / LOCK change retargets in one cycle instead of overshooting; the converged trim is saved so a near-floor sound recalls its pitch on load. FREQ reports the measured period.
+- **GENDYN LOCK**: a per-cycle servo trims the residual rounding bias so the *measured* period tracks the target through the whole reachable range (best-effort only below the physical `fs/N` floor). It feeds back against the target each cycle was rendered against — not the live knob — and resets the trim when the target changes or drops below the floor, so a B DUR CTR / LOCK change lands within ~1 sample of pitch on the first cycle (exact within a few) instead of carrying a stale correction. The converged trim is saved so a near-floor sound recalls its pitch on load. FREQ reports the measured period.
 - **Haptik Slow-mode FREEZE**: captures the interpolated shape currently being heard instead of jumping to the frame endpoint, so it holds (and un-freezes) without a click.
 - **GENDYN & Haptik state**: breakpoints + walk velocities (GENDYN) and lattice + scan phase (Haptik) persist via `dataToJson`/`dataFromJson`.
 
@@ -36,7 +36,7 @@ audible effect.
 
 ### Performance
 
-- **Operon**: the Hill LUT gates on whether `n` is *actually moving*, so a static/held HILL CV uses the LUT (~80× less `pow` vs the old cable-present gate); the `pStar` centre solve warm-starts Newton from the previous root (~8× fewer `pow` under DRIVE modulation, matches bisection to ~1e-6); and the LUT rebuild now fills incrementally (256 entries/sample) so the ~60 µs single-callback spike is gone.
+- **Operon**: the Hill LUT gates on whether `n` is *actually moving*, so a static/held HILL CV uses the LUT (~80× less `pow` vs the old cable-present gate); the `pStar` centre solve warm-starts Newton from the previous root (~8× fewer `pow` under DRIVE modulation, matches bisection to ~1e-6); and the LUT rebuild fills incrementally (256 entries/sample, spread over ~33 module frames) so no single `process()` call pays the whole ~60 µs table build, and a slow HILL LFO no longer thrashes the rebuild (it stays on direct `pow`).
 - **Axon/Soma**: phase-trail rendering batched into 32 alpha bands — ~16× fewer NanoVG strokes (511 → 32 per voice) for a visually identical fade.
 - **Haptik**: the lattice state/clamp pass is vectorized 4-wide, bit-identical to the scalar path (proven in `check-simd`).
 

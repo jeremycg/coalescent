@@ -8,7 +8,7 @@
 //   Build & run:  g++ -O2 -o /tmp/axon_test stability_test.cpp && /tmp/axon_test
 //   Exit 0 = all checks pass, 1 = a check failed.
 //
-// What it does (plan §5):
+// What it does:
 //   1. CALIBRATION: measure the dimensionless limit-cycle period T_dim at the
 //      default params. RATE_CAL must equal T_dim so that, with
 //      dtau = RATE_CAL * pitchHz / fs, the emergent audio fundamental comes out

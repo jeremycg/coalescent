@@ -130,10 +130,12 @@ option for high notes).
 g++ -O2 -o /tmp/t tools/stability/soma.cpp && /tmp/t      # exit 0 = pass
 ```
 
-## Deferred
+## Not included
 
-Closed-loop pitch tracking; per-spike velocity output; a regime/MODE switch to
-recalibrate pitch to the burst (vs spike) rate.
+Soma's pitch is open-loop calibrated (like [Axon](axon.md)), so there is no
+closed-loop pitch tracking, no per-spike velocity output, and no switch to
+recalibrate pitch to the burst rate rather than the spike rate — the emergent
+period shifts with the voicing, as the model intends.
 
 ## References
 

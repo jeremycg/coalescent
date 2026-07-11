@@ -495,15 +495,18 @@ struct GENDYN : Module {
                 // LOCK servo: nudge lockCorr so next cycle's realized period tracks the
                 // target. Multiplicative negative feedback (a long period wants a smaller
                 // norm_k), damped per-cycle to ±25% and bounded, so it converges in a few
-                // cycles and can't run away. Above the N-sample floor this reaches the
-                // target; below it lockCorr saturates and LOCK is best-effort.
+                // cycles and can't run away.
                 //
                 // Feed back against cycleTarget — the target THIS just-finished cycle was
-                // rendered against — not the live knob. If B DUR CTR or LOCK changed since,
-                // the completed cycle never aimed at the new target, so servoing it against
-                // the new one would double-correct (feed-forward below already retargets).
-                // cycleTarget==0 means that cycle was unlocked → nothing to feed back.
-                if (cycleTarget > 0.f && realized > 0.f) {
+                // rendered against — not the live knob; servoing a completed cycle against a
+                // target it never aimed at would double-correct (feed-forward retargets).
+                //
+                // Anti-windup: only integrate while the target is *reachable* (period above
+                // the N-sample floor). Below the floor every cycle floors to N regardless of
+                // norm_k, so the ratio is always <1 and the correction would wind down to its
+                // 0.25 bound — a stale value that then makes the first cycle after you raise
+                // the pitch again wildly sharp. So the servo simply doesn't integrate there.
+                if (cycleTarget > (float) N && realized > 0.f) {
                     const float step = clamp(cycleTarget / realized, 0.8f, 1.25f);
                     lockCorr         = clamp(lockCorr * step, 0.25f, 4.f);
                 }
@@ -515,8 +518,16 @@ struct GENDYN : Module {
                     std::pow(10.f, -2.f * params[PERSIST_PARAM].getValue());
                 runCycleUpdate(N, scaleAmp, scaleDur, bAmp, bDurMin, bDurMax,
                                dist, persistSpread);
+                // A correction is only valid for the target/shape it converged on. If the
+                // target changed (B DUR CTR moved, LOCK toggled) or is now unreachable, drop
+                // to unity so a stale/wound value can't detune the new cycle — the servo then
+                // re-trims from 1, which for a reachable target is already within ~1 sample
+                // of pitch via feed-forward alone.
+                const float newTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
+                if (newTarget != cycleTarget || newTarget <= (float) N)
+                    lockCorr = 1.f;
                 updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
-                cycleTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;   // target the NEW cycle aims at
+                cycleTarget = newTarget;                 // target the NEW cycle aims at
                 if (realized > 0.f) freq_cv = computeFreqCV(args.sampleRate, realized);
                 publishSaveFrame(N);                     // coherent copy for a race-free save
                 // Continuity at the cycle boundary is inherent: every segment

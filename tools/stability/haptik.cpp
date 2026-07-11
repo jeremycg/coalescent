@@ -8,7 +8,7 @@
 //   Build & run:  g++ -O2 -o /tmp/haptik_stability stability_test.cpp && /tmp/haptik_stability
 //   Exit 0 = all checks pass, 1 = a stability check failed.
 //
-// Invariant under test (see plan §5): with COUPLE (kSpr) clamped at 0.9 and the
+// Invariant under test: with COUPLE (kSpr) clamped at 0.9 and the
 // centering term tiny, omega_max = sqrt(kCtr + 4*kSpr) < 2, so the integrator is
 // stable and y[] stays finite/bounded for any COUPLE in [0, 0.9] even at DAMP=0.
 #include <cstdio>

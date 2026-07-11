@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the four §7 Haptik smoke-test patches as .vcv files.
+"""Generate the four Haptik smoke-test patches as .vcv files.
 
 Each patch is Haptik → Core AudioInterface (L+R). The driven-resonator patch
 also wires a Fundamental VCO SAW output into Haptik's EXT IN.

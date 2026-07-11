@@ -49,28 +49,38 @@ static float lockNorm(float sum_dur, int N, float fs, float centerFreq) {
     return std::max(k, (float) N / sum_dur);
 }
 
+// Mode selector for the servo mirror below: the shipped fix, and the two historical
+// regressions the tests must still discriminate against.
+enum ServoMode {
+    SERVO_FIXED,        // cycleTarget feedback + anti-windup (>N) + reset-on-target-change
+    BUG_FEEDBACK,       // pre-fix #1: feed the completed cycle back against the *next* target
+    BUG_STALE,          // pre-fix #2: no anti-windup, no reset — carry lockCorr across targets
+};
+
 // Faithful mirror of the src/GENDYN.cpp LOCK servo (updateNormAndFreq + the cycle-
 // boundary feedback). `sched` is the per-cycle (centerFreq, lockOn) the module sees;
 // the shape `dur[]` is held fixed (the walk is exercised elsewhere). Returns the
 // realized period of every cycle so transitions can be inspected; *finalCorr, if
 // given, receives the converged lockCorr for restore tests.
 //
-// The module feeds the realized period back against `cycleTarget` — the target the
-// *just-finished* cycle was rendered against — so a target change / LOCK toggle isn't
-// double-corrected. `buggy=true` reproduces the pre-fix regression (feed back against
-// the next cycle's target) purely so the tests can prove the fix discriminates.
+// SERVO_FIXED mirrors the module exactly: feedback for a completed cycle uses the
+// target THAT cycle was rendered against; the servo only integrates for reachable
+// targets (period > the N-sample floor); and a material target change / unreachable
+// target / LOCK toggle resets lockCorr to unity so a stale correction can't detune
+// the next cycle. The two BUG_ modes drop one guard each so the tests can prove the
+// fix discriminates.
 static std::vector<long> servoRun(const float* dur, int N, float fs,
                                   const std::vector<std::pair<float,bool>>& sched,
-                                  bool buggy = false, float lockCorr0 = 1.f,
+                                  ServoMode mode = SERVO_FIXED, float lockCorr0 = 1.f,
                                   float* finalCorr = nullptr) {
     float sum = 0.f; for (int i = 0; i < N; i++) sum += dur[i];
     float lockCorr = lockCorr0, dur_err = 0.f, cycleTarget = 0.f, norm_k = 1.f;
-    auto setCycle = [&](std::pair<float,bool> s) {          // updateNormAndFreq + cycleTarget
+    auto prime = [&](std::pair<float,bool> s) {             // reinit/restore branch primes cycle 0
         if (s.second) norm_k = (fs / s.first) / sum * lockCorr;
         else { norm_k = 1.f; lockCorr = 1.f; }
         cycleTarget = s.second ? fs / s.first : 0.f;
     };
-    setCycle(sched[0]);                                     // reinit/restore branch primes cycle 0
+    prime(sched[0]);
     std::vector<long> out; out.reserve(sched.size());
     for (size_t c = 0; c < sched.size(); c++) {
         long realized = 0;
@@ -81,13 +91,23 @@ static std::vector<long> servoRun(const float* dur, int N, float fs,
             realized += cd;
         }
         out.push_back(realized);
-        float fbT = cycleTarget; bool fbOn = cycleTarget > 0.f;
-        if (buggy && c + 1 < sched.size()) {                 // regression: use the NEXT target
-            fbOn = sched[c+1].second; fbT = fbOn ? fs / sched[c+1].first : 0.f;
-        }
-        if (fbOn && fbT > 0.f && realized > 0)
+
+        // ── servo feedback for the just-finished cycle ──
+        float fbT = cycleTarget;
+        if (mode == BUG_FEEDBACK && c + 1 < sched.size())    // #1: feed back against the NEXT target
+            fbT = sched[c+1].second ? fs / sched[c+1].first : 0.f;
+        bool reachable = (mode == SERVO_FIXED) ? (fbT > (float) N) : (fbT > 0.f);  // anti-windup only when fixed
+        if (fbT > 0.f && reachable && realized > 0)
             lockCorr = std::clamp(lockCorr * std::clamp(fbT / (float) realized, 0.8f, 1.25f), 0.25f, 4.f);
-        setCycle(c + 1 < sched.size() ? sched[c+1] : sched[c]);
+
+        // ── advance to the next cycle ──
+        auto nx = (c + 1 < sched.size()) ? sched[c+1] : sched[c];
+        float newTarget = nx.second ? fs / nx.first : 0.f;
+        if (mode == SERVO_FIXED && (newTarget != cycleTarget || newTarget <= (float) N))
+            lockCorr = 1.f;                                  // reset-on-target-change / unreachable
+        if (nx.second) norm_k = (fs / nx.first) / sum * lockCorr;
+        else { norm_k = 1.f; lockCorr = 1.f; }
+        cycleTarget = newTarget;
     }
     if (finalCorr) *finalCorr = lockCorr;
     return out;
@@ -235,30 +255,30 @@ int main() {
     {
         const int N = 64;
 
-        // A production-valid clustered near-floor shape: 58 minimum-length (1.0) + 6
-        // near-max (2.1875) segments, durations in [1, 2.1875] (the actual range at a
-        // ~65-sample target and full B DUR WID). Target 65 samples (> floor N=64).
+        // A production-valid clustered near-floor shape. At a 65-sample target the real
+        // barrier range is [1, 2*65/64] = [1, 2.03125] (bDurMin=1, bDurMax=2*durCenter),
+        // so use 57 minimum-length (1.0) + 7 near-max (2.03125) segments: the feed-forward
+        // period realizes 66 samples and the servo must trim it to 65 (a real 1-sample
+        // correction, not the vacuous 58/6 @2.1875 cluster whose feed-forward is already 65).
         float dNear[64];
-        for (int i = 0; i < N; i++) dNear[i] = (i < 58) ? 1.0f : 2.1875f;
+        for (int i = 0; i < N; i++) dNear[i] = (i < 57) ? 1.0f : 2.03125f;
 
         bool ok = true;
         for (float fs : sampleRates) {
             float floorHz = fs / N;
 
-            // (a) reachable near-floor: servo trims the residual to within a sample, and
-            //     it is a real (not vacuous) correction — feed-forward alone is ~1 sample
-            //     flatter. No dramatic "30 sample" claim: that needs sub-1 durations the
-            //     module can't produce.
+            // (a) reachable near-floor: servo trims the residual to within a sample, and it
+            //     is a real (not vacuous) correction — feed-forward alone is ~1 sample flat.
             {
-                float f = floorHz / (65.f / N);            // target period 65 samples
+                float f = floorHz / (65.f / N);            // target period 65 samples (> floor)
                 std::vector<std::pair<float,bool>> hold(300, {f, true});
                 long servo = servoRun(dNear, N, fs, hold).back();
                 long ff    = servoRun(dNear, N, fs, {{f, true}}).front();   // feed-forward only (1 cycle)
                 double servoErr = std::fabs(servo - fs / f), ffErr = std::fabs(ff - fs / f);
                 if (servoErr > 1.1) { ok = false;
                     printf("  [5a] FAIL fs=%.0f near-floor servo period err=%.2f samples\n", fs, servoErr); }
-                else if (ffErr < 0.9)
-                    printf("  [5a] note fs=%.0f: feed-forward already exact (servo no-op here)\n", fs);
+                else if (ffErr < 0.9) { ok = false;        // fixture must actually exercise the servo
+                    printf("  [5a] FAIL fs=%.0f feed-forward already exact (%.2f) — fixture vacuous\n", fs, ffErr); }
             }
             // (b) below the floor (target period < N): unreachable, must saturate at fs/N.
             {
@@ -281,8 +301,8 @@ int main() {
             float cf1 = fs / 704.f, cf2 = fs / 352.f;
             std::vector<std::pair<float,bool>> sched(80, {cf1, true});
             sched.push_back({cf2, true});                  // octave up on the 81st cycle
-            long fixedPost = servoRun(dHi, N, fs, sched).at(80);
-            long buggyPost = servoRun(dHi, N, fs, sched, /*buggy=*/true).at(80);
+            long fixedPost = servoRun(dHi, N, fs, sched, SERVO_FIXED).at(80);
+            long buggyPost = servoRun(dHi, N, fs, sched, BUG_FEEDBACK).at(80);
             double fixedC = cents(fs / fixedPost, fs / 352.f), buggyC = cents(fs / buggyPost, fs / 352.f);
             if (std::fabs(fixedC) > 8.0) { ok = false;
                 printf("  [5c] FAIL octave change double-corrects: %.1f cents (want ~0)\n", fixedC); }
@@ -293,8 +313,8 @@ int main() {
             //      is the same hazard: unlocked natural period 704, LOCK on at target 352.
             std::vector<std::pair<float,bool>> eng(5, {cf1, false});
             for (int i = 0; i < 5; i++) eng.push_back({cf2, true});
-            long fixedEng = servoRun(dHi, N, fs, eng).at(5);
-            long buggyEng = servoRun(dHi, N, fs, eng, /*buggy=*/true).at(5);
+            long fixedEng = servoRun(dHi, N, fs, eng, SERVO_FIXED).at(5);
+            long buggyEng = servoRun(dHi, N, fs, eng, BUG_FEEDBACK).at(5);
             if (std::fabs(cents(fs / fixedEng, fs / 352.f)) > 8.0) { ok = false;
                 printf("  [5c'] FAIL LOCK-engage double-corrects: %.1f cents\n", cents(fs / fixedEng, fs / 352.f)); }
             if (std::fabs(cents(fs / buggyEng, fs / 352.f)) < 200.0) { ok = false;
@@ -309,16 +329,36 @@ int main() {
             float f = (fs / N) / (65.f / N);               // target 65 samples
             float converged = 1.f;
             std::vector<std::pair<float,bool>> hold(300, {f, true});
-            servoRun(dNear, N, fs, hold, false, 1.f, &converged);
-            long recalled = servoRun(dNear, N, fs, {{f, true}}, false, converged).front();
-            long fresh    = servoRun(dNear, N, fs, {{f, true}}, false, 1.f).front();
+            servoRun(dNear, N, fs, hold, SERVO_FIXED, 1.f, &converged);
+            long recalled = servoRun(dNear, N, fs, {{f, true}}, SERVO_FIXED, converged).front();
+            long fresh    = servoRun(dNear, N, fs, {{f, true}}, SERVO_FIXED, 1.f).front();
             if (std::fabs(recalled - fs / f) > 1.1) { ok = false;
                 printf("  [5d] FAIL restored lockCorr off by %.2f samples\n", std::fabs(recalled - fs / f)); }
             if (std::fabs(recalled - fs / f) > std::fabs(fresh - fs / f) + 1e-3) { ok = false;
                 printf("  [5d] FAIL recall no better than a fresh reload\n"); }
         }
 
-        printf("[5] LOCK servo: near-floor trim, below-floor saturation, no double-correct on target/LOCK change, restore recall: %s\n",
+        // (e) a below-floor request winds no stale correction into a later reachable one.
+        //     Hold LOCK at 5 kHz (target ~8.8 samples, far below the 64 floor) so the
+        //     pre-fix servo would wind lockCorr to its 0.25 bound, then drop to C4: the
+        //     first C4 cycle must land near C4, not stay floored at 64 samples (~+1677
+        //     cents). Anti-windup + reset-on-target-change is what makes the fixed path
+        //     land close; BUG_STALE (no guard) reproduces the blowup for discrimination.
+        {
+            const float fs = 44100.f;
+            float dHi[64]; for (int i = 0; i < N; i++) dHi[i] = 11.f;
+            float cf5k = 5000.f, cfC4 = fs / 168.56f;      // below floor, then a reachable C4
+            std::vector<std::pair<float,bool>> sched(40, {cf5k, true});
+            for (int i = 0; i < 8; i++) sched.push_back({cfC4, true});
+            double fixedC = cents(fs / servoRun(dHi, N, fs, sched, SERVO_FIXED).at(40), 261.626);
+            double staleC = cents(fs / servoRun(dHi, N, fs, sched, BUG_STALE ).at(40), 261.626);
+            if (std::fabs(fixedC) > 50.0) { ok = false;
+                printf("  [5e] FAIL below-floor->C4 first cycle %.0f cents off (want <50)\n", fixedC); }
+            if (std::fabs(staleC) < 1000.0) { ok = false;  // discrimination: the stale bug was huge
+                printf("  [5e] FAIL discrimination: stale-correction only %.0f cents — test vacuous\n", staleC); }
+        }
+
+        printf("[5] LOCK servo: near-floor trim, below-floor saturation, no double-correct or stale-correction on target/LOCK change, restore recall: %s\n",
                ok ? "PASS" : "FAIL");
         if (!ok) fails++;
     }

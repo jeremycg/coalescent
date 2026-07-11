@@ -56,13 +56,14 @@ The **MODE** switch picks how fast the ring itself evolves:
 | **COUPLE** | 0–0.9 | neighbour stiffness; the main timbral control (hard-capped at 0.9 for stability) |
 | **DAMP** | 0–1 | energy loss; 0 = lossless drone |
 | **INJECT** | 0–1 | excitation amount + EXT IN gain |
-| **EXCITE** | impulse / bump / noise / drive | excitation shape applied on TRIG |
+| **EXCITE** | Impulse / Bump / Noise / Continuous | Impulse/Bump/Noise are applied on each TRIG; Continuous drives the ring constantly (no trigger) |
 | **DRIVER** | 0–100% | where excitation / EXT IN enters the ring (default 25%) |
 | **FREEZE** | Run / Freeze | hold the current shape as a static tone |
 | **MODE** | Fast / Slow | audio-rate resonator vs haptic-rate morphing wavetable |
 
 CV inputs (RATE, COUPLE, DAMP, INJECT) each have an attenuverter. **V/OCT** sums
-with PITCH. **TRIG** re-excites with the current EXCITE shape on each rising edge.
+with PITCH. **TRIG** re-excites with the current EXCITE shape on each rising edge
+(Impulse/Bump/Noise; Continuous ignores TRIG and drives constantly).
 **EXT IN** injects external audio as a force at the DRIVER mass (level scales with
 INJECT). A polyphonic cable is summed to mono (Haptik has a single lattice).
 
@@ -91,9 +92,9 @@ Two deliberate fudges, both for legibility:
 
 ## Playing it
 
-**Out of the box** Haptik defaults to **EXCITE = drive** (continuous excitation),
+**Out of the box** Haptik defaults to **EXCITE = Continuous** (constant drive),
 so patching `V/OCT` + `OUT → audio` gives an immediate, sustaining, evolving tone —
-no trigger needed. Switch EXCITE to **impulse / bump / noise** (0–2) for the
+no trigger needed. Switch EXCITE to **Impulse / Bump / Noise** for the
 struck/plucked behaviour instead.
 
 In the pluck modes Haptik has **no built-in amplitude envelope** — a struck note

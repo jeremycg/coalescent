@@ -55,7 +55,7 @@ all N breakpoints.
 | B AMP | Amplitude barrier half-width (0=frozen, 1=full ±5V range) |
 | B DUR CTR | Center frequency for duration barriers (20–5000 Hz; default C4 = 261.6) |
 | B DUR WID | Duration barrier half-width around center (0=fixed pitch, 1=wide) |
-| DIST | Distribution: 0=Cauchy, 1=Gaussian, 2=Uniform, 3=Logistic (default) |
+| DIST | Distribution (named switch): Cauchy / Gaussian / Uniform / Logistic (default) |
 | PERSIST | Glide persistence: how many cycles a step keeps its direction. 0% ≈ uncorrelated jitter (first-order / SC Gendy feel), 30% (default) ≈ 16 cycles, 100% = very long steady glides |
 | LOCK | Pitch lock: a per-cycle servo scales the durations so the *measured* period tracks B DUR CTR while the waveform keeps evolving (SC `Gendy3` behaviour). Tracking is essentially exact through most of the range; very close to the sample floor (very high B DUR CTR and/or high N) each segment bottoms out at 1 sample and the lock becomes best-effort, holding as close as the integer segment lengths allow. |
 

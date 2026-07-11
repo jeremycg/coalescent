@@ -11,6 +11,9 @@ using namespace rack;              // so `simd::` resolves as it does inside the
 #include "../src/tanh_approx.hpp"
 #include <cstdio>
 #include <cmath>
+#include <cstring>
+#include <limits>
+#include <utility>
 #include <algorithm>
 #include <vector>
 
@@ -200,44 +203,69 @@ int main() {
         }
     }
 
-    // ── Haptik lattice state/clamp pass: scalar vs float_4, must be bit-identical.
+    // ── Haptik lattice state/clamp pass: scalar vs float_4, must be BIT-identical.
     // Unlike the RK4 oscillators (where SIMD rounding causes benign phase drift), this
     // pass is a plain elementwise clamp with no accumulation, so the vectorized version
-    // must match the scalar loop *exactly* for every finite value. The module writes the
-    // clamp as fmax(fmin(x,hi),lo) to mirror rack::clamp's op order; verify that here,
-    // including the ragged tail (N not a multiple of 4). ──
+    // must match the scalar loop exactly. The module writes the clamp as fmax(fmin(x,hi),lo)
+    // to mirror rack::clamp's op order (which also fixes _mm_min/max_ps's NaN and signed-
+    // zero behavior to match std::fmin/fmax here). Swept over every production N=8..128
+    // (all four tail residues) with a value set that includes the ±16 boundary, values far
+    // past it, ±inf, NaN, ±0, and subnormals, compared with memcmp for true bit-equality. ──
     {
         const float SMAX_H = 16.f;          // Haptik STATE_MAX
-        const int   N = 130;                // 32 four-wide groups + a 2-wide tail
-        std::vector<float> y0(N), v0(N);
-        for (int i = 0; i < N; i++) {       // spread spans well past ±16 (exercise the clamp)
-            float t = -1.f + 2.f * (i / (float)(N - 1));
-            y0[i] = t * 20.f * (1.f + 0.3f * std::sin(i * 1.7f));
-            v0[i] = -t * 25.f * (1.f + 0.2f * std::cos(i * 2.3f));
+        const float INF = std::numeric_limits<float>::infinity();
+        const float NAN_ = std::numeric_limits<float>::quiet_NaN();
+        const float SUB = std::numeric_limits<float>::denorm_min();
+        const float extras[] = { 0.f, -0.f, SMAX_H, -SMAX_H, 100.f, -100.f, INF, -INF, NAN_, SUB, -SUB };
+        const int   NE = (int) (sizeof(extras) / sizeof(extras[0]));
+
+        long totalDiffs = 0;
+        for (int N = 8; N <= 128; N++) {                     // every N, so every tail residue 0..3
+            std::vector<float> y0(N), v0(N);
+            for (int i = 0; i < N; i++) {
+                // seed the first entries with the pathological values, the rest with a
+                // spread that straddles the clamp boundary in both directions.
+                if (i < NE) { y0[i] = extras[i]; v0[i] = extras[(i * 7 + 3) % NE]; }
+                else {
+                    float t = -1.f + 2.f * (i / (float)(N - 1));
+                    y0[i] = t * 20.f * (1.f + 0.3f * std::sin(i * 1.7f));
+                    v0[i] = -t * 25.f * (1.f + 0.2f * std::cos(i * 2.3f));
+                }
+            }
+            std::vector<float> ys = y0, vs = v0;             // scalar reference (mirrors module)
+            for (int i = 0; i < N; i++) {
+                ys[i] = rack::math::clamp(ys[i] + vs[i], -SMAX_H, SMAX_H);
+                vs[i] = rack::math::clamp(vs[i], -SMAX_H, SMAX_H);
+            }
+            std::vector<float> yv = y0, vv = v0;             // vectorized (mirrors module)
+            const float_4 lo(-SMAX_H), hi(SMAX_H);
+            int i = 0;
+            for (; i + 4 <= N; i += 4) {
+                float_4 Y = float_4::load(&yv[i]);
+                float_4 V = float_4::load(&vv[i]);
+                Y = simd::fmax(simd::fmin(Y + V, hi), lo);
+                V = simd::fmax(simd::fmin(V, hi), lo);
+                Y.store(&yv[i]); V.store(&vv[i]);
+            }
+            for (; i < N; i++) {
+                yv[i] = rack::math::clamp(yv[i] + vv[i], -SMAX_H, SMAX_H);
+                vv[i] = rack::math::clamp(vv[i], -SMAX_H, SMAX_H);
+            }
+            // memcmp: catches any bit difference (incl. signed zero), skipping NaN slots
+            // where a raw bit-compare is not meaningful but both must still be NaN.
+            for (int j = 0; j < N; j++) {
+                for (auto pr : { std::make_pair(&ys[j], &yv[j]), std::make_pair(&vs[j], &vv[j]) }) {
+                    if (std::isnan(*pr.first) || std::isnan(*pr.second)) {
+                        if (std::isnan(*pr.first) != std::isnan(*pr.second)) totalDiffs++;
+                    } else if (std::memcmp(pr.first, pr.second, sizeof(float)) != 0) {
+                        totalDiffs++;
+                    }
+                }
+            }
         }
-        std::vector<float> ys = y0, vs = v0;                 // scalar reference (mirrors module)
-        for (int i = 0; i < N; i++) {
-            ys[i] = rack::math::clamp(ys[i] + vs[i], -SMAX_H, SMAX_H);
-            vs[i] = rack::math::clamp(vs[i], -SMAX_H, SMAX_H);
-        }
-        std::vector<float> yv = y0, vv = v0;                 // vectorized (mirrors module)
-        const float_4 lo(-SMAX_H), hi(SMAX_H);
-        int i = 0;
-        for (; i + 4 <= N; i += 4) {
-            float_4 Y = float_4::load(&yv[i]);
-            float_4 V = float_4::load(&vv[i]);
-            Y = simd::fmax(simd::fmin(Y + V, hi), lo);
-            V = simd::fmax(simd::fmin(V, hi), lo);
-            Y.store(&yv[i]); V.store(&vv[i]);
-        }
-        for (; i < N; i++) {
-            yv[i] = rack::math::clamp(yv[i] + vv[i], -SMAX_H, SMAX_H);
-            vv[i] = rack::math::clamp(vv[i], -SMAX_H, SMAX_H);
-        }
-        int diffs = 0;
-        for (int j = 0; j < N; j++) { if (ys[j] != yv[j]) diffs++; if (vs[j] != vv[j]) diffs++; }
-        printf("Haptik clamp pass scalar vs float_4 (N=%d, incl. ragged tail): %d value diffs\n", N, diffs);
-        if (diffs) { printf("FAIL: Haptik vectorized clamp differs from scalar\n"); return 1; }
+        printf("Haptik clamp pass scalar vs float_4 (N=8..128, all tail residues, "
+               "incl. inf/NaN/-0/subnormal): %ld bit diffs\n", totalDiffs);
+        if (totalDiffs) { printf("FAIL: Haptik vectorized clamp differs from scalar\n"); return 1; }
     }
 
     // Oscillator equivalence = same pitch. The per-sample |Δv| is phase micro-drift

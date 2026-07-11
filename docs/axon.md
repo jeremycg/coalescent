@@ -38,8 +38,9 @@ smoother, near-sinusoidal swing. **a** (SHAPE) shifts the asymmetry / threshold.
 The system is **stiff** (a fast variable riding a slow one), so the integrator is
 the real work: each sample takes a number of **RK4 substeps**, and that number
 adapts to pitch to hold the substep size near `0.05` — up to a cap of 64 substeps,
-above which (roughly the top octave) the step grows and pitch trades some
-integration accuracy for bounded CPU. A finiteness reset + state clamp are the
+above which the step grows and pitch trades some integration accuracy for bounded
+CPU. That cap isn't reached until well past the PITCH knob — around +6 octaves via
+V/OCT CV at default conditions (see the CPU section), not the top of the knob. A finiteness reset + state clamp are the
 backstop if forcing ever pushes it to run away. The `f()` derivative and the RK4
 step are written so the **Hindmarsh–Rose** sibling (Soma) uses the same integration
 strategy with one extra equation.

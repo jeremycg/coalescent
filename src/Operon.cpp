@@ -83,8 +83,8 @@ struct Operon : Module {
     static constexpr int   HILL_LUT_SLICE = 256;   // entries filled per sample during a rebuild
     float hillLut[HILL_LUT_N + 1];
     float lutN = -1.f;      // n the active LUT was built for
-    float nPrev = -1.f;     // n from the previous sample (movement detector)
-    int   rebuildClock = 0; // rate-limit LUT rebuilds (samples since the last completion)
+    float nSettleRef = -1e9f; // anchor for the settle detector (see process())
+    int   rebuildClock = 0; // consecutive samples n has stayed within N_MOVE_EPS of nSettleRef
     bool  lutValid = false;
     int   buildPos = -1;    // incremental rebuild cursor: -1 idle, else next entry to fill
     float buildN = -1.f;    // n the in-progress rebuild is filling for
@@ -170,7 +170,7 @@ struct Operon : Module {
         reseedAsymmetric();
         pStarValid = false;
         pStar = 0.f; pStarA = pStarN = pStarL = -1.f;
-        lutValid = false; lutN = -1.f; nPrev = -1.f; rebuildClock = 0; buildPos = -1;
+        lutValid = false; lutN = -1.f; nSettleRef = -1e9f; rebuildClock = 0; buildPos = -1;
         for (int k = 0; k < 3; ++k) { lastCentered[k] = 0.f; gateGen[k].reset(); }
     }
 
@@ -235,40 +235,37 @@ struct Operon : Module {
             pStarA = alpha; pStarN = n; pStarL = alpha0; pStarValid = true;
         }
 
-        // Hill LUT vs direct pow, gated on whether n is *actually moving* this sample
-        // (not on cable presence): a STATIC n — knob at rest or a held HILL CV — uses
-        // the 8192-point LUT; a moving n (audio-rate, or a slow drift once it exceeds
-        // the rebuild threshold) uses direct pow, since a rebuilt-at-most-every-N-
-        // samples LUT would lag and detune.
-        // Two guards keep the rebuild off the hot path:
-        //   • nMoving blocks rebuilds while n is being dialled/swept (use direct pow);
-        //   • the ~2048-sample rate-limit backstops the knob-smoothing asymptotic tail
-        //     (tiny per-sample deltas that read as "settled" while n still creeps),
-        //     which otherwise thrashes 8192 pow per change and spikes CPU.
-        const bool nMoving = std::fabs(n - nPrev) > N_MOVE_EPS;
-        nPrev = n;
-        if (rebuildClock < 2048) ++rebuildClock;   // saturate: only the >=2048 threshold matters, and this avoids signed overflow after hours
+        // Hill LUT vs direct pow: a STATIC n (knob at rest or a held HILL CV) uses the
+        // 8192-point LUT; a moving n (audio-rate, or any drift) uses direct pow, since a
+        // rebuilt-at-most-every-N-samples LUT would lag and detune.
+        //
+        // Settle detector: rebuildClock counts *consecutive* samples n has stayed within
+        // N_MOVE_EPS of nSettleRef. ANY larger move — a fast sweep OR slow cumulative
+        // drift past the window — resets the counter, the anchor, and any partial build.
+        // A rebuild starts only after n has genuinely been still for ~2048 samples, so a
+        // slow HILL LFO (whose per-sample delta is tiny but which never settles) stays on
+        // direct pow instead of aborting-and-restarting a 256-entry fill every sample.
+        if (std::fabs(n - nSettleRef) > N_MOVE_EPS) {
+            nSettleRef = n; rebuildClock = 0; buildPos = -1;   // moved → reset window + drop partial build
+        } else if (rebuildClock < 2048) {
+            ++rebuildClock;                                    // saturates; only the >=2048 threshold matters
+        }
 
         // Rebuild the LUT incrementally rather than in one sample: the full 8192-pow
-        // table build measured ~60 µs on an audio callback (a real spike at high SR /
-        // many instances). Fill it HILL_LUT_SLICE entries per sample and publish only
-        // when complete — the whole rebuild is spread over ~33 samples (<1 ms), and no
-        // single callback pays more than a slice. Safe to fill in place: the table is
+        // table build measured ~60 µs (a real spike at high SR / many instances). Fill it
+        // HILL_LUT_SLICE entries per sample and publish only when complete — the whole
+        // rebuild spreads over ~33 samples (<1 ms). Safe to fill in place: the table is
         // only read when hillDirect is false, which requires a *matching* live LUT
-        // (lutValid && n≈lutN) — impossible mid-build, since a build clears lutValid.
-        if (nMoving) buildPos = -1;                                    // moving again → drop the partial build
-        else if (buildPos >= 0 && std::fabs(n - buildN) > 1e-4f) buildPos = -1;   // target moved → restart
-        if (buildPos < 0 && !nMoving && std::fabs(n - lutN) > 1e-4f && rebuildClock >= 2048) {
-            buildPos = 0; buildN = n; lutValid = false;               // start; old LUT is now stale/unreadable
+        // (lutValid && n≈lutN) — impossible mid-build, since starting a build clears lutValid.
+        if (buildPos < 0 && rebuildClock >= 2048 && std::fabs(n - lutN) > 1e-4f) {
+            buildPos = 0; buildN = n; lutValid = false;        // start; old LUT is now stale/unreadable
         }
         if (buildPos >= 0) {
             int end = std::min(buildPos + HILL_LUT_SLICE, HILL_LUT_N + 1);
             for (; buildPos < end; ++buildPos) hillLut[buildPos] = hillEntry(buildPos, buildN);
-            if (buildPos > HILL_LUT_N) {                              // complete → go live
-                lutN = buildN; lutValid = true; buildPos = -1; rebuildClock = 0;
-            }
+            if (buildPos > HILL_LUT_N) { lutN = buildN; lutValid = true; buildPos = -1; }   // complete → go live
         }
-        const bool hillDirect = nMoving || !lutValid || std::fabs(n - lutN) > 1e-4f;
+        const bool hillDirect = !lutValid || std::fabs(n - lutN) > 1e-4f;
 
         // ── pitch = simulation speed; adaptive substepping ──
         float pitchTotal = clamp(params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage(),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the §7 Axon smoke-test patches as .vcv files.
+"""Generate the Axon smoke-test patches as .vcv files.
 
 Axon positional ids (must match enum order in src/Axon.cpp):
   ParamId : 0 PITCH, 1 CURRENT, 2 EPS, 3 SHAPE, 4 CURRENT_ATT, 5 EPS_ATT

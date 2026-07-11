@@ -101,7 +101,7 @@ int main() {
         fails++;
     }
 
-    // LV servo health across WILD (plan §6 diagnostics): V should track V0, clamp
+    // LV servo health across WILD: V should track V0, clamp
     // fraction stay low, and orbits stay off the positivity floor.
     printf("LV servo health (bal=0.5): max|V-V0|  servo-clamp%%  minState\n");
     float worstClamp = 0, worstFloor = 1e9f;
