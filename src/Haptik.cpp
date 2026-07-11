@@ -60,6 +60,7 @@ struct Haptik : Module {
     int   driverIdx = 0;            // mass that excitation / EXT IN drives
     int   divCounter = 0;           // slow-mode: samples since the last lattice step
     bool  wasFrozen = false;        // slow-mode: FREEZE edge detector (capture interpolated frame)
+    bool  wasSlow = false;          // Fast/Slow edge detector (reconcile interpolation state)
     dsp::SchmittTrigger trig;
     dsp::TRCFilter<float> dcBlock;  // fixed internal DC blocker on OUT
     float lastFs = 0.f;             // detects SR change to refresh dcBlock cutoff
@@ -232,6 +233,7 @@ struct Haptik : Module {
             scanPhase = 0.f;
             divCounter = 0;
             wasFrozen = false;
+            wasSlow = params[MODE_PARAM].getValue() > 0.5f;   // don't fire a spurious transition on the first sample after reinit
             applyExcite(1, 1.f, N);            // always a full bump (ignores EXCITE/INJECT) so it sounds on load
             std::copy(y, y + N, yPrev);        // yPrev must mirror a real frame: if a patch loads with Slow+FREEZE
                                                // already on, the FREEZE-edge capture runs at fr=0 and would otherwise
@@ -275,6 +277,21 @@ struct Haptik : Module {
 
         bool freeze = params[FREEZE_PARAM].getValue() > 0.5f;
         int  shape  = (int) std::round(params[EXCITE_PARAM].getValue());
+
+        // Fast/Slow transition: reconcile the interpolation state so the readout stays
+        // continuous. Leaving Slow, collapse the frame we were hearing (fr uses the Slow
+        // divider) into y so Fast continues from it; then yPrev=y and divCounter=0 so a
+        // future Slow phase starts flat from y instead of against a stale pre-Fast frame.
+        if (slow != wasSlow) {
+            if (wasSlow) {
+                float fr = clamp((float) divCounter / (float) SLOW_DIV, 0.f, 1.f);
+                for (int i = 0; i < N; i++) y[i] = yPrev[i] + fr * (y[i] - yPrev[i]);
+            }
+            std::copy(y, y + N, yPrev);
+            divCounter = 0;
+            wasFrozen  = false;   // re-arm the freeze edge for the new mode
+        }
+        wasSlow = slow;
 
         // Slow-mode FREEZE edge: capture the frame the ear is *currently* hearing —
         // the interpolated shape between yPrev and y — into y, so the frozen readout

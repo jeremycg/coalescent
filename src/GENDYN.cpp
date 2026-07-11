@@ -68,7 +68,7 @@ struct GENDYN : Module {
     // stochastic walk then evolves — far more discoverable than a random noise seed.
     int   initShape = 0;
     int   lastInitShape = -1;        // forces a reseed when the shape changes
-    bool  reseedPending = false;
+    std::atomic<bool> reseedPending{false};   // UI menu sets; DSP reads-and-clears (exchange), so a reseed can't be lost
     bool  restoredPending = false;   // dataFromJson set the arrays; process() must recompute
                                      // the SR-dependent caches (norm_k / freq_cv / current_dur)
     dsp::TRCFilter<float> dcBlock;   // gentle ~5 Hz DC blocker on OUT (walk mean drifts)
@@ -375,11 +375,14 @@ struct GENDYN : Module {
         const bool lockPitch = params[LOCK_PARAM].getValue() > 0.5f;
 
         // ── Reinit on N change, seed-shape change, or a menu re-seed ───────────
-        if (N != last_N || initShape != lastInitShape || reseedPending) {
+        // exchange() reads-and-clears the menu's reseed request atomically, so a
+        // request set by the UI between a plain read and a plain clear can't be lost.
+        bool doReseed = reseedPending.exchange(false, std::memory_order_relaxed);
+        if (N != last_N || initShape != lastInitShape || doReseed) {
             initBreakpoints(N, bAmp, durCenter, bDurMin, bDurMax);
             updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
-            last_N = N; lastInitShape = initShape; reseedPending = false;
+            last_N = N; lastInitShape = initShape;
             restoredPending = false;                 // reinit already recomputed the caches
         } else if (restoredPending) {
             // Just restored from a patch: dataFromJson set the arrays but couldn't
