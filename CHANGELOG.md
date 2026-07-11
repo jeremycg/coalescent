@@ -2,6 +2,22 @@
 
 ## 2.2.1 (unreleased)
 
+- **Concurrency & robustness pass** (from an external review):
+  - **Race-free saves**: GENDYN/Haptik `dataToJson()` read live state arrays while
+    `process()` could mutate them (Rack only share-locks on save). The audio thread
+    now publishes a coherent save snapshot; the save reads that.
+  - **GENDYN reseed** request is atomic (a menu re-seed can't be dropped by the
+    audio thread clearing the flag).
+  - **Haptik Fast/Slow** transitions reconcile the interpolation state, so a mode
+    switch doesn't click.
+  - **GENDYN FREQ** reports the *measured* realized period, honest even when unequal
+    durations near the 1-sample floor under LOCK can't reach the requested pitch.
+  - **Operon** LUT-rebuild counter saturates (was signed-overflow UB after hours).
+  - **Corrupt-patch bounds**: restored GENDYN amplitudes/walk steps and Haptik
+    lattice values are range-checked, not just finiteness-checked.
+- **Manifest/docs**: Operon/Bunnies tag `LFO`→`Low-frequency oscillator`+`Clock
+  generator`; Operon scope window documented as ~25 Hz / ~10 s; README taxonomy
+  includes the genetic and ecological modules.
 - **UI — race-free display snapshots**: all six modules published their scope/trail
   frames through an atomic-index double buffer, which the audio thread could reclaim
   mid-draw (a benign display tear, but formally a data race). Replaced with a shared
