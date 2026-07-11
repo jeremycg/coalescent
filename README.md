@@ -78,8 +78,10 @@ automatically and is the easiest path for most users.
 **Manual (development builds / unreleased changes).** Download the `.vcvplugin`
 bundle for your platform from the
 [latest GitHub Release](https://github.com/jeremycg/coalescent/releases/latest),
-drop it into your Rack user folder's `plugins/` directory (Rack → *Library →
-Open user folder*), and restart Rack.
+drop it into your Rack user folder's platform-specific plugins directory — since
+Rack 2.5 this is `plugins-<os>-<cpu>/` (for example `plugins-lin-x64/`,
+`plugins-win-x64/`, `plugins-mac-arm64/`), not a bare `plugins/` — which you can
+open via Rack → *Library → Open user folder*. Then restart Rack.
 
 ## Build
 

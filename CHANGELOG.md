@@ -5,10 +5,12 @@
 **What you'll notice.** Two changes affect how *saved patches* sound: **Bunnies**
 now plays in tune (was ~37¢ sharp) and **Haptik's DAMP** knob is musical across its
 whole travel (saved Haptik patches play back more resonant). **GENDYN `DUR WID = 0`**
-holds pitch exactly, **Haptik FREEZE** no longer clicks (and a Slow+FREEZE patch
-reloads audibly), and **GENDYN/Haptik now save their evolved or frozen sound** with
-the patch. The rest below is the full record, including internal robustness,
-performance, and concurrency work with no audible effect.
+holds pitch exactly, **GENDYN LOCK** now genuinely holds pitch even for high
+centre frequencies / large N (it used to drift sharply flat near the sample floor),
+**Haptik FREEZE** no longer clicks (and a Slow+FREEZE patch reloads audibly), and
+**GENDYN/Haptik now save their evolved or frozen sound** with the patch. The rest
+below is the full record, including internal robustness, performance, and
+concurrency work with no audible effect.
 
 - **Concurrency & robustness pass** (from an external review):
   - **Race-free saves**: GENDYN/Haptik `dataToJson()` read live state arrays while
@@ -18,11 +20,23 @@ performance, and concurrency work with no audible effect.
     audio thread clearing the flag).
   - **Haptik Fast/Slow** transitions reconcile the interpolation state, so a mode
     switch doesn't click.
-  - **GENDYN FREQ** reports the *measured* realized period, honest even when unequal
-    durations near the 1-sample floor under LOCK can't reach the requested pitch.
+  - **GENDYN LOCK now actually holds pitch near the sample floor.** LOCK previously
+    set a *theoretical* duration scale; with unequal durations near the 1-sample
+    floor the per-segment rounding inflated the real period (sharply flat — the
+    reviewer's case ran ~140 cents off, pathological shapes far more). A per-cycle
+    servo now measures the realized period and nudges the scale until it tracks the
+    target, so LOCK holds pitch through the whole reachable range and degrades to
+    best-effort only *below* the physical `fs/N` floor (where no integer-length
+    playback can go faster). FREQ still reports the measured period, so it stays
+    honest either way.
+  - **Operon PERTURB** input is sanitized (NaN/inf flushed, range-clamped) before it
+    enters the integrator, and the Hill lookup flushes a non-finite argument to 0 —
+    a corrupt CV could otherwise reach the lookup's array index (out-of-bounds read).
   - **Operon** LUT-rebuild counter saturates (was signed-overflow UB after hours).
   - **Corrupt-patch bounds**: restored GENDYN amplitudes/walk steps and Haptik
-    lattice values are range-checked, not just finiteness-checked.
+    lattice values are range-checked, not just finiteness-checked (GENDYN amplitude
+    bound tightened to the model's true ±1.5 V range). GENDYN **Initialize** also
+    clears any in-flight cycle pulse so OUT/CYCLE restart clean.
 - **Manifest/docs**: Operon/Bunnies tag `LFO`→`Low-frequency oscillator`+`Clock
   generator`; Operon scope window documented as ~25 Hz / ~10 s; README taxonomy
   includes the genetic and ecological modules.
@@ -85,6 +99,13 @@ performance, and concurrency work with no audible effect.
   nine patches (adds polytrig/polyvoice) and describes poly CV normalling correctly
   (monophonic broadcasts; partial-poly channels read 0 V); softened Axon's
   "one spike per trigger" wording; softened Haptik's display "race-free" comment.
+  Corrected the Axon/Soma CPU budget (the top of the PITCH knob is ~30–50% of a
+  core, but V/OCT CV can push to ~+6 oct and saturate one — and splitting voices
+  across instances rounds each side up to whole four-lane groups); the manual
+  install path (`plugins-<os>-<cpu>/` since Rack 2.5, not a bare `plugins/`); and
+  GENDYN's state-persistence wording (a saved sound reloads with the same *shape*
+  and keeps evolving, but playback resumes from a clean cycle boundary, not the
+  exact mid-segment sample).
 - **Bunnies — tuning fix**: the LV default voicing was ~37 cents sharp
   (`RATE_CAL` 7.49, which put PITCH=0 at ~267 Hz instead of C4's 261.6 Hz). The
   constant was left stale after `LV_V0_RANGE` was retuned. Corrected to 7.33

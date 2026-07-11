@@ -99,8 +99,11 @@ voices; inactive lanes are masked so a silent voice's oscillator state is frozen
 — helper state like edge detectors may still warm, inaudibly). The group runs at
 its **fastest** lane's substep count, so one very-high-pitched voice pulls its
 groupmates up with it. Rough budget (44.1 kHz, ×4, 16 voices): ~4% of a core at
-moderate pitch, ~50% at the top of the range — Soma is a little heavier than Axon.
-Drop anti-aliasing or split extreme pitches onto another instance if it matters.
+moderate pitch, ~50% at the top of the PITCH knob (+4 oct), and — pushed higher
+with V/OCT CV, around +6 oct — a full patch can saturate a core (Soma is a little
+heavier than Axon). Drop anti-aliasing, or move the fast voices to another
+instance if it matters; note splitting rounds each side up to whole four-lane
+groups, so isolate the fast voices rather than splitting arbitrarily.
 
 ## Patches
 

@@ -5,8 +5,9 @@
 //   [2] DUR WID=0 (zero-width frequency barrier) plays the exact centre pitch
 //       — the regression that shipped ~41 cents flat,
 //   [3] the reachable maximum frequency is fs/N (every segment >= 1 sample),
-//   [4] LOCK renormalises an off-centre cycle back to the centre pitch,
-//   [5] all of the above hold across sample rates.
+//   [4] LOCK renormalises an off-centre cycle back to the centre pitch (well above floor),
+//   [5] the LOCK servo hits reachable near-floor targets and saturates below the floor,
+//   and all of the above hold across sample rates.
 //
 //   g++ -O2 -o /tmp/t tools/stability/gendyn.cpp && /tmp/t   (exit 0 = pass)
 #include <cstdio>
@@ -44,6 +45,32 @@ static double playHz(const float* dur, int N, float norm_k, float fs, int cycles
 static float lockNorm(float sum_dur, int N, float fs, float centerFreq) {
     float k = (fs / centerFreq) / sum_dur;
     return std::max(k, (float) N / sum_dur);
+}
+
+// src/GENDYN.cpp closed-loop LOCK servo: each cycle plays the N segments
+// (error-diffused, per-segment 1-sample floor), measures the realized period, and
+// nudges lockCorr toward target/realized (damped to ±25%/cycle, bounded [0.25,4]).
+// dur_err persists across cycles exactly as the module carries it. Returns the
+// realized frequency of the final cycle after `cycles` cycles of convergence.
+static double playHzServoLock(const float* dur, int N, float fs, float centerFreq, int cycles) {
+    float sum = 0.f; for (int i = 0; i < N; i++) sum += dur[i];
+    if (sum <= 0.f) return 0.0;
+    float dur_err = 0.f, lockCorr = 1.f;
+    const float target = fs / centerFreq;
+    long realized = 0;
+    for (int c = 0; c < cycles; c++) {
+        float k = (fs / centerFreq) / sum * lockCorr;   // servo bounds the loop, not a norm_k clamp
+        realized = 0;
+        for (int i = 0; i < N; i++) {
+            float fd = dur[i] * k + dur_err;
+            int cd = std::max(1, (int) (fd + 0.5f));
+            dur_err = std::clamp(fd - (float) cd, -4.f, 4.f);
+            realized += cd;
+        }
+        float step = std::clamp(target / (float) realized, 0.8f, 1.25f);
+        lockCorr = std::clamp(lockCorr * step, 0.25f, 4.f);
+    }
+    return fs / (double) realized;
 }
 
 static double cents(double got, double want) { return 1200.0 * std::log2(got / want); }
@@ -174,6 +201,58 @@ int main() {
                         printf("  [4] FAIL fs=%.0f N=%d f=%.1f LOCK -> %.3f Hz (%.1f cents)\n", fs, N, f, hz, dc); }
                 }
         printf("[4] LOCK holds centre pitch off-centre: %s\n", ok ? "PASS" : "FAIL");
+        if (!ok) fails++;
+    }
+
+    // [5] Near the sample floor the plain theoretical norm inflates the realized
+    //     period (per-segment >=1 sample + error-diffused rounding of unequal
+    //     durations), so the module runs a per-cycle servo. Two regimes:
+    //       (a) target period above the N-sample floor  -> servo hits it (few cents),
+    //           whereas the un-servo'd norm would be sharply flat;
+    //       (b) target period at/below the floor         -> physically unreachable,
+    //           servo saturates and holds as close as fs/N allows (best-effort).
+    {
+        bool ok = true;
+        for (float fs : sampleRates) {
+            int N = 64;
+            float floorHz = fs / N;                        // fastest reachable pitch
+            // (a) reachable but near-floor, with the durations *clustered* asymmetric
+            //     (many shorts, few longs) so the shorts all floor to 1 sample and the
+            //     theoretical norm inflates the period sharply — the exact defect the
+            //     servo fixes. Target period ~1.09*N samples. The integer-sample
+            //     granularity is coarse here (~1 sample ≈ 23 cents at a 70-sample
+            //     period), so the invariant is "within ~1 sample of the target period"
+            //     — the best any integer-length playback can do — not absolute cents.
+            {
+                float f = floorHz / 1.09375f;              // period ~1.09N (70 samples for N=64) > floor
+                float targetPeriod = fs / f;
+                float dur[64];
+                for (int i = 0; i < N; i++) dur[i] = (i < 48) ? 0.4f : 4.6f;  // 48 shorts + 16 longs
+                double servoPeriod = fs / playHzServoLock(dur, N, fs, f, 400);
+                float sum = 0.f; for (int i = 0; i < N; i++) sum += dur[i];
+                double naivePeriod = fs / playHz(dur, N, lockNorm(sum, N, fs, f), fs, 400);
+                double servoErr = std::fabs(servoPeriod - targetPeriod);
+                double naiveErr = std::fabs(naivePeriod - targetPeriod);
+                if (servoErr > 1.1) { ok = false;
+                    printf("  [5a] FAIL fs=%.0f near-floor LOCK servo period err=%.2f samples (want <=1)\n", fs, servoErr); }
+                else if (naiveErr < 3.0)                   // guard: the servo must be fixing a real defect
+                    printf("  [5a] note fs=%.0f: un-servo'd norm only %.2f samples off — mild case\n", fs, naiveErr);
+                else
+                    printf("  [5a] OK fs=%.0f: servo within %.2f samples of target (un-servo'd off by %.1f samples)\n",
+                           fs, servoErr, naiveErr);
+            }
+            // (b) unreachable (below the floor): realized must saturate near fs/N.
+            {
+                float f = floorHz * 1.3f;                  // requested pitch faster than fs/N
+                float durCenter = fs / (f * (float) N);
+                float dur[64]; for (int i = 0; i < N; i++) dur[i] = std::max(0.1f, durCenter);
+                double hz = playHzServoLock(dur, N, fs, f, 400);
+                if (std::fabs(hz - floorHz) > 1.0) { ok = false;
+                    printf("  [5b] FAIL fs=%.0f below-floor LOCK -> %.2f Hz, expected saturation at fs/N=%.2f\n",
+                           fs, hz, floorHz); }
+            }
+        }
+        printf("[5] LOCK servo: hits reachable near-floor targets, saturates below floor: %s\n", ok ? "PASS" : "FAIL");
         if (!ok) fails++;
     }
 

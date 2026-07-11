@@ -218,8 +218,14 @@ struct Operon : Module {
                            + inputs[BETA_INPUT].getVoltage() * params[BETA_ATT_PARAM].getValue() * BETA_CV_DEPTH,
                              0.05f, 8.f);
         float alpha0 = clamp(params[LEAK_PARAM].getValue(), 0.f, 2.f);
-        float perturb = inputs[PERTURB_INPUT].isConnected()
-                      ? inputs[PERTURB_INPUT].getVoltage() * PERTURB_GAIN : 0.f;
+        // Sanitize PERTURB before it enters the ODE: a non-finite CV would propagate
+        // through rk4 into rep and hit hillLookup's array index (UB) *before* the
+        // post-step finiteness guard below can catch it. Flush NaN/inf to 0, clamp range.
+        float perturb = 0.f;
+        if (inputs[PERTURB_INPUT].isConnected()) {
+            float v = inputs[PERTURB_INPUT].getVoltage();
+            if (std::isfinite(v)) perturb = clamp(v, -10.f, 10.f) * PERTURB_GAIN;
+        }
 
         // ── symmetric fixed point for centering (cached on alpha/n/alpha0) ──
         if (!pStarValid || alpha != pStarA || n != pStarN || alpha0 != pStarL) {
@@ -257,7 +263,8 @@ struct Operon : Module {
         // ── derivative over y = [m0,m1,m2,p0,p1,p2]; rep_i = protein of prev gene ──
         auto deriv = [&](const float* Y, float* D) {
             for (int i = 0; i < 3; ++i) {
-                float rep = std::max(Y[3 + ((i + 2) % 3)], 0.f);   // required: n non-integer
+                float r0  = Y[3 + ((i + 2) % 3)];
+                float rep = r0 > 0.f ? r0 : 0.f;   // required: n non-integer; also flushes NaN→0 (hillLookup index safety)
                 float hr  = hillDirect ? 1.f / (1.f + std::pow(rep, n)) : hillLookup(rep);
                 D[i]     = -Y[i] + alpha * hr + alpha0;
                 D[3 + i] = -beta * (Y[3 + i] - Y[i]);

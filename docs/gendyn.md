@@ -57,7 +57,7 @@ all N breakpoints.
 | B DUR WID | Duration barrier half-width around center (0=fixed pitch, 1=wide) |
 | DIST | Distribution: 0=Cauchy, 1=Gaussian, 2=Uniform, 3=Logistic (default) |
 | PERSIST | Glide persistence: how many cycles a step keeps its direction. 0% ≈ uncorrelated jitter (first-order / SC Gendy feel), 30% (default) ≈ 16 cycles, 100% = very long steady glides |
-| LOCK | Pitch lock: normalizes durations each cycle so pitch holds exactly at B DUR CTR while the waveform keeps evolving (SC `Gendy3` behaviour) |
+| LOCK | Pitch lock: a per-cycle servo scales the durations so the *measured* period tracks B DUR CTR while the waveform keeps evolving (SC `Gendy3` behaviour). Tracking is essentially exact through most of the range; very close to the sample floor (very high B DUR CTR and/or high N) each segment bottoms out at 1 sample and the lock becomes best-effort, holding as close as the integer segment lengths allow. |
 
 ## CV Inputs
 
@@ -110,9 +110,11 @@ Right-click the module to change this:
 
 The centre-frequency default is **C4** (261.6 Hz). The seed choice **and the
 evolved waveform** (the current breakpoints plus their walk velocities) are saved
-with the patch, so a sound you let run reloads exactly where it was — not re-seeded.
-(OUT is also DC-blocked internally at ~5 Hz, so the walk's mean drift can't offset
-the signal.)
+with the patch, so a sound you let run reloads with the *same shape* and keeps
+evolving from there — not re-seeded from scratch. Playback resumes from a clean
+cycle boundary (breakpoint 0) rather than the exact mid-segment sample it was at,
+so the timbre and pitch are preserved but the phase restarts. (OUT is also
+DC-blocked internally at ~5 Hz, so the walk's mean drift can't offset the signal.)
 
 ## Tuning notes
 

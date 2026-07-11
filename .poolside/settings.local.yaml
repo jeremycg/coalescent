@@ -1,5 +1,0 @@
-tools:
-    shell:
-        allow:
-            - find *
-            - head *

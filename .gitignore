@@ -21,3 +21,6 @@ COALESCENT_unification_plan.md
 
 # Output of tools/panel_diagram_*.py
 *_panel.png
+
+# Local tool settings (poolside)
+.poolside/

@@ -59,6 +59,9 @@ struct GENDYN : Module {
     float freq_cv            = 0.f; // cached FREQ output voltage, updated with sum_dur
     float norm_k             = 1.f; // playback duration scale; LOCK mode sets it so
                                     // the cycle length is exactly sampleRate/centerFreq
+    float lockCorr           = 1.f; // LOCK servo: multiplies norm_k so the *measured*
+                                    // realized period tracks the target (the per-segment
+                                    // floor + error-diffused rounding otherwise inflate it)
     float dur_err            = 0.f; // error-diffusion remainder for int segment lengths
     int   last_N             = -1;  // -1 forces reinit on the first process() call
 
@@ -186,8 +189,9 @@ struct GENDYN : Module {
         // Bound restored values to the model's actual ranges so a corrupt/hand-edited
         // patch can't produce UB or absurd output: durations are floored at 1 and
         // capped well below INT_MAX (the playback float→int conversions would otherwise
-        // overflow); amplitudes are ~±1 (B AMP ≤ 1) and walk steps ~±1 (reflected).
-        constexpr float DUR_MAX = 1e6f, AMP_MAX = 10.f, STEP_MAX = 2.f;
+        // overflow); amplitudes are reflected into [-bAmp,bAmp] with bAmp ≤ 1, so ±1.5
+        // is the true model range plus a little headroom (not ±50 V); steps ~±1.
+        constexpr float DUR_MAX = 1e6f, AMP_MAX = 1.5f, STEP_MAX = 2.f;
         float A[MAX_N], Dr[MAX_N], SA[MAX_N], SD[MAX_N];
         for (int i = 0; i < n; i++) {
             A[i]  = (float) json_number_value(json_array_get(ja,  i));
@@ -216,6 +220,8 @@ struct GENDYN : Module {
         reseedPending = true;
         restoredPending = false;
         dcBlock.reset();
+        cycleTrigger.reset();   // drop any in-flight cycle pulse so OUT/CYCLE start clean
+        cycleAcc = 0;
     }
 
     // ── DSP helpers ───────────────────────────────────────────────────────────
@@ -296,6 +302,7 @@ struct GENDYN : Module {
         target_amp         = amp[0];
         current_dur        = std::max(1, (int)dur[0]);
         dur_err            = 0.f;
+        lockCorr           = 1.f;   // fresh shape → servo re-converges from unity
     }
 
     // Apply one cycle of the second-order random walk to all breakpoints
@@ -336,16 +343,23 @@ struct GENDYN : Module {
     // sums to exactly sampleRate/centerFreq. The duration *walk* stays in
     // its barriers untouched — relative durations keep evolving (timbre)
     // while pitch holds — so toggling LOCK is clean and stateless.
-    void updateNormAndFreq(int N, bool lockPitch, float sampleRate, float centerFreq) {
+    void updateNormAndFreq(bool lockPitch, float sampleRate, float centerFreq) {
         norm_k = 1.f;
         if (lockPitch && sum_dur > 0.f) {
-            norm_k = (sampleRate / centerFreq) / sum_dur;
-            // Playback floors each segment at 1 sample, so a cycle can't be shorter
-            // than N samples. Clamp norm_k so a below-floor LOCK target can't run
-            // norm_k away. The realized period the per-segment floor and error-diffused
-            // rounding actually produce is *measured* per cycle (see freq_cv below), so
-            // FREQ stays honest even when unequal durations near the floor inflate it.
-            norm_k = std::max(norm_k, (float) N / sum_dur);
+            // lockCorr is the per-cycle servo term (see the cycle boundary): the raw
+            // sampleRate/centerFreq/sum_dur is only the *theoretical* scale — the
+            // per-segment 1-sample floor plus error-diffused rounding inflate the
+            // realized period when durations are unequal near the floor, so the servo
+            // multiplies norm_k until the *measured* period tracks the target.
+            norm_k = (sampleRate / centerFreq) / sum_dur * lockCorr;
+            // No floor clamp on norm_k here: playback still floors each segment at 1
+            // sample (so a cycle can't be shorter than N samples and a below-floor
+            // target is physically unreachable), but the servo — not a norm_k clamp —
+            // now bounds the loop. lockCorr is clamped to [0.25,4], so norm_k can't run
+            // away; when the target is unreachable lockCorr simply saturates and the
+            // realized period bottoms out at the N-sample floor (best-effort LOCK).
+        } else {
+            lockCorr = 1.f;   // idle: re-enabling LOCK re-converges from unity
         }
         // Initial estimate; the per-cycle measurement overrides this once playing.
         freq_cv = computeFreqCV(sampleRate, sum_dur * norm_k);
@@ -405,7 +419,7 @@ struct GENDYN : Module {
         bool doReseed = reseedPending.exchange(false, std::memory_order_relaxed);
         if (N != last_N || initShape != lastInitShape || doReseed) {
             initBreakpoints(N, bAmp, durCenter, bDurMin, bDurMax);
-            updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
+            updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
             last_N = N; lastInitShape = initShape;
             restoredPending = false;                 // reinit already recomputed the caches
@@ -415,7 +429,7 @@ struct GENDYN : Module {
             // compute the sample-rate-dependent caches. Do it now (without reseeding
             // the restored waveform) so the first cycle — pitch under LOCK and the
             // FREQ output — is correct from sample 0, not one cycle late.
-            updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
+            updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
             restoredPending = false;
             publishSaveFrame(N);                     // restored state is immediately re-saveable
@@ -454,6 +468,16 @@ struct GENDYN : Module {
                 // estimate below, so unequal durations near the sample floor under
                 // LOCK report their true pitch instead of the requested one.
                 float realized = (float) cycleAcc; cycleAcc = 0;
+                // LOCK servo: nudge lockCorr so next cycle's realized period tracks the
+                // target. Multiplicative negative feedback (a long period wants a smaller
+                // norm_k), damped per-cycle to ±25% and bounded, so it converges in a few
+                // cycles and can't run away. Above the N-sample floor this reaches the
+                // target exactly; below it lockCorr saturates and LOCK is best-effort.
+                if (lockPitch && realized > 0.f) {
+                    const float target = args.sampleRate / centerFreq;
+                    const float step   = clamp(target / realized, 0.8f, 1.25f);
+                    lockCorr           = clamp(lockCorr * step, 0.25f, 4.f);
+                }
                 // PERSIST knob -> step-walk draw spread, exponential: 0 -> 1.0
                 // (near-white steps, first-order feel), 0.3 -> 0.25 (default),
                 // 1 -> 0.01 (long steady glides). Needed once per cycle, so
@@ -462,7 +486,7 @@ struct GENDYN : Module {
                     std::pow(10.f, -2.f * params[PERSIST_PARAM].getValue());
                 runCycleUpdate(N, scaleAmp, scaleDur, bAmp, bDurMin, bDurMax,
                                dist, persistSpread);
-                updateNormAndFreq(N, lockPitch, args.sampleRate, centerFreq);
+                updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
                 if (realized > 0.f) freq_cv = computeFreqCV(args.sampleRate, realized);
                 publishSaveFrame(N);                     // coherent copy for a race-free save
                 // Continuity at the cycle boundary is inherent: every segment
