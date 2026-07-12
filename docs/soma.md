@@ -72,6 +72,11 @@ of spikes climbing along `z` and the silent gap as the slow return. In the chaot
 window the trail never quite repeats. The faint diagonal is the `z`-nullcline
 `z = s·(x − x_R)`, where the slow drift reverses.
 
+The bright dot is a slowed play head over a faint completed burst/spike path.
+Chaotic paths are held for one visual lap to prevent mid-lap jumps; if a captured
+path does not close, the dot reverses at its ends instead of crossing empty space.
+After sustained quiescence, the guide expires and the dot returns to the live trail.
+
 ## CPU & polyphony
 
 Polyphony works exactly as in [Axon](axon.md#polyphony) (up to 16 voices, count

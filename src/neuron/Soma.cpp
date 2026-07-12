@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "../dsp/rk4.hpp"
 #include "../dsp/display_snapshot.hpp"
+#include "../dsp/completed_path.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
@@ -30,6 +31,9 @@
 // across a narrow band around Soma's amber accent.
 
 static const int TRAIL = 512;   // length of the (x,z) phase-portrait trail
+// Screen-space bins for the latest completed burst/spike path the slow play head rides.
+static const int   ORBIT_N    = 192;
+static const float ORBIT_SECS = 7.f;   // wall-clock seconds per lap / round trip
 
 struct Soma : Module {
 
@@ -91,8 +95,22 @@ struct Soma : Module {
     // trails and head dots stay coherent.
     float trailX[MAX_POLY][TRAIL] = {}, trailZ[MAX_POLY][TRAIL] = {};
     int   trailIdx = 0, trailDecim = 0;
+    // The burst boundary is an upward crossing of a fast-minus-slow z envelope.
+    // Both filters run in dimensionless model time, so the same detector follows
+    // tonic spikes, bursts and low-pitch chaotic regimes. The completed path is
+    // simplified incrementally, preserving short x tails without predicting its period.
+    using OrbitPath = coalescent::CompletedPath<ORBIT_N>;
+    using OrbitPoint = OrbitPath::Point;
+    OrbitPath orbitPath[MAX_POLY];
+    float zFast[MAX_POLY] = {}, zSlow[MAX_POLY] = {};
+    int orbitCommitClock[MAX_POLY] = {};
+    bool zFilterInit[MAX_POLY] = {};
     struct DisplayFrame {
         float x[MAX_POLY][TRAIL] = {}, z[MAX_POLY][TRAIL] = {};
+        OrbitPoint orbit[MAX_POLY][ORBIT_N] = {}; // latest completed cycle the dot rides
+        int   orbitCount[MAX_POLY] = {};
+        bool  orbitValid[MAX_POLY] = {};
+        bool  orbitClosed[MAX_POLY] = {};
         int   head = 0;
         int   channels = 1;
     };
@@ -141,6 +159,14 @@ struct Soma : Module {
         configOutput(Z_OUTPUT, "Adaptation z (burst-envelope CV)");
 
         for (int g = 0; g < GROUPS; g++) { xx4[g] = -1.6f; yy4[g] = -11.8f; zz4[g] = 2.f; }
+        // A sub-pixel spacing stagger keeps identical poly voices from running
+        // their bounded guide simplification on the same audio callback.
+        for (int c = 0; c < MAX_POLY; ++c) {
+            orbitPath[c].setMetric(50.f / 4.2f, 34.f / 3.7f);
+            orbitPath[c].setMarkerAges(0.5f, 8192.f);
+            orbitPath[c].setMinimumSpacing(0.15f + 0.0015f * c);
+            orbitCommitClock[c] = 1 << 24;
+        }
     }
 
     void onReset() override {
@@ -150,7 +176,13 @@ struct Soma : Module {
             trigIn4[g].reset(); syncIn4[g].reset(); spikeDet4[g].reset();
             dcBlock4[g].reset(); decim2_4[g].reset(); decim4_4[g].reset(); decim8_4[g].reset();
         }
-        for (int c = 0; c < MAX_POLY; c++) spikeGen[c].reset();
+        for (int c = 0; c < MAX_POLY; c++) {
+            spikeGen[c].reset();
+            orbitPath[c].reset();
+            zFast[c] = zSlow[c] = 0.f;
+            zFilterInit[c] = false;
+            orbitCommitClock[c] = 1 << 24;
+        }
     }
 
     json_t* dataToJson() override {
@@ -188,6 +220,14 @@ struct Soma : Module {
         dx = y - A*x*x*x + B*x*x - z + Itot;
         dy = C - D*x*x - y;
         dz = r * (s * (x - XR) - z);
+    }
+
+    // One-pole coefficient for a model-time step. This [2/2] Padé form closely
+    // approximates 1-exp(-step/tau) over the bounded integrator step while
+    // keeping transcendental functions out of the per-voice audio path.
+    static inline float modelOnePole(float step, float tau) {
+        const float x = step / tau;
+        return clamp(x / (1.f + 0.5f * x + x * x / 12.f), 0.f, 1.f);
     }
 
     void process(const ProcessArgs& args) override {
@@ -252,6 +292,7 @@ struct Soma : Module {
             // ── hard sync: rising edge re-seeds those lanes to rest (all 3 vars) ──
             simd::float_4 syncMask = syncIn4[g].process(
                 inputs[SYNC_INPUT].getPolyVoltageSimd<simd::float_4>(base), 0.1f, 1.f);
+            const int syncBits = simd::movemask(syncMask);
             x = simd::ifelse(syncMask, -1.6f, x);
             y = simd::ifelse(syncMask, -11.8f, y);
             z = simd::ifelse(syncMask, 2.f, z);
@@ -288,6 +329,16 @@ struct Soma : Module {
             // ── render os oversampled samples (full output chain each), decimate ──
             simd::float_4 st[3] = {x, y, z};
             simd::float_4 osBuf[8];
+            // Hoist the z-envelope one-pole coefficients: subTau[l] is fixed across the
+            // oversample loop, so computing them once per lane here (instead of per lane
+            // per oversample step) saves the divide/libm work at 16 voices ×8.
+            float zFastCoef[4] = {}, zSlowCoef[4] = {};
+            for (int l = 0; l < 4 && base + l < channels; ++l) {
+                const int c = base + l;
+                orbitCommitClock[c] = std::min(orbitCommitClock[c] + 1, dispPeriod);
+                zFastCoef[l] = modelOnePole(subTau[l], 15.f);
+                zSlowCoef[l] = modelOnePole(subTau[l], 300.f);
+            }
             for (int o = 0; o < os; o++) {
                 for (int k = 0; k < K; k++)
                     coalescent::rk4<3>(st, h, [&](const simd::float_4* Y, simd::float_4* d) {
@@ -297,6 +348,8 @@ struct Soma : Module {
                 // Backstop: reset any non-finite / runaway lane to rest, then clamp.
                 simd::float_4 finite = (st[0] == st[0]) & (st[1] == st[1]) & (st[2] == st[2])
                     & (simd::abs(st[0]) < 1e6f) & (simd::abs(st[1]) < 1e6f) & (simd::abs(st[2]) < 1e6f);
+                const int orbitResetBits = (o == 0 ? syncBits : 0)
+                    | ((~simd::movemask(finite)) & 0xf);
                 st[0] = simd::ifelse(finite, st[0], -1.6f);
                 st[1] = simd::ifelse(finite, st[1], -11.8f);
                 st[2] = simd::ifelse(finite, st[2], 2.f);
@@ -311,6 +364,29 @@ struct Soma : Module {
 
                 dcBlock4[g].process(st[0] + antiDenorm);
                 osBuf[o] = 5.f * coalescent::fastTanh(dcBlock4[g].highpass() * OUT_GAIN);
+
+                // The guide needs the oversampled states: Soma's positive-x peak
+                // can fall entirely between host-rate samples at high pitch.
+                for (int l = 0; l < 4 && base + l < channels; ++l) {
+                    const int c = base + l;
+                    const float xNow = st[0][l];
+                    const float zNow = st[2][l];
+                    const float modelStep = subTau[l];
+                    const bool discontinuity = orbitResetBits & (1 << l);
+                    if (!zFilterInit[c] || discontinuity) {
+                        zFast[c] = zSlow[c] = zNow;
+                        zFilterInit[c] = true;
+                    } else {
+                        zFast[c] += (zNow - zFast[c]) * zFastCoef[l];
+                        zSlow[c] += (zNow - zSlow[c]) * zSlowCoef[l];
+                    }
+
+                    const bool committed = orbitPath[c].push(
+                        xNow, zNow, zFast[c] - zSlow[c], modelStep,
+                        orbitCommitClock[c] >= dispPeriod, discontinuity);
+                    if (committed)
+                        orbitCommitClock[c] = 0;
+                }
             }
             // Write back active lanes only; inactive lanes keep their frozen state.
             xx4[g] = simd::ifelse(activeMask, st[0], xx4[g]);
@@ -345,6 +421,10 @@ struct Soma : Module {
             for (int c = 0; c < channels; c++) {
                 std::copy(trailX[c], trailX[c] + TRAIL, fr.x[c]);
                 std::copy(trailZ[c], trailZ[c] + TRAIL, fr.z[c]);
+                std::copy(orbitPath[c].path(), orbitPath[c].path() + ORBIT_N, fr.orbit[c]);
+                fr.orbitCount[c] = orbitPath[c].pathSize();
+                fr.orbitValid[c] = orbitPath[c].hasPath();
+                fr.orbitClosed[c] = orbitPath[c].isClosed();
             }
             fr.head = trailIdx;
             fr.channels = channels;
@@ -364,6 +444,13 @@ struct Soma : Module {
 // across a narrow amber band.
 struct SomaDisplay : Widget {
     Soma* module = nullptr;
+    // Hold one immutable guide for a complete visual lap. Chaotic cycles differ
+    // legitimately; swapping guides mid-lap would teleport the slow play head.
+    Soma::OrbitPoint playOrbit[Soma::MAX_POLY][ORBIT_N] = {};
+    int playCount[Soma::MAX_POLY] = {};
+    long long playLap[Soma::MAX_POLY] = {};
+    bool playValid[Soma::MAX_POLY] = {};
+    bool playClosed[Soma::MAX_POLY] = {};
 
     static constexpr float XMIN = -2.0f, XMAX = 2.2f;
     static constexpr float ZMIN = 0.3f, ZMAX = 4.0f;
@@ -397,6 +484,20 @@ struct SomaDisplay : Widget {
             static const Soma::DisplayFrame dummy;
             const Soma::DisplayFrame& fr = module ? module->displaySnapshot.consume() : dummy;
             int nv = module ? fr.channels : 1;
+            const double playCycles = system::getTime() / (double) ORBIT_SECS;
+            const long long currentLap = (long long) std::floor(playCycles);
+            const float lapFraction = (float) (playCycles - std::floor(playCycles));
+            for (int v = 0; v < nv; ++v) {
+                if (!fr.orbitValid[v]) {
+                    playValid[v] = false;
+                } else if (!playValid[v] || playLap[v] != currentLap) {
+                    playCount[v] = clamp(fr.orbitCount[v], 2, ORBIT_N);
+                    std::copy(fr.orbit[v], fr.orbit[v] + playCount[v], playOrbit[v]);
+                    playClosed[v] = fr.orbitClosed[v];
+                    playValid[v] = true;
+                    playLap[v] = currentLap;
+                }
+            }
 
             // z-nullcline: z = s·(x − x_R).
             nvgBeginPath(args.vg);
@@ -420,6 +521,26 @@ struct SomaDisplay : Widget {
                     const float* dx = fr.x[v];
                     const float* dz = fr.z[v];
                     float hue = voiceHue(v, nv);
+                    const Soma::OrbitPoint* orbit = playOrbit[v];
+
+                    // Show the completed guide beneath the fading ring. This keeps
+                    // slow bursts and narrow spike tails visibly connected to the
+                    // play head even when the decimated 512-point trail omits them.
+                    if (playValid[v]) {
+                        const int orbitCount = playCount[v];
+                        nvgBeginPath(args.vg);
+                        nvgMoveTo(args.vg, X(orbit[0].x), Y(orbit[0].y));
+                        for (int b = 1; b < orbitCount; ++b)
+                            nvgLineTo(args.vg, X(orbit[b].x), Y(orbit[b].y));
+                        if (playClosed[v])
+                            nvgLineTo(args.vg, X(orbit[0].x), Y(orbit[0].y));
+                        const int guideAlpha = clamp(64 - (nv - 1) * 2, 32, 64);
+                        nvgStrokeColor(args.vg, nvgHSLA(hue, 0.95f, 0.60f, guideAlpha));
+                        nvgStrokeWidth(args.vg, 1.f);
+                        nvgStroke(args.vg);
+                        nvgStrokeWidth(args.vg, 1.6f);
+                    }
+
                     int curBand = -1;
                     auto strokeBand = [&](int band) {
                         float alpha = (band + 0.5f) / TRAIL_BANDS;   // older = dimmer
@@ -439,8 +560,21 @@ struct SomaDisplay : Widget {
                         nvgLineTo(args.vg, X(dx[i1]), Y(dz[i1]));
                     }
                     if (curBand >= 0) strokeBand(curBand);
-                    int newest = (idx + TRAIL - 1) % TRAIL;
-                    float hx = X(dx[newest]), hy = Y(dz[newest]);
+                    // Slow play head over the latest completed real burst/spike path.
+                    // Uniform screen-space bins make the narrow horizontal tails visible.
+                    // A chaotic path whose marker endpoints do not meet is traversed in
+                    // both directions rather than closed with an invented off-trace chord.
+                    float hx, hy;
+                    if (playValid[v]) {
+                        const float lap = lapFraction;
+                        const int orbitCount = playCount[v];
+                        const Soma::OrbitPoint head = coalescent::sampleCompletedPath(
+                            orbit, orbitCount, playClosed[v], lap, X, Y);
+                        hx = X(head.x); hy = Y(head.y);
+                    } else {
+                        const int newest = (idx + TRAIL - 1) % TRAIL;
+                        hx = X(dx[newest]); hy = Y(dz[newest]);
+                    }
                     nvgBeginPath(args.vg); nvgCircle(args.vg, hx, hy, 4.f);
                     nvgFillColor(args.vg, nvgHSLA(hue, 0.95f, 0.72f, 0x55)); nvgFill(args.vg);
                     nvgBeginPath(args.vg); nvgCircle(args.vg, hx, hy, 2.f);

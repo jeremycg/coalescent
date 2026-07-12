@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.2.1 (unreleased)
+## 2.2.1
 
 **What you'll notice.** **Bunnies** now plays in tune (was ~37¢ sharp) and
 **Haptik's DAMP** knob is musical across its whole travel. **GENDYN `DUR WID = 0`**
@@ -46,6 +46,7 @@ audible effect.
 - Fonts load per-frame (a cached `Font` can dangle across a Window recreation); panel captions moved to a dedicated child widget.
 - **GENDYN scope** pairs each duration with the segment it plays and reflects the LOCK-normalized, error-diffused schedule (a clean-start approximation).
 - **Haptik ring display** shows wave *shape* (DC removed, deviation-scaled) instead of reading as a circle.
+- **Axon/Soma play head**: the phase-portrait dot now glides a *real completed cycle* — captured at the oversampled state rate and resampled to uniform screen spacing (`coalescent::CompletedPath`) — so it moves smoothly at constant speed and reaches into the spikes/bursts instead of flickering at audio rate. A faint completed-orbit guide sits under the fading trail (so the dot never looks off-trace even when a slow cycle is longer than the trail), the path latches once per lap to avoid mid-lap geometry swaps, non-closing chaotic paths are traversed there-and-back rather than closed with a false chord, and the guide expires when a voice rests. Soma marks bursts by a dimensionless-time `z` bandpass so it follows tonic, burst and chaotic regimes.
 
 ### Tests, manifest & docs
 

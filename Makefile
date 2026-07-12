@@ -42,6 +42,7 @@ CHECK_CXX ?= g++ -std=c++17 -O2
 .PHONY: check check-simd
 check:
 	jq . plugin.json >/dev/null
+	$(CHECK_CXX) tools/completed_path_test.cpp -o /tmp/coalescent_check_path && /tmp/coalescent_check_path
 	$(CHECK_CXX) tools/stability/gendyn.cpp -o /tmp/coalescent_check_gendyn && /tmp/coalescent_check_gendyn
 	$(CHECK_CXX) tools/stability/axon.cpp   -o /tmp/coalescent_check_axon   && /tmp/coalescent_check_axon
 	$(CHECK_CXX) tools/stability/soma.cpp   -o /tmp/coalescent_check_soma   && /tmp/coalescent_check_soma

@@ -86,7 +86,11 @@ that jumps out and relaxes back. The two faint guides are the **nullclines**
 (the cubic `v`-nullcline and the straight `w`-nullcline); their intersection is
 the fixed point whose stability CURRENT controls, so you can watch the orbit grow
 as CURRENT crosses into the oscillating band. The trail is read lock-free from a
-~45 Hz snapshot — fine for a visualiser.
+~45 Hz snapshot — fine for a visualiser. The bright dot is a deliberately slow
+play head over a faint completed-orbit guide, so it remains readable even when a
+low-pitched cycle is longer than the fading trail. A completed guide is held for
+one visual lap, preventing modulation from replacing its geometry under the dot.
+After sustained quiescence, it expires and the dot returns to the live trail.
 
 ## Polyphony
 
