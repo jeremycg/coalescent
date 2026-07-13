@@ -1,9 +1,10 @@
 #pragma once
 
 // Generic explicit 4th-order Runge–Kutta step, shared by Coalescent's ODE
-// modules — the neuron pair Axon/Soma (N = 2 / 3) and Operon's repressilator
-// (N = 6). Each module supplies its own derivative via a small functor; only the
-// dimensionality and f() differ, so the step itself lives here once.
+// modules — the neuron pair Axon/Soma (N = 2 / 3), Operon's repressilator (N = 6),
+// and the ecological pair Bunnies/Foxes (N = 2 / 3). Each module supplies its own
+// derivative via a small functor; only the dimensionality and f() differ, so the
+// step itself lives here once.
 //
 // Templated on the scalar type T so one implementation serves scalar float (the
 // per-voice path) and rack::simd::float_4 (four poly voices at once). For float_4

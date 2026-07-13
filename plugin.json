@@ -82,6 +82,18 @@
         "Clock generator"
       ],
       "keywords": "predator prey Lotka Volterra Rosenzweig MacArthur population ecology two phase limit cycle"
+    },
+    {
+      "slug": "Foxes",
+      "name": "Foxes",
+      "description": "Three-species food chain (Hastings-Powell): grass, bunnies, and foxes move from a regular chase through period doubling into deterministic chaos.",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/foxes.md",
+      "tags": [
+        "Oscillator",
+        "Low-frequency oscillator",
+        "Clock generator"
+      ],
+      "keywords": "Hastings Powell tritrophic three trophic food chain ecology deterministic chaos strange attractor period doubling grass bunnies foxes predator prey"
     }
   ]
 }

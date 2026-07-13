@@ -4,7 +4,7 @@ namespace coalescent {
 
 // Padé[7/6] rational approximation of tanh, saturating to ±1 beyond ±4.
 //
-// Used as the output soft-clip in Axon/Soma/Haptik. Profiled ~14x faster than
+// Used as the output soft-clip in Axon/Soma/Haptik/Bunnies/Foxes. Profiled ~14x faster than
 // std::tanh with a max error of 6.7e-4 (-64 dB) over |x| <= 8 — inaudible — so
 // it's a free substitute for the (transcendental) library tanh in the oversampled
 // output chain. See tools/perf_minsub.cpp / the tanh profiling for the numbers.

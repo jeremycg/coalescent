@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Foxes — panel base, 12 HP (60.96 x 128.5 mm). Dark forest base; the
+     three-colour signal identity (grass green / bunny coral / fox amber), display
+     screen, title, and control labels are drawn by the widget (house style: this
+     SVG carries only bg + rails + screw holes). -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="60.96mm" height="128.5mm" viewBox="0 0 60.96 128.5">
+  <rect width="60.96" height="128.5" fill="#16211a"/>
+  <rect y="0"     width="60.96" height="3" fill="#0e150f"/>
+  <rect y="125.5" width="60.96" height="3" fill="#0e150f"/>
+  <circle cx="3.5"   cy="3.5"   r="1.5" fill="#0b110c"/>
+  <circle cx="57.46" cy="3.5"   r="1.5" fill="#0b110c"/>
+  <circle cx="3.5"   cy="124.5" r="1.5" fill="#0b110c"/>
+  <circle cx="57.46" cy="124.5" r="1.5" fill="#0b110c"/>
+</svg>

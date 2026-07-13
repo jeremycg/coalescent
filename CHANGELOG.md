@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### New module
+
+- **Foxes** — a three-species food chain (grass → bunnies → foxes) on the
+  nondimensional **Hastings–Powell** model, the chaotic sibling of Bunnies. WILD
+  moves it from a resting coexistence, through a regular three-population chase and
+  period doubling, into the canonical **deterministic-chaos** "teacup" strange
+  attractor (near WILD 0.62); BALANCE reshapes the chase and shifts the chaotic
+  windows. Three equilibrium-centered population outputs (GRASS/BUNNY/FOX) and three
+  peak-event gates, a continuous KICK force into grass, and a projected phase-trail
+  display that draws the actual attractor. Monophonic, 12 HP. Deterministic chaos —
+  no random source; the same knobs and seed always sound the same. `make check`
+  gains a standalone kernel replica asserting the analytic equilibrium, Hopf
+  location, default-period calibration (within 5 cents), a positive Lyapunov
+  estimate at canonical chaos, and finite/bounded behavior across the control box.
+
 ## 2.2.1
 
 **What you'll notice.** **Bunnies** now plays in tune (was ~37¢ sharp) and

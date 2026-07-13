@@ -49,6 +49,7 @@ check:
 	$(CHECK_CXX) tools/stability/haptik.cpp -o /tmp/coalescent_check_haptik && /tmp/coalescent_check_haptik
 	$(CHECK_CXX) tools/stability/operon.cpp -o /tmp/coalescent_check_operon && /tmp/coalescent_check_operon
 	$(CHECK_CXX) tools/stability/bunnies.cpp -o /tmp/coalescent_check_bunnies && /tmp/coalescent_check_bunnies
+	$(CHECK_CXX) tools/stability/foxes.cpp  -o /tmp/coalescent_check_foxes  && /tmp/coalescent_check_foxes
 	$(CHECK_CXX) -funsafe-math-optimizations tools/integrator_equiv.cpp -o /tmp/coalescent_check_equiv && /tmp/coalescent_check_equiv
 
 # Needs Rack headers (simd). Run after the SDK is available: make check-simd

@@ -12,6 +12,7 @@ extern Model* modelAxon;     // FitzHugh–Nagumo neuron
 extern Model* modelSoma;     // Hindmarsh–Rose neuron
 extern Model* modelOperon;   // repressilator gene circuit (three-phase)
 extern Model* modelBunnies;  // predator-prey (Lotka-Volterra / Rosenzweig-MacArthur)
+extern Model* modelFoxes;    // three-species food chain (Hastings-Powell, chaotic)
 
 // The panel captions live in their own `widget::Widget` subclass (one per module)
 // added as a child, rather than drawn inline in ModuleWidget::draw(). Fonts are

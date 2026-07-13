@@ -44,7 +44,8 @@ cycle — self-correcting, so RM needs no servo. It rests at low WILD and cycles
 you raise it.
 
 *(A 2-variable system like this can only rest or cycle — never chaos, by
-Poincaré–Bendixson. Chaos needs a third species, a possible future module.)*
+Poincaré–Bendixson. Chaos needs a third species — that's [Foxes](foxes.md), the
+three-level food chain.)*
 
 Both modes integrate on the shared RK4 stepper with pitch-adaptive substepping
 (same engine as [Axon](axon.md)/[Soma](soma.md)/[Operon](operon.md)). Populations

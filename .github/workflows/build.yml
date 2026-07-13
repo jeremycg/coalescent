@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main, 'feat/**']
+    branches: [main, 'feat/**', foxes]
     tags: ['v*']
   pull_request:
   workflow_dispatch:

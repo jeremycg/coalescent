@@ -10,4 +10,5 @@ void init(Plugin* p) {
     p->addModel(modelSoma);
     p->addModel(modelOperon);
     p->addModel(modelBunnies);
+    p->addModel(modelFoxes);
 }
