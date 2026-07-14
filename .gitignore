@@ -6,6 +6,9 @@ plugin.so
 plugin.dll
 plugin.dylib
 
+# Python helper caches
+__pycache__/
+
 # Rack SDK fetched by CI / local builds
 /Rack-SDK/
 

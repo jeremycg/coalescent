@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Gallery/showcase patch: all seven Coalescent modules in one row, each doing
-its best trick — all seven side by side for screenshots and a quick visual check.
+"""Gallery/showcase patch: all eight Coalescent modules in one row, each doing
+its best trick — all eight side by side for screenshots and a quick visual check.
 
 - Axon: 4 poly voices (Cmaj7) with CURRENT spread via 8vert->Merge, so the scope
   draws four differently-sized coloured orbits (values proven in axon_6_poly).
@@ -10,8 +10,9 @@ its best trick — all seven side by side for screenshots and a quick visual che
 - Operon: LFO pitch so the 3-lane protein scope shows clean staggered waves.
 - Bunnies: LV, mid WILD, LFO pitch so the phase loop + bunny read clearly.
 - Foxes: LFO pitch, WILD at canonical chaos so the teacup strange attractor draws.
+- Finches: fast evolutionary time and a branching regime so one trait peak divides.
 
-Top row (y=0) holds ONLY the seven Coalescent modules; all utility modules (8vert /
+Top row (y=0) holds ONLY the eight Coalescent modules; all utility modules (8vert /
 Merge poly sources) live on the second row (y=1) so a screenshot can crop to
 the top row cleanly. No audio cables — the displays animate regardless.
 """
@@ -49,9 +50,9 @@ def cable(om, oid, im, iid, ci):
             "inputModuleId": im, "inputId": iid, "color": colors[ci % len(colors)],
             "inputPlugOrder": ci, "outputPlugOrder": ci}
 
-# ── Top row: the seven Coalescent modules, dressed to impress ─────────────────
+# ── Top row: the eight Coalescent modules, dressed to impress ────────────────
 # HP widths: GENDYN 12, Haptik 18, Axon 12, Soma 12, Operon 14, Bunnies 12,
-# Foxes 12 → the left edges below tile them left-to-right (0,12,30,42,54,68,80).
+# Foxes 12, Finches 14 → left edges (0,12,30,42,54,68,80,92).
 # GENDYN: N=24 breakpoints, SCALE up so the sine seed morphs into a living
 # polygon within seconds (params: 0 N, 1 SCALE_AMP, 2 SCALE_DUR).
 gendyn = mod("GENDYN", 0, 0, params=[pv(0, 24), pv(1, 0.006), pv(2, 0.006)])
@@ -73,6 +74,12 @@ bunnies = mod("Bunnies", 68, 0, params=[pv(0, -5), pv(1, 0.5), pv(2, 0.5), pv(3,
 # Foxes: Hastings-Powell food chain at LFO pitch, WILD at canonical chaos so the
 # projected teacup strange attractor fills in. (params: 0 RATE, 1 BALANCE, 2 WILD)
 foxes = mod("Foxes", 80, 0, params=[pv(0, -5), pv(1, 0.5), pv(2, 0.62)])
+# Finches: parameters are deliberately inside the branching regime; the high RATE
+# setting lets the density visibly leave its ancestral peak during a gallery visit.
+# (params: 0 RATE, 1 MUTATE, 2 COMPETE, 3 NICHE, 4 MUTANT, 5 SEED,
+#  6 MUTATE_ATT, 7 COMPETE_ATT)
+finches = mod("Finches", 92, 0, params=[pv(0, 1.0), pv(1, 0.35), pv(2, 0.72),
+                                        pv(3, 0.60), pv(4, 0.72)])
 
 # ── Second row: poly sources (proven values from axon_6_poly / soma_6_poly) ──
 axon_semis, axon_cur = [0, 4, 7, 11], [-1.5, 1.0, 4.0, 7.5]     # I ≈ 0.45..1.35
@@ -84,7 +91,8 @@ evPs = eightvert([s / 120.0 for s in soma_semis], 24)
 evCs = eightvert([v / 10.0 for v in soma_cur], 32)
 mgPs, mgCs = merge(40), merge(42)
 
-modules = [gendyn, haptik, axon, soma, operon, bunnies, foxes, evPa, evCa, mgPa, mgCa, evPs, evCs, mgPs, mgCs]
+modules = [gendyn, haptik, axon, soma, operon, bunnies, foxes, finches,
+           evPa, evCa, mgPa, mgCa, evPs, evCs, mgPs, mgCs]
 
 cables  = [cable(evPa["id"], i, mgPa["id"], i, i) for i in range(4)]
 cables += [cable(evCa["id"], i, mgCa["id"], i, i) for i in range(4)]

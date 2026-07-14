@@ -1,11 +1,12 @@
 # Coalescent
 
-Coalescent is a set of strange oscillators for **VCV Rack 2**: gliding stochastic tones,
-scanned physical bodies, spiking neuron voices, three-phase genetic circuits, and
-predator–prey ecologies. 
-Built around one idea: let a small dynamical system run, and listen to it.
+Coalescent is a set of strange dynamical instruments for **VCV Rack 2**: gliding
+stochastic tones, scanned physical bodies, spiking neuron voices, genetic
+circuits, and ecological systems that cycle, turn chaotic, or branch into new
+phenotypic clusters. Built around one idea: let a small dynamical system run, and
+listen to or modulate with it.
 Each module is a different system — stochastic, physical, neural, genetic, or
-ecological — driven hard enough to make sound. They're
+ecological — shaped into a playable musical surface. They're
 grouped as the **Fluctuations** series (a label used throughout the docs, not a
 separate brand); the same plugin has room for other series later.
 
@@ -18,8 +19,9 @@ separate brand); the same plugin has room for other series later.
 | **Operon** | Elowitz–Leibler repressilator (gene ring) | three genes repressing each other in a ring, ~120° out of phase — a native three-phase oscillator, LFO, and clock |
 | **Bunnies** | Lotka–Volterra / Rosenzweig–MacArthur | predator & prey chasing each other a quarter cycle apart — a two-phase oscillator, LFO, and clock |
 | **Foxes** | Hastings–Powell three-level food chain | grass, bunnies, and foxes move from a regular chase through period doubling into deterministic chaos — three correlated voices, LFOs, and event sources |
+| **Finches** | trait-structured mutation–competition ecology | one phenotype broadens and branches into two persistent clusters — paired pitch and abundance CVs, spread CV, and split/merge events |
 
-![Coalescent — GENDYN, Haptik, Axon, Soma, Operon, Bunnies, Foxes](docs/img/coalescent.png)
+![Coalescent module gallery](docs/img/coalescent.png)
 
 ## Which module should I use?
 
@@ -30,6 +32,7 @@ separate brand); the same plugin has room for other series later.
 - **Three-phase tones, three-phase LFOs, or a three-phase clock?** → **Operon**
 - **Two-phase boom-bust motion, or a two-phase clock?** → **Bunnies**
 - **Three linked ecological voices, or deterministic chaos you can dial in?** → **Foxes**
+- **One CV voice visibly and audibly diversifying into two?** → **Finches**
 
 ## The neuron pair
 
@@ -51,6 +54,7 @@ language so the kinship reads visually; they're also the only two modules tagged
 - [Operon](docs/operon.md) — Elowitz–Leibler repressilator (three-phase)
 - [Bunnies](docs/bunnies.md) — Lotka–Volterra / Rosenzweig–MacArthur predator–prey
 - [Foxes](docs/foxes.md) — Hastings–Powell three-species food chain (deterministic chaos)
+- [Finches](docs/finches.md) — trait-density evolutionary branching
 
 ## Demo patches
 
@@ -71,6 +75,7 @@ python3 tools/make_patch_gendyn_cluster.py
 python3 tools/make_patch_operon.py          # Operon (repressilator)
 python3 tools/make_patch_bunnies.py         # Bunnies (predator-prey)
 python3 tools/make_patch_foxes.py           # Foxes (food-chain chaos)
+python3 tools/make_patch_finches.py         # Finches (evolutionary branching)
 python3 tools/make_patch_gallery.py         # gallery view
 ```
 
@@ -141,10 +146,11 @@ These are intended behaviours, called out so they don't read as defects:
   their pitch is open-loop (CURRENT/EPS/BURST/ADAPT pull it a little).
 - **Soma's chaotic region** sits *around* the documented CURRENT; nearby values
   shift with rate, drive, and modulation — chaos isn't a fixed point on the dial.
-- **GENDYN and Haptik preserve their evolved internal state** with the patch (the
-  running waveform / frozen lattice), so a sound you let run or freeze reloads as
-  itself. Axon, Soma, Operon, Bunnies and Foxes restart from their defined initial
-  conditions; all knob and menu settings persist everywhere.
+- **GENDYN, Haptik and Finches preserve their evolved internal state** with the
+  patch (the running waveform, frozen lattice, or trait distribution), so the
+  state you shaped reloads as itself. Axon, Soma, Operon, Bunnies and Foxes restart
+  from their defined initial conditions; all knob and menu settings persist
+  everywhere.
 
 ## License
 

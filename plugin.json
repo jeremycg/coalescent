@@ -94,6 +94,16 @@
         "Clock generator"
       ],
       "keywords": "Hastings Powell tritrophic three trophic food chain ecology deterministic chaos strange attractor period doubling grass bunnies foxes predator prey"
+    },
+    {
+      "slug": "Finches",
+      "name": "Finches",
+      "description": "Trait-density ecology: mutation and frequency-dependent competition turn one phenotype into two persistent clusters.",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/finches.md",
+      "tags": [
+        "Function generator"
+      ],
+      "keywords": "evolution evolutionary branching adaptive dynamics phenotype trait density mutation diffusion competition disruptive selection diversity speciation finches"
     }
   ]
 }

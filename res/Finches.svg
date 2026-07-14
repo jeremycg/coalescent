@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Finches - panel base, 14 HP (71.12 x 128.5 mm). Deep blue-green base;
+     the density curve, peak colours, display title, and control labels are drawn
+     by the widget. House style: this SVG carries only bg, rails, and screw holes. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="71.12mm" height="128.5mm" viewBox="0 0 71.12 128.5">
+  <rect width="71.12" height="128.5" fill="#182326"/>
+  <rect y="0"     width="71.12" height="3" fill="#0e1719"/>
+  <rect y="125.5" width="71.12" height="3" fill="#0e1719"/>
+  <circle cx="3.5"   cy="3.5"   r="1.5" fill="#091012"/>
+  <circle cx="67.62" cy="3.5"   r="1.5" fill="#091012"/>
+  <circle cx="3.5"   cy="124.5" r="1.5" fill="#091012"/>
+  <circle cx="67.62" cy="124.5" r="1.5" fill="#091012"/>
+</svg>

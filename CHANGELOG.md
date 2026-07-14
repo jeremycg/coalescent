@@ -4,6 +4,15 @@
 
 ### New module
 
+- **Finches** — a 14 HP evolutionary CV instrument whose fixed 64-bin trait
+  density can broaden from one phenotype into two persistent clusters under
+  mutation, environmental selection, and frequency-dependent competition. Two
+  cluster positions drive paired pitch CVs, their basin masses drive paired
+  abundance CVs, SPREAD follows trait variance, and SPLIT/MERGE mark accepted
+  transitions with persistence and hysteresis. The evolved density is saved with
+  the patch. Four Core/Fundamental demo patches and a standalone stability suite
+  cover the one-to-two-to-one gesture, parameter extremes, symmetry, no-flux
+  boundaries, deterministic restore, and timestep convergence.
 - **Foxes** — a three-species food chain (grass → bunnies → foxes) on the
   nondimensional **Hastings–Powell** model, the chaotic sibling of Bunnies. WILD
   moves it from a resting coexistence, through a regular three-population chase and

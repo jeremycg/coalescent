@@ -50,6 +50,7 @@ check:
 	$(CHECK_CXX) tools/stability/operon.cpp -o /tmp/coalescent_check_operon && /tmp/coalescent_check_operon
 	$(CHECK_CXX) tools/stability/bunnies.cpp -o /tmp/coalescent_check_bunnies && /tmp/coalescent_check_bunnies
 	$(CHECK_CXX) tools/stability/foxes.cpp  -o /tmp/coalescent_check_foxes  && /tmp/coalescent_check_foxes
+	$(CHECK_CXX) -std=c++11 tools/stability/finches.cpp -o /tmp/coalescent_check_finches && /tmp/coalescent_check_finches
 	$(CHECK_CXX) -funsafe-math-optimizations tools/integrator_equiv.cpp -o /tmp/coalescent_check_equiv && /tmp/coalescent_check_equiv
 
 # Needs Rack headers (simd). Run after the SDK is available: make check-simd
