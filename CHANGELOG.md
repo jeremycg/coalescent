@@ -4,6 +4,22 @@
 
 ### New module
 
+- **Islands** — a 16 HP stochastic population-genetics modulator with four
+  synchronous Wright–Fisher islands. Exact binomial reproduction turns effective
+  size into a musically direct texture control; signed genic selection, symmetric
+  mutation, common-pool migration, a clockable single-generation STEP, and a
+  rotating eight-copy FOUNDER bottleneck shape the four bounded `0 ... 10 V`
+  allele-frequency lanes. MEAN and normalized within-island heterozygosity provide
+  summary CV, while exact FIX A/B gates, a global LOSS event, and a hysteretic
+  SWEEP event mark the boundaries. Generation endpoints are interpolated at audio
+  rate, and complete population, event, interpolation, founder, and deterministic
+  RNG state persists with the patch. Four Core/Fundamental demos cover neutral
+  drift, migration-led correlation, selection sweeps, and founder effects; a
+  standalone suite checks distribution moments, parameter order, events, replay,
+  and restoration. Factory instances intentionally share seed/stream `42/54`;
+  context-menu reseeding chooses a seed/stream pair that becomes that instance's
+  repeatable RESET identity, restoring the factory pair returns to `42/54`, and
+  Rack Randomize also reseeds.
 - **Finches** — a 14 HP evolutionary CV instrument whose fixed 64-bin trait
   density can broaden from one phenotype into two persistent clusters under
   mutation, environmental selection, and frequency-dependent competition. Two

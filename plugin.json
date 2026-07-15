@@ -104,6 +104,18 @@
         "Function generator"
       ],
       "keywords": "evolution evolutionary branching adaptive dynamics phenotype trait density mutation diffusion competition disruptive selection diversity speciation finches"
+    },
+    {
+      "slug": "Islands",
+      "name": "Islands",
+      "description": "Four-island Wright-Fisher drift: bounded stochastic allele-frequency CV with selection, mutation, migration, and founder bottlenecks.",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/islands.md",
+      "tags": [
+        "Random",
+        "Sample and hold",
+        "Function generator"
+      ],
+      "keywords": "Wright Fisher population genetics genetic drift allele frequency stochastic random modulation islands migration mutation selection fixation sweep founder bottleneck heterozygosity"
     }
   ]
 }

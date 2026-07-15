@@ -12,4 +12,5 @@ void init(Plugin* p) {
     p->addModel(modelBunnies);
     p->addModel(modelFoxes);
     p->addModel(modelFinches);
+    p->addModel(modelIslands);
 }

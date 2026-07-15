@@ -2,9 +2,9 @@
 
 Coalescent is a set of strange dynamical instruments for **VCV Rack 2**: gliding
 stochastic tones, scanned physical bodies, spiking neuron voices, genetic
-circuits, and ecological systems that cycle, turn chaotic, or branch into new
-phenotypic clusters. Built around one idea: let a small dynamical system run, and
-listen to or modulate with it.
+circuits, and ecological systems that cycle, turn chaotic, branch into new
+phenotypic clusters, or drift toward fixation. Built around one idea: let a small
+dynamical system run, and listen to or modulate with it.
 Each module is a different system — stochastic, physical, neural, genetic, or
 ecological — shaped into a playable musical surface. They're
 grouped as the **Fluctuations** series (a label used throughout the docs, not a
@@ -20,6 +20,7 @@ separate brand); the same plugin has room for other series later.
 | **Bunnies** | Lotka–Volterra / Rosenzweig–MacArthur | predator & prey chasing each other a quarter cycle apart — a two-phase oscillator, LFO, and clock |
 | **Foxes** | Hastings–Powell three-level food chain | grass, bunnies, and foxes move from a regular chase through period doubling into deterministic chaos — three correlated voices, LFOs, and event sources |
 | **Finches** | trait-structured mutation–competition ecology | one phenotype broadens and branches into two persistent clusters — paired pitch and abundance CVs, spread CV, and split/merge events |
+| **Islands** | four-population Wright–Fisher drift | four bounded allele-frequency CVs shaped by population size, selection, mutation, migration, and founder bottlenecks |
 
 ![Coalescent module gallery](docs/img/coalescent.png)
 
@@ -33,6 +34,7 @@ separate brand); the same plugin has room for other series later.
 - **Two-phase boom-bust motion, or a two-phase clock?** → **Bunnies**
 - **Three linked ecological voices, or deterministic chaos you can dial in?** → **Foxes**
 - **One CV voice visibly and audibly diversifying into two?** → **Finches**
+- **Four bounded stochastic CVs with correlated drift and meaningful boundaries?** → **Islands**
 
 ## The neuron pair
 
@@ -55,6 +57,7 @@ language so the kinship reads visually; they're also the only two modules tagged
 - [Bunnies](docs/bunnies.md) — Lotka–Volterra / Rosenzweig–MacArthur predator–prey
 - [Foxes](docs/foxes.md) — Hastings–Powell three-species food chain (deterministic chaos)
 - [Finches](docs/finches.md) — trait-density evolutionary branching
+- [Islands](docs/islands.md) — four-island Wright–Fisher genetic drift
 
 ## Demo patches
 
@@ -76,6 +79,7 @@ python3 tools/make_patch_operon.py          # Operon (repressilator)
 python3 tools/make_patch_bunnies.py         # Bunnies (predator-prey)
 python3 tools/make_patch_foxes.py           # Foxes (food-chain chaos)
 python3 tools/make_patch_finches.py         # Finches (evolutionary branching)
+python3 tools/make_patch_islands.py         # Islands (Wright-Fisher drift)
 python3 tools/make_patch_gallery.py         # gallery view
 ```
 
@@ -146,11 +150,11 @@ These are intended behaviours, called out so they don't read as defects:
   their pitch is open-loop (CURRENT/EPS/BURST/ADAPT pull it a little).
 - **Soma's chaotic region** sits *around* the documented CURRENT; nearby values
   shift with rate, drive, and modulation — chaos isn't a fixed point on the dial.
-- **GENDYN, Haptik and Finches preserve their evolved internal state** with the
-  patch (the running waveform, frozen lattice, or trait distribution), so the
-  state you shaped reloads as itself. Axon, Soma, Operon, Bunnies and Foxes restart
-  from their defined initial conditions; all knob and menu settings persist
-  everywhere.
+- **GENDYN, Haptik, Finches and Islands preserve their evolved internal state**
+  with the patch (the running waveform, frozen lattice, trait distribution, or
+  allele frequencies plus deterministic RNG), so the state you shaped reloads as
+  itself. Axon, Soma, Operon, Bunnies and Foxes restart from their defined initial
+  conditions; all knob and menu settings persist everywhere.
 
 ## License
 
