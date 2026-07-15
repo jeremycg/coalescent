@@ -116,6 +116,17 @@
         "Function generator"
       ],
       "keywords": "Wright Fisher population genetics genetic drift allele frequency stochastic random modulation islands migration mutation selection fixation sweep founder bottleneck heterozygosity"
+    },
+    {
+      "slug": "Archipelago",
+      "name": "Archipelago",
+      "description": "Eight-habitat local adaptation: selection follows a spatial environmental gradient while mutation, nearest-neighbor migration, climate, and a barrier shape clines and range shifts.",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/archipelago.md",
+      "tags": [
+        "Function generator",
+        "Polyphonic"
+      ],
+      "keywords": "local adaptation quantitative trait cline gene flow stepping stone migration selection mutation barrier climate range shift colonization extinction metapopulation spatial ecology"
     }
   ]
 }

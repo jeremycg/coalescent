@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Gallery/showcase patch: all nine Coalescent modules in one row, each doing
-its best trick — all nine side by side for screenshots and a quick visual check.
+"""Gallery/showcase patch: all ten Coalescent modules in one row, each doing
+its best trick — all ten side by side for screenshots and a quick visual check.
 
 - Axon: 4 poly voices (Cmaj7) with CURRENT spread via 8vert->Merge, so the scope
   draws four differently-sized coloured orbits (values proven in axon_6_poly).
@@ -12,13 +12,14 @@ its best trick — all nine side by side for screenshots and a quick visual chec
 - Foxes: LFO pitch, WILD at canonical chaos so the teacup strange attractor draws.
 - Finches: fast evolutionary time and a branching regime so one trait peak divides.
 - Islands: small, fast, lightly coupled populations so all four drift lanes move.
+- Archipelago: a steep, partly blocked spatial cline across eight local trait fields.
 
-Top row (y=0) holds ONLY the nine Coalescent modules; all utility modules (8vert /
+Top row (y=0) holds ONLY the ten Coalescent modules; all utility modules (8vert /
 Merge poly sources) live on the second row (y=1) so a screenshot can crop to
 the top row cleanly. No audio cables — the displays animate regardless.
 """
 
-import json, math, os, io, glob, shutil, subprocess, sys, tarfile, tempfile, random
+import json, math, os, io, glob, shutil, subprocess, sys, tarfile, random
 
 random.seed(40)
 def uid():
@@ -36,6 +37,27 @@ def mod(model, x, y=0, params=None, data=None):
 def pv(i, v):
     return {"id": i, "value": float(v)}
 
+def archipelago_state(gradient, climate):
+    bins, sigma = 32, 0.065
+    density, reported_traits = [], []
+    global_moment = 0.0
+    for habitat in range(8):
+        position = -1.0 + 2.0 * habitat / 7.0
+        optimum = max(-1.0, min(climate + gradient * position, 1.0))
+        traits = [-1.0 + (trait_bin + 0.5) * 2.0 / bins
+                  for trait_bin in range(bins)]
+        population = [math.exp(-0.5 * ((trait - optimum) / sigma) ** 2)
+                      for trait in traits]
+        scale = 0.75 / sum(population)
+        population = [value * scale for value in population]
+        moment = sum(value * trait for value, trait in zip(population, traits))
+        density.extend(population)
+        reported_traits.append(moment / 0.75)
+        global_moment += moment
+    return {"archipelagoVersion": 1, "density": density,
+            "reportedTrait": reported_traits,
+            "reportedGlobalMean": global_moment / 6.0, "occupiedMask": 0xff}
+
 def eightvert(gains, x, y=1):
     params = [pv(i, gains[i] if i < len(gains) else 0.0) for i in range(8)]
     return {"id": uid(), "plugin": "Fundamental", "model": "8vert", "version": "2.6.4",
@@ -51,9 +73,10 @@ def cable(om, oid, im, iid, ci):
             "inputModuleId": im, "inputId": iid, "color": colors[ci % len(colors)],
             "inputPlugOrder": ci, "outputPlugOrder": ci}
 
-# ── Top row: the nine Coalescent modules, dressed to impress ─────────────────
+# ── Top row: the ten Coalescent modules, dressed to impress ──────────────────
 # HP widths: GENDYN 12, Haptik 18, Axon 12, Soma 12, Operon 14, Bunnies 12,
-# Foxes 12, Finches 14, Islands 16 → left edges (0,12,30,42,54,68,80,92,106).
+# Foxes 12, Finches 14, Islands 16, Archipelago 18
+# → left edges (0,12,30,42,54,68,80,92,106,122).
 # GENDYN: N=24 breakpoints, SCALE up so the sine seed morphs into a living
 # polygon within seconds (params: 0 N, 1 SCALE_AMP, 2 SCALE_DUR).
 gendyn = mod("GENDYN", 0, 0, params=[pv(0, 24), pv(1, 0.006), pv(2, 0.006)])
@@ -88,6 +111,13 @@ finches = mod("Finches", 92, 0, params=[pv(0, 1.0), pv(1, 0.35), pv(2, 0.72),
 # 4 GENERATIONS=log2 rate, 5 FOUNDER, 6 RESET, 7-9 attenuverters)
 islands = mod("Islands", 106, 0, params=[pv(0, 5.0), pv(1, 0.0), pv(2, 0.70),
                                         pv(3, 0.08), pv(4, 4.0)])
+# Archipelago: a quick deterministic spatial field with a visible cline and a
+# partly closed central barrier. (params: 0 RATE, 1 SELECT, 2 MUTATE, 3 MIGRATE,
+# 4 GRADIENT, 5 BARRIER, 6 CLIMATE, 7 RESET, 8-12 attenuverters, 13 TOPOLOGY)
+archipelago = mod("Archipelago", 122, 0,
+                  params=[pv(0, 1.5), pv(1, 0.62), pv(2, 0.45), pv(3, 0.42),
+                          pv(4, 0.65), pv(5, 0.72), pv(6, 0.0), pv(13, 0.0)],
+                  data=archipelago_state(0.65, 0.0))
 
 # ── Second row: poly sources (proven values from axon_6_poly / soma_6_poly) ──
 axon_semis, axon_cur = [0, 4, 7, 11], [-1.5, 1.0, 4.0, 7.5]     # I ≈ 0.45..1.35
@@ -100,6 +130,7 @@ evCs = eightvert([v / 10.0 for v in soma_cur], 32)
 mgPs, mgCs = merge(40), merge(42)
 
 modules = [gendyn, haptik, axon, soma, operon, bunnies, foxes, finches, islands,
+           archipelago,
            evPa, evCa, mgPa, mgCa, evPs, evCs, mgPs, mgCs]
 
 cables  = [cable(evPa["id"], i, mgPa["id"], i, i) for i in range(4)]
@@ -118,17 +149,18 @@ name = "coalescent_gallery.vcv"
 out_dir = os.path.join(ROOT, "..", "patches")
 os.makedirs(out_dir, exist_ok=True)
 out_file = os.path.join(out_dir, name)
-with tempfile.TemporaryDirectory() as tmp:
-    jp = os.path.join(tmp, "patch.json")
-    with open(jp, "w") as f:
-        json.dump(patch, f, indent=2)
-    tar_buf = io.BytesIO()
-    with tarfile.open(fileobj=tar_buf, mode="w:") as tf:
-        tf.add(jp, arcname="patch.json")
+patch_json = json.dumps(patch, indent=2).encode("utf-8")
+tar_buf = io.BytesIO()
+with tarfile.open(fileobj=tar_buf, mode="w:") as tf:
+    info = tarfile.TarInfo("patch.json")
+    info.size = len(patch_json)
+    info.mtime = 0
+    info.mode = 0o644
+    tf.addfile(info, io.BytesIO(patch_json))
     r = subprocess.run(["zstd", "-19", "-o", out_file, "-f"],
                        input=tar_buf.getvalue(), capture_output=True)
-    if r.returncode != 0:
-        print("zstd error:", r.stderr.decode(), file=sys.stderr); sys.exit(1)
+if r.returncode != 0:
+    print("zstd error:", r.stderr.decode(), file=sys.stderr); sys.exit(1)
 
 print(f"  {name}: {len(modules)} modules, {len(cables)} cables (v{VER}), {os.path.getsize(out_file)} bytes")
 for win in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"):

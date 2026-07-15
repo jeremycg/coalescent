@@ -52,6 +52,7 @@ check:
 	$(CHECK_CXX) tools/stability/foxes.cpp  -o /tmp/coalescent_check_foxes  && /tmp/coalescent_check_foxes
 	$(CHECK_CXX) -std=c++11 tools/stability/finches.cpp -o /tmp/coalescent_check_finches && /tmp/coalescent_check_finches
 	$(CHECK_CXX) -std=c++11 tools/stability/islands.cpp -o /tmp/coalescent_check_islands && /tmp/coalescent_check_islands
+	$(CHECK_CXX) -std=c++11 tools/stability/archipelago.cpp -o /tmp/coalescent_check_archipelago && /tmp/coalescent_check_archipelago
 	$(CHECK_CXX) -funsafe-math-optimizations tools/integrator_equiv.cpp -o /tmp/coalescent_check_equiv && /tmp/coalescent_check_equiv
 
 # Needs Rack headers (simd). Run after the SDK is available: make check-simd

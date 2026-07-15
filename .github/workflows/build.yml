@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main, 'feat/**', foxes, finches, islands]
+    branches: [main, 'feat/**', foxes, finches, islands, archipelago]
     tags: ['v*']
   pull_request:
   workflow_dispatch:

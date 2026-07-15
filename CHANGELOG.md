@@ -4,6 +4,17 @@
 
 ### New module
 
+- **Archipelago** — an 18 HP deterministic spatial eco-evolution modulator with
+  eight abundance-carrying trait distributions. Local stabilizing selection and
+  mutation act within each habitat while nearest-neighbor migration, a signed
+  environmental gradient, a closable 4↔5 barrier, row/ring topology, and moving
+  climate create clines, gene-flow conflict, range contraction, and recolonization.
+  Eight-channel TRAIT and MASS outputs turn the field into a polyphonic pitch/VCA
+  pair; abundance-weighted MEAN, signed left/right DIFF, state-dependent FLUX, and
+  hysteretic COLONIZE/EXTINCT events expose its spatial structure. The complete
+  8×32 field and occupancy memory persist with the patch. Four Core/Fundamental
+  demos and an SDK-free suite cover local adaptation, homogenization, barriers,
+  range shifts, positivity, conservation, restoration, and timestep convergence.
 - **Islands** — a 16 HP stochastic population-genetics modulator with four
   synchronous Wright–Fisher islands. Exact binomial reproduction turns effective
   size into a musically direct texture control; signed genic selection, symmetric

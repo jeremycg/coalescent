@@ -3,8 +3,8 @@
 Coalescent is a set of strange dynamical instruments for **VCV Rack 2**: gliding
 stochastic tones, scanned physical bodies, spiking neuron voices, genetic
 circuits, and ecological systems that cycle, turn chaotic, branch into new
-phenotypic clusters, or drift toward fixation. Built around one idea: let a small
-dynamical system run, and listen to or modulate with it.
+phenotypic clusters, drift toward fixation, or form spatial clines. Built around
+one idea: let a small dynamical system run, and listen to or modulate with it.
 Each module is a different system — stochastic, physical, neural, genetic, or
 ecological — shaped into a playable musical surface. They're
 grouped as the **Fluctuations** series (a label used throughout the docs, not a
@@ -21,6 +21,7 @@ separate brand); the same plugin has room for other series later.
 | **Foxes** | Hastings–Powell three-level food chain | grass, bunnies, and foxes move from a regular chase through period doubling into deterministic chaos — three correlated voices, LFOs, and event sources |
 | **Finches** | trait-structured mutation–competition ecology | one phenotype broadens and branches into two persistent clusters — paired pitch and abundance CVs, spread CV, and split/merge events |
 | **Islands** | four-population Wright–Fisher drift | four bounded allele-frequency CVs shaped by population size, selection, mutation, migration, and founder bottlenecks |
+| **Archipelago** | eight-habitat spatial local adaptation | eight continuous trait distributions follow different environments while nearest-neighbor migration, a barrier, and climate shape a polyphonic geographic cline |
 
 ![Coalescent module gallery](docs/img/coalescent.png)
 
@@ -35,6 +36,7 @@ separate brand); the same plugin has room for other series later.
 - **Three linked ecological voices, or deterministic chaos you can dial in?** → **Foxes**
 - **One CV voice visibly and audibly diversifying into two?** → **Finches**
 - **Four bounded stochastic CVs with correlated drift and meaningful boundaries?** → **Islands**
+- **An eight-voice spatial cline, range shift, or migration-versus-selection system?** → **Archipelago**
 
 ## The neuron pair
 
@@ -44,8 +46,9 @@ a shared `src/dsp/rk4.hpp` (a generic `coalescent::rk4<N>` step + pitch-adaptive
 substepping, where the HR model extends the FHN one with a third, slow adaptation
 equation). They
 share a name prefix so they sort together in the browser and an accent/panel
-language so the kinship reads visually; they're also the only two modules tagged
-**Polyphonic** (up to 16 voices), so a browser filter narrows to exactly the pair.
+language so the kinship reads visually. Both are polyphonic audio voices (up to
+16 voices); Archipelago is also tagged **Polyphonic** because its TRAIT and MASS
+CV outputs expose eight linked habitats on one cable.
 
 ## Modules — full documentation
 
@@ -58,6 +61,7 @@ language so the kinship reads visually; they're also the only two modules tagged
 - [Foxes](docs/foxes.md) — Hastings–Powell three-species food chain (deterministic chaos)
 - [Finches](docs/finches.md) — trait-density evolutionary branching
 - [Islands](docs/islands.md) — four-island Wright–Fisher genetic drift
+- [Archipelago](docs/archipelago.md) — eight-habitat spatial local adaptation
 
 ## Demo patches
 
@@ -80,6 +84,7 @@ python3 tools/make_patch_bunnies.py         # Bunnies (predator-prey)
 python3 tools/make_patch_foxes.py           # Foxes (food-chain chaos)
 python3 tools/make_patch_finches.py         # Finches (evolutionary branching)
 python3 tools/make_patch_islands.py         # Islands (Wright-Fisher drift)
+python3 tools/make_patch_archipelago.py     # Archipelago (local adaptation)
 python3 tools/make_patch_gallery.py         # gallery view
 ```
 
@@ -150,11 +155,11 @@ These are intended behaviours, called out so they don't read as defects:
   their pitch is open-loop (CURRENT/EPS/BURST/ADAPT pull it a little).
 - **Soma's chaotic region** sits *around* the documented CURRENT; nearby values
   shift with rate, drive, and modulation — chaos isn't a fixed point on the dial.
-- **GENDYN, Haptik, Finches and Islands preserve their evolved internal state**
-  with the patch (the running waveform, frozen lattice, trait distribution, or
-  allele frequencies plus deterministic RNG), so the state you shaped reloads as
-  itself. Axon, Soma, Operon, Bunnies and Foxes restart from their defined initial
-  conditions; all knob and menu settings persist everywhere.
+- **GENDYN, Haptik, Finches, Islands and Archipelago preserve their evolved internal
+  state** with the patch (the running waveform, frozen lattice, trait distribution,
+  allele frequencies plus deterministic RNG, or spatial population field), so the
+  state you shaped reloads as itself. Axon, Soma, Operon, Bunnies and Foxes restart
+  from their defined initial conditions; all knob and menu settings persist everywhere.
 
 ## License
 

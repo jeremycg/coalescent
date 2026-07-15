@@ -15,6 +15,7 @@ extern Model* modelBunnies;  // predator-prey (Lotka-Volterra / Rosenzweig-MacAr
 extern Model* modelFoxes;    // three-species food chain (Hastings-Powell, chaotic)
 extern Model* modelFinches;  // trait-density evolutionary branching
 extern Model* modelIslands;  // four-island Wright-Fisher genetic drift
+extern Model* modelArchipelago;  // spatial local adaptation across eight habitats
 
 // The panel captions live in their own `widget::Widget` subclass (one per module)
 // added as a child, rather than drawn inline in ModuleWidget::draw(). Fonts are
