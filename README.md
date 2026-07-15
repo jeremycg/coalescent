@@ -1,14 +1,13 @@
 # Coalescent
 
-Coalescent is a set of strange dynamical instruments for **VCV Rack 2**: gliding
-stochastic tones, scanned physical bodies, spiking neuron voices, genetic
-circuits, and ecological systems that cycle, turn chaotic, branch into new
-phenotypic clusters, drift toward fixation, or form spatial clines. Built around
-one idea: let a small dynamical system run, and listen to or modulate with it.
-Each module is a different system — stochastic, physical, neural, genetic, or
-ecological — shaped into a playable musical surface. They're
-grouped as the **Fluctuations** series (a label used throughout the docs, not a
-separate brand); the same plugin has room for other series later.
+Coalescent is a set of strange dynamical and generative instruments for **VCV
+Rack 2**: gliding stochastic tones, scanned physical bodies, spiking neuron
+voices, genetic circuits, ecological systems, and finite ancestral trees. Each
+module turns a biological, physical, or stochastic model into a playable musical
+surface. Most let a small dynamical system run continuously; those instruments
+form the **Fluctuations** series (a label used throughout the docs, not a separate
+brand). **Lineages** is the first generative genealogy module: it creates a
+persistent finite musical structure, then plays or scrubs through it.
 
 | Module | System | Character |
 | --- | --- | --- |
@@ -22,6 +21,7 @@ separate brand); the same plugin has room for other series later.
 | **Finches** | trait-structured mutation–competition ecology | one phenotype broadens and branches into two persistent clusters — paired pitch and abundance CVs, spread CV, and split/merge events |
 | **Islands** | four-population Wright–Fisher drift | four bounded allele-frequency CVs shaped by population size, selection, mutation, migration, and founder bottlenecks |
 | **Archipelago** | eight-habitat spatial local adaptation | eight continuous trait distributions follow different environments while nearest-neighbor migration, a barrier, and climate shape a polyphonic geographic cline |
+| **Lineages** | finite Kingman coalescent genealogy | a persistent ancestral tree played backward into convergence or forward into a related polyphonic mutation cluster |
 
 ![Coalescent module gallery](docs/img/coalescent.png)
 
@@ -37,6 +37,7 @@ separate brand); the same plugin has room for other series later.
 - **One CV voice visibly and audibly diversifying into two?** → **Finches**
 - **Four bounded stochastic CVs with correlated drift and meaningful boundaries?** → **Islands**
 - **An eight-voice spatial cline, range shift, or migration-versus-selection system?** → **Archipelago**
+- **A repeatable family of related pitches that converges to unison or branches from it?** → **Lineages**
 
 ## The neuron pair
 
@@ -48,7 +49,9 @@ equation). They
 share a name prefix so they sort together in the browser and an accent/panel
 language so the kinship reads visually. Both are polyphonic audio voices (up to
 16 voices); Archipelago is also tagged **Polyphonic** because its TRAIT and MASS
-CV outputs expose eight linked habitats on one cable.
+CV outputs expose eight linked habitats on one cable. Lineages' TRAITS output is
+polyphonic too: its channel count is fixed by the generated tree's 2–16 samples,
+even while an uncommitted SAMPLES change marks that tree dirty.
 
 ## Modules — full documentation
 
@@ -62,6 +65,7 @@ CV outputs expose eight linked habitats on one cable.
 - [Finches](docs/finches.md) — trait-density evolutionary branching
 - [Islands](docs/islands.md) — four-island Wright–Fisher genetic drift
 - [Archipelago](docs/archipelago.md) — eight-habitat spatial local adaptation
+- [Lineages](docs/lineages.md) — finite Kingman genealogy and neutral mutation
 
 ## Demo patches
 
@@ -85,6 +89,7 @@ python3 tools/make_patch_foxes.py           # Foxes (food-chain chaos)
 python3 tools/make_patch_finches.py         # Finches (evolutionary branching)
 python3 tools/make_patch_islands.py         # Islands (Wright-Fisher drift)
 python3 tools/make_patch_archipelago.py     # Archipelago (local adaptation)
+python3 tools/make_patch_lineages.py        # Lineages (generative genealogy)
 python3 tools/make_patch_gallery.py         # gallery view
 ```
 
@@ -160,6 +165,11 @@ These are intended behaviours, called out so they don't read as defects:
   allele frequencies plus deterministic RNG, or spatial population field), so the
   state you shaped reloads as itself. Axon, Soma, Operon, Bunnies and Foxes restart
   from their defined initial conditions; all knob and menu settings persist everywhere.
+- **Lineages preserves the complete generated tree, mutations, cursor, transport,
+  and local RNG state**, so a patch reloads exactly and, on the same build and
+  platform, its next NEW produces the same replacement tree. SAMPLES and MUTATE
+  edit the next tree: they mark the current one dirty but do not regenerate it
+  until NEW.
 
 ## License
 

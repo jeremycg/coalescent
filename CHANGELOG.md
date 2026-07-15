@@ -4,6 +4,20 @@
 
 ### New module
 
+- **Lineages** — a 16 HP generative genealogy sequencer built on a finite Kingman
+  coalescent tree with 2–16 sampled leaves and signed neutral mutations. Play from
+  the present toward the MRCA or descend from the MRCA into a related polyphonic
+  pitch cluster; reverse direction in place, loop, or scrub absolute ancestral age
+  with TIME. TRAITS, NODE, MUTATION, MRCA, active LINEAGES, and mutation DIVERSITY
+  expose the tree as pitches, modulation CV, and event pulses. Structural
+  SAMPLES and MUTATE edits stay visibly dirty until the controls are returned or
+  NEW is requested, while RESET replays the exact tree.
+  The complete topology, mutation list, cursor, transport, and lossless local RNG
+  state persist with validation, including exact same-build/platform next-NEW
+  reproduction after a save/load round trip. A direction-aware cladogram, three
+  generated demo patches, and SDK-free/Rack integration suites cover generation,
+  playback, persistence, polyphonic convergence, boundary events, and
+  malformed-state fallback.
 - **Archipelago** — an 18 HP deterministic spatial eco-evolution modulator with
   eight abundance-carrying trait distributions. Local stabilizing selection and
   mutation act within each habitat while nearest-neighbor migration, a signed

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Gallery/showcase patch: all ten Coalescent modules in one row, each doing
-its best trick — all ten side by side for screenshots and a quick visual check.
+"""Gallery/showcase patch: all eleven Coalescent modules in one row, each doing
+its best trick — all eleven side by side for screenshots and a quick visual check.
 
 - Axon: 4 poly voices (Cmaj7) with CURRENT spread via 8vert->Merge, so the scope
   draws four differently-sized coloured orbits (values proven in axon_6_poly).
@@ -13,8 +13,9 @@ its best trick — all ten side by side for screenshots and a quick visual check
 - Finches: fast evolutionary time and a branching regime so one trait peak divides.
 - Islands: small, fast, lightly coupled populations so all four drift lanes move.
 - Archipelago: a steep, partly blocked spatial cline across eight local trait fields.
+- Lineages: the default genealogy branches from one ancestor into eight related traits.
 
-Top row (y=0) holds ONLY the ten Coalescent modules; all utility modules (8vert /
+Top row (y=0) holds ONLY the eleven Coalescent modules; all utility modules (8vert /
 Merge poly sources) live on the second row (y=1) so a screenshot can crop to
 the top row cleanly. No audio cables — the displays animate regardless.
 """
@@ -73,10 +74,10 @@ def cable(om, oid, im, iid, ci):
             "inputModuleId": im, "inputId": iid, "color": colors[ci % len(colors)],
             "inputPlugOrder": ci, "outputPlugOrder": ci}
 
-# ── Top row: the ten Coalescent modules, dressed to impress ──────────────────
+# ── Top row: the eleven Coalescent modules, dressed to impress ────────────────
 # HP widths: GENDYN 12, Haptik 18, Axon 12, Soma 12, Operon 14, Bunnies 12,
-# Foxes 12, Finches 14, Islands 16, Archipelago 18
-# → left edges (0,12,30,42,54,68,80,92,106,122).
+# Foxes 12, Finches 14, Islands 16, Archipelago 18, Lineages 16
+# → left edges (0,12,30,42,54,68,80,92,106,122,140).
 # GENDYN: N=24 breakpoints, SCALE up so the sine seed morphs into a living
 # polygon within seconds (params: 0 N, 1 SCALE_AMP, 2 SCALE_DUR).
 gendyn = mod("GENDYN", 0, 0, params=[pv(0, 24), pv(1, 0.006), pv(2, 0.006)])
@@ -118,6 +119,9 @@ archipelago = mod("Archipelago", 122, 0,
                   params=[pv(0, 1.5), pv(1, 0.62), pv(2, 0.45), pv(3, 0.42),
                           pv(4, 0.65), pv(5, 0.72), pv(6, 0.0), pv(13, 0.0)],
                   data=archipelago_state(0.65, 0.0))
+# Lineages: default eight-sample tree, descent direction, and loop state. No
+# generated topology is embedded, so Rack installs a normal fresh default tree.
+lineages = mod("Lineages", 140, 0)
 
 # ── Second row: poly sources (proven values from axon_6_poly / soma_6_poly) ──
 axon_semis, axon_cur = [0, 4, 7, 11], [-1.5, 1.0, 4.0, 7.5]     # I ≈ 0.45..1.35
@@ -130,7 +134,7 @@ evCs = eightvert([v / 10.0 for v in soma_cur], 32)
 mgPs, mgCs = merge(40), merge(42)
 
 modules = [gendyn, haptik, axon, soma, operon, bunnies, foxes, finches, islands,
-           archipelago,
+           archipelago, lineages,
            evPa, evCa, mgPa, mgCa, evPs, evCs, mgPs, mgCs]
 
 cables  = [cable(evPa["id"], i, mgPa["id"], i, i) for i in range(4)]

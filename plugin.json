@@ -127,6 +127,18 @@
         "Polyphonic"
       ],
       "keywords": "local adaptation quantitative trait cline gene flow stepping stone migration selection mutation barrier climate range shift colonization extinction metapopulation spatial ecology"
+    },
+    {
+      "slug": "Lineages",
+      "name": "Lineages",
+      "description": "Generative ancestral-tree sequencer: sampled traits coalesce backward into a common ancestor or branch forward through neutral mutation.",
+      "manualUrl": "https://github.com/jeremycg/coalescent/blob/main/docs/lineages.md",
+      "tags": [
+        "Random",
+        "Sequencer",
+        "Polyphonic"
+      ],
+      "keywords": "Kingman coalescent genealogy ancestry lineage phylogeny MRCA mutation genetic drift tree generative polyphonic"
     }
   ]
 }

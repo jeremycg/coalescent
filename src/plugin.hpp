@@ -17,6 +17,9 @@ extern Model* modelFinches;  // trait-density evolutionary branching
 extern Model* modelIslands;  // four-island Wright-Fisher genetic drift
 extern Model* modelArchipelago;  // spatial local adaptation across eight habitats
 
+// Generative genealogy.
+extern Model* modelLineages;  // generative Kingman genealogy sequencer
+
 // The panel captions live in their own `widget::Widget` subclass (one per module)
 // added as a child, rather than drawn inline in ModuleWidget::draw(). Fonts are
 // loaded per-frame inside it (see the widget). Call after setPanel() so the

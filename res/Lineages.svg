@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lineages - panel base, 16 HP (81.28 x 128.5 mm). The genealogy,
+     display bezel, title, and control labels are drawn by the module widget. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="81.28mm" height="128.5mm" viewBox="0 0 81.28 128.5">
+  <rect width="81.28" height="128.5" fill="#1b2723"/>
+  <rect y="0" width="81.28" height="3" fill="#0f1714"/>
+  <rect y="125.5" width="81.28" height="3" fill="#0f1714"/>
+
+  <circle cx="3.5" cy="3.5" r="1.5" fill="#08100d"/>
+  <circle cx="77.78" cy="3.5" r="1.5" fill="#08100d"/>
+  <circle cx="3.5" cy="124.5" r="1.5" fill="#08100d"/>
+  <circle cx="77.78" cy="124.5" r="1.5" fill="#08100d"/>
+</svg>
