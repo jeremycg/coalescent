@@ -167,7 +167,8 @@ struct Axon : Module {
         }
     }
 
-    void onReset() override {
+    void onReset(const ResetEvent& event) override {
+        Module::onReset(event);
         oversampleMode = 2;   // restore default anti-aliasing (×4) on Initialize
         for (int g = 0; g < GROUPS; g++) {
             vv4[g] = -1.2f; ww4[g] = -0.6f; trigPulse4[g] = 0.f;
@@ -178,7 +179,16 @@ struct Axon : Module {
             spikeGen[c].reset();
             orbitPath[c].reset();
             orbitCommitClock[c] = 1 << 24;
+            std::fill(trailV[c], trailV[c] + TRAIL, 0.f);
+            std::fill(trailW[c], trailW[c] + TRAIL, 0.f);
         }
+        trailIdx = trailDecim = 0;
+        channels = 1;
+        dispClock = 0;
+        displaySnapshot.writable() = DisplayFrame{};
+        displaySnapshot.publish();
+        lastFs = 0.f;
+        lastOs = -1;
     }
 
     json_t* dataToJson() override {

@@ -89,9 +89,11 @@ burst, entrain a running ring, or cross-modulate at audio rate.
 
 Outputs: **OUT1/2/3** — the three centered proteins, soft-clipped to ±5 V, ~120°
 apart. **GATE1/2/3** — a 10 V / ~1 ms pulse each time a protein crosses upward
-through its centre (one per phase, per cycle). Near the oscillation threshold the
-amplitude is tiny and the gates may stay quiet while the OUTs already move — raise
-DRIVE or HILL.
+through its centre (one per phase, per cycle). Each lane uses hysteresis: it arms
+below the low side of centre and fires once above the high side, so a smooth crossing
+cannot be missed and near-centre noise cannot double-trigger. Near the oscillation
+threshold the amplitude is tiny and the gates may stay quiet while the OUTs already
+move — raise DRIVE or HILL.
 
 ## Display
 
@@ -137,8 +139,9 @@ PERTURB for kick-and-settle bursts.
 
 `tools/stability/operon.cpp` is a standalone replica: it sweeps DRIVE × HILL ×
 DECAY × LEAK at several pitches and asserts all six states stay finite and
-bounded, reports the default period (→ pitch calibration), and finds the DRIVE
-threshold. It runs in `make check`.
+bounded, reports the default period (→ pitch calibration), finds the DRIVE
+threshold, and verifies balanced cyclic gate events plus near-threshold hysteresis.
+It runs in `make check`.
 
 ## References
 

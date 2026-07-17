@@ -138,10 +138,16 @@ struct Haptik : Module {
         configOutput(MOTION_OUTPUT, "Motion (mass 0 displacement, audio-rate CV)");
     }
 
-    void onReset() override {
+    void onReset(const ResetEvent& event) override {
+        Module::onReset(event);
         last_N = -1;        // force a clean lattice reseed (y/v/scanPhase) on next process()
         trig.reset();       // clear trigger edge state
         dcBlock.reset();    // clear DC-blocker filter state
+        dispClock = 0;
+        displaySnapshot.writable() = DisplayFrame{};
+        displaySnapshot.publish();
+        saveSnapshot.writable() = SaveFrame{};
+        saveSnapshot.publish();
     }
 
     // Audio thread: publish a coherent copy of the lattice for dataToJson.
@@ -224,7 +230,7 @@ struct Haptik : Module {
                     added += d;
                 }
                 break;
-            case 3:  // continuous drive: no impulse here (handled in kernel)
+            case 3:  // continuous noise drive: no impulse here (handled in kernel)
             default:
                 break;
         }
@@ -341,7 +347,7 @@ struct Haptik : Module {
         float drive = inputs[EXT_INPUT].isConnected()
                     ? inputs[EXT_INPUT].getVoltageSum() * EXT_GAIN * amt : 0.f;   // sum poly channels → mono force
         if (shape == 3 && !freeze)
-            drive += amt * DRIVE_KEEPALIVE * (2.f * random::uniform() - 1.f);   // continuous keep-alive
+            drive += amt * DRIVE_KEEPALIVE * (2.f * random::uniform() - 1.f);   // low-level continuous noise drive
 
         // ── dynamics: symplectic Euler, two passes (skip if frozen) ──
         // Pass 1 reads only y[] (one snapshot) to form all accelerations;
@@ -408,6 +414,7 @@ struct Haptik : Module {
         int   i1  = (i0 + 1) % N;
         float f   = p - i0;
         float s;
+        float motion = y[0];
         if (slow && !freeze) {
             // Interpolate the two readout points between the previous and current
             // lattice frame (fr = samples since last step / D) so the held shape
@@ -416,6 +423,7 @@ struct Haptik : Module {
             float a0 = yPrev[i0] + fr * (y[i0] - yPrev[i0]);
             float a1 = yPrev[i1] + fr * (y[i1] - yPrev[i1]);
             s = a0 + f * (a1 - a0);
+            motion = yPrev[0] + fr * (y[0] - yPrev[0]);
         } else {
             s = y[i0] + f * (y[i1] - y[i0]);
         }
@@ -430,8 +438,9 @@ struct Haptik : Module {
         }
         dcBlock.process(s);                      // ~20 Hz high-pass; scanned mean wanders
         outputs[OUT_OUTPUT].setVoltage(5.f * coalescent::fastTanh(dcBlock.highpass() * OUT_GAIN));
-        // MOTION taps mass 0 directly (audio-rate in this design); not high-passed.
-        outputs[MOTION_OUTPUT].setVoltage(clamp(y[0] * MOTION_GAIN, -5.f, 5.f));
+        // MOTION taps mass 0 from the same interpolated Slow-mode frame as OUT;
+        // unlike OUT it is not scanned or high-passed.
+        outputs[MOTION_OUTPUT].setVoltage(clamp(motion * MOTION_GAIN, -5.f, 5.f));
 
         // ── refresh display + save snapshots (~45 Hz) ──
         if (++dispClock >= dispPeriod) {

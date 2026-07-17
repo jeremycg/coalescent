@@ -50,10 +50,12 @@
   mutation, environmental selection, and frequency-dependent competition. Two
   cluster positions drive paired pitch CVs, their basin masses drive paired
   abundance CVs, SPREAD follows trait variance, and SPLIT/MERGE mark accepted
-  transitions with persistence and hysteresis. The evolved density is saved with
-  the patch. Four Core/Fundamental demo patches and a standalone stability suite
+  transitions with persistence and hysteresis. The complete musical state is
+  saved with the patch: density, accepted split latch, and pending split/merge
+  timers. Four Core/Fundamental demo patches and a standalone stability suite
   cover the one-to-two-to-one gesture, parameter extremes, symmetry, no-flux
-  boundaries, deterministic restore, and timestep convergence.
+  boundaries, exact detector-state continuation, numerical-extinction handling,
+  performance, deterministic restore, and timestep convergence.
 - **Foxes** — a three-species food chain (grass → bunnies → foxes) on the
   nondimensional **Hastings–Powell** model, the chaotic sibling of Bunnies. WILD
   moves it from a resting coexistence, through a regular three-population chase and
@@ -66,6 +68,37 @@
   gains a standalone kernel replica asserting the analytic equilibrium, Hopf
   location, default-period calibration (within 5 cents), a positive Lyapunov
   estimate at canonical chaos, and finite/bounded behavior across the control box.
+
+### Fixes and polish
+
+- **Operon gates** now use armed hysteresis, so gradual center crossings produce
+  one balanced event per phase instead of being missed unless a single RK4 step
+  crossed the entire deadband. Modulation and PERTURB inputs are sanitized before
+  entering the solver and lookup table.
+- **Bunnies peak events** are observed at accepted RK4 substeps, preserving the
+  prey/predator clock order at the fastest rates. Hostile CV and extreme KICK
+  values are bounded before integration.
+- **Haptik MOTION** follows the same inter-frame interpolation as OUT in Slow mode
+  instead of stepping every 256 samples. The manual now identifies Continuous as
+  a low-level noise drive and documents snapshot age and RNG continuation limits.
+- **Soma BURST** modulation is sanitized before the fast exponential map, closing
+  the remaining non-finite-CV path into an integer conversion.
+- **Initialize consistency**: every module uses Rack 2's `ResetEvent` API and calls
+  the base reset so parameters return to defaults. Stateful scopes, trails, event
+  generators, and save/display snapshots are cleared or republished immediately.
+- **Shared deterministic state**: Islands and Lineages now use one exact PCG32
+  implementation and one lossless fixed-width hexadecimal codec without changing
+  their golden streams or serialized bits. Lineages rejects unreachable restored
+  transport combinations before installation.
+- **Finches persistence and numerics** now preserve detector hysteresis and pending
+  transition timers exactly, remain compatible with older density-only patches,
+  flush masses below `1e-30`, and snap presentation smoothers to their settled targets.
+- **Demo and documentation validation**: all 49 generated patches now use canonical,
+  reproducible tar+zstd archives and corrected Fundamental 2.6.4 panel widths.
+  `make check` validates manifest/manual registration, local links and screenshots,
+  archive metadata, module placement, cable endpoints, known port ranges, and all
+  49 generators in an isolated temporary tree. CI runs this coverage on every
+  branch push, and the README gallery shows all eleven current modules.
 
 ## 2.2.1
 

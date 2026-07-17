@@ -1,5 +1,7 @@
 #pragma once
 
+#include "pcg32.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -26,46 +28,8 @@ public:
     static constexpr double migrationMax() { return 1.0; }
     static constexpr std::uint32_t founderCopies() { return 8u; }
 
-    // PCG-XSH-RR 64/32. The engine and its seeding sequence are owned here so
-    // saved patches do not depend on Rack or standard-library RNG algorithms.
-    class Pcg32 {
-    public:
-        Pcg32(std::uint64_t seedValue = 42u, std::uint64_t stream = 54u) {
-            seed(seedValue, stream);
-        }
-
-        void seed(std::uint64_t seedValue, std::uint64_t stream) {
-            state_ = 0u;
-            increment_ = (stream << 1u) | 1u;
-            next();
-            state_ += seedValue;
-            next();
-        }
-
-        std::uint32_t next() {
-            const std::uint64_t oldState = state_;
-            state_ = oldState * UINT64_C(6364136223846793005) + increment_;
-            const std::uint32_t shifted = static_cast<std::uint32_t>(
-                ((oldState >> 18u) ^ oldState) >> 27u);
-            const std::uint32_t rotation = static_cast<std::uint32_t>(oldState >> 59u);
-            return (shifted >> rotation) | (shifted << ((-rotation) & 31u));
-        }
-
-        std::uint64_t state() const { return state_; }
-        std::uint64_t increment() const { return increment_; }
-
-        bool restore(std::uint64_t stateValue, std::uint64_t incrementValue) {
-            if ((incrementValue & 1u) == 0u)
-                return false;
-            state_ = stateValue;
-            increment_ = incrementValue;
-            return true;
-        }
-
-    private:
-        std::uint64_t state_ = 0u;
-        std::uint64_t increment_ = 1u;
-    };
+    // Public alias retained for existing SDK-free callers and golden tests.
+    using Pcg32 = coalescent::Pcg32;
 
     struct Parameters {
         std::uint32_t copies;
@@ -135,8 +99,9 @@ public:
         State saved;
         saved.counts = counts_;
         saved.denominators = denominators_;
-        saved.rngState = rng_.state();
-        saved.rngIncrement = rng_.increment();
+        const Pcg32::State rngState = rng_.state();
+        saved.rngState = rngState.state;
+        saved.rngIncrement = rngState.increment;
         saved.nextFounder = nextFounder_;
         saved.wasFixA = wasFixA_;
         saved.wasFixB = wasFixB_;
@@ -152,7 +117,8 @@ public:
             return false;
 
         Pcg32 restoredRng;
-        if (!restoredRng.restore(saved.rngState, saved.rngIncrement))
+        if (!restoredRng.restore(Pcg32::State(saved.rngState,
+                                              saved.rngIncrement)))
             return false;
 
         counts_ = saved.counts;

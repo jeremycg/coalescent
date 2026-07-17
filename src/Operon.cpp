@@ -67,7 +67,7 @@ struct Operon : Module {
     // subspace and never oscillates.
     float m[3] = {0.2f, 0.1f, 0.3f};
     float p[3] = {0.1f, 0.4f, 0.15f};
-    float lastCentered[3] = {};          // upward-crossing detection on p[k] - pStar
+    bool  gateArmed[3] = {};             // armed below GATE_LOW; fires once above GATE_HIGH
     float pStar = 0.f;                   // cached symmetric fixed point (= mStar)
     float pStarA = -1.f, pStarN = -1.f, pStarL = -1.f;  // params pStar was solved for
     bool  pStarValid = false;
@@ -163,15 +163,32 @@ struct Operon : Module {
     }
 
     void resetGateMemory() {
-        for (int k = 0; k < 3; ++k) lastCentered[k] = p[k] - pStar;
+        for (int k = 0; k < 3; ++k) gateArmed[k] = p[k] - pStar <= GATE_LOW;
     }
 
-    void onReset() override {
+    void onReset(const ResetEvent& event) override {
+        Module::onReset(event);
         reseedAsymmetric();
         pStarValid = false;
         pStar = 0.f; pStarA = pStarN = pStarL = -1.f;
         lutValid = false; lutN = -1.f; nSettleRef = -1e9f; rebuildClock = 0; buildPos = -1;
-        for (int k = 0; k < 3; ++k) { lastCentered[k] = 0.f; gateGen[k].reset(); }
+        for (int k = 0; k < 3; ++k) { gateArmed[k] = false; gateGen[k].reset(); }
+        liveScope = OperonScope{};
+        displaySnapshot.writable() = liveScope;
+        displaySnapshot.publish();
+        lastDisplayFs = 0.f;
+    }
+
+    static float finiteOr(float value, float fallback) {
+        return std::isfinite(value) ? value : fallback;
+    }
+
+    float modulatedParam(ParamId param, InputId input, ParamId attenuverter,
+                         float depth, float fallback) {
+        const float base = finiteOr(params[param].getValue(), fallback);
+        const float cv = finiteOr(inputs[input].getVoltage(), 0.f);
+        const float att = finiteOr(params[attenuverter].getValue(), 0.f);
+        return finiteOr(base + finiteOr(cv * att * depth, 0.f), base);
     }
 
     // Symmetric fixed point pStar (= mStar): the monotonic g(x) = x - alpha/(1+x^n)
@@ -210,16 +227,13 @@ struct Operon : Module {
         const float fs = args.sampleRate;
 
         // ── read + clamp params (per-sample; CV added with separate depths) ──
-        float alpha  = clamp(params[ALPHA_PARAM].getValue()
-                           + inputs[ALPHA_INPUT].getVoltage() * params[ALPHA_ATT_PARAM].getValue() * ALPHA_CV_DEPTH,
-                             0.f, 80.f);
-        float n      = clamp(params[HILL_PARAM].getValue()
-                           + inputs[HILL_INPUT].getVoltage() * params[HILL_ATT_PARAM].getValue() * HILL_CV_DEPTH,
-                             1.01f, 10.f);
-        float beta   = clamp(params[BETA_PARAM].getValue()
-                           + inputs[BETA_INPUT].getVoltage() * params[BETA_ATT_PARAM].getValue() * BETA_CV_DEPTH,
-                             0.05f, 8.f);
-        float alpha0 = clamp(params[LEAK_PARAM].getValue(), 0.f, 2.f);
+        float alpha  = clamp(modulatedParam(ALPHA_PARAM, ALPHA_INPUT, ALPHA_ATT_PARAM,
+                                            ALPHA_CV_DEPTH, 12.f), 0.f, 80.f);
+        float n      = clamp(modulatedParam(HILL_PARAM, HILL_INPUT, HILL_ATT_PARAM,
+                                            HILL_CV_DEPTH, 2.5f), 1.01f, 10.f);
+        float beta   = clamp(modulatedParam(BETA_PARAM, BETA_INPUT, BETA_ATT_PARAM,
+                                            BETA_CV_DEPTH, 1.f), 0.05f, 8.f);
+        float alpha0 = clamp(finiteOr(params[LEAK_PARAM].getValue(), 0.05f), 0.f, 2.f);
         // Sanitize PERTURB before it enters the ODE: a non-finite CV would propagate
         // through rk4 into rep and hit hillLookup's array index (UB) *before* the
         // post-step finiteness guard below can catch it. Flush NaN/inf to 0, clamp range.
@@ -275,7 +289,9 @@ struct Operon : Module {
         const bool hillDirect = !lutValid || std::fabs(n - lutN) > 1e-4f;
 
         // ── pitch = simulation speed; adaptive substepping ──
-        float pitchTotal = clamp(params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage(),
+        const float pitchBase = finiteOr(params[PITCH_PARAM].getValue(), 0.f);
+        const float pitchCv = finiteOr(inputs[VOCT_INPUT].getVoltage(), 0.f);
+        float pitchTotal = clamp(finiteOr(pitchBase + pitchCv, pitchBase),
                                  PITCH_TOTAL_MIN, PITCH_TOTAL_MAX);
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pitchTotal);
         float dtau = RATE_CAL * pitchHz / fs;
@@ -309,10 +325,15 @@ struct Operon : Module {
                 resetGateMemory();
                 break;
             }
-            for (int k = 0; k < 3; ++k) {                  // gates on CENTERED value, per substep
+            for (int k = 0; k < 3; ++k) {                  // armed Schmitt gates on centered value
                 float c = y[3 + k] - pStar;
-                if (lastCentered[k] <= GATE_LOW && c >= GATE_HIGH) gateGen[k].trigger(GATE_TIME);
-                lastCentered[k] = c;
+                if (c <= GATE_LOW) {
+                    gateArmed[k] = true;
+                }
+                else if (gateArmed[k] && c >= GATE_HIGH) {
+                    gateArmed[k] = false;
+                    gateGen[k].trigger(GATE_TIME);
+                }
             }
         }
         for (int i = 0; i < 3; ++i) { m[i] = y[i]; p[i] = y[3 + i]; }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../dsp/hex64.hpp"
 #include "playback.hpp"
 
 #include <cmath>
@@ -9,64 +10,13 @@
 namespace coalescent {
 namespace lineages {
 
+using coalescent::Hex64Codec;
+
 static const int STATE_VERSION = 1;
 static const int FACTORY_LEAF_COUNT = 8;
 static const double FACTORY_MUTATE = 0.4;
 static const std::uint64_t FACTORY_SEED = UINT64_C(42);
 static const std::uint64_t FACTORY_STREAM = UINT64_C(54);
-
-class Hex64Codec {
-public:
-    enum {
-        DIGITS = 16,
-        TEXT_SIZE = DIGITS + 1
-    };
-
-    static void format(std::uint64_t value, char (&text)[TEXT_SIZE]) {
-        static const char digits[] = "0123456789abcdef";
-        for (int index = DIGITS - 1; index >= 0; --index) {
-            text[index] = digits[value & UINT64_C(0xf)];
-            value >>= 4u;
-        }
-        text[DIGITS] = '\0';
-    }
-
-    // Parsing is transactional: destination is untouched unless all sixteen
-    // digits are present and valid. Both cases are accepted for compatibility
-    // with existing Coalescent patch state; formatting is canonical lowercase.
-    static bool parse(const char* text, std::size_t length,
-                      std::uint64_t& destination) {
-        if (!text || length != static_cast<std::size_t>(DIGITS))
-            return false;
-
-        std::uint64_t parsed = 0u;
-        for (int index = 0; index < DIGITS; ++index) {
-            const char character = text[index];
-            unsigned digit = 0u;
-            if (character >= '0' && character <= '9')
-                digit = static_cast<unsigned>(character - '0');
-            else if (character >= 'a' && character <= 'f')
-                digit = static_cast<unsigned>(character - 'a' + 10);
-            else if (character >= 'A' && character <= 'F')
-                digit = static_cast<unsigned>(character - 'A' + 10);
-            else
-                return false;
-            parsed = (parsed << 4u) | static_cast<std::uint64_t>(digit);
-        }
-
-        destination = parsed;
-        return true;
-    }
-
-    static bool parseCString(const char* text, std::uint64_t& destination) {
-        if (!text)
-            return false;
-        std::size_t length = 0u;
-        while (length <= static_cast<std::size_t>(DIGITS) && text[length] != '\0')
-            ++length;
-        return parse(text, length, destination);
-    }
-};
 
 // Canonical save payload shared by the audio-thread snapshot and JSON restore.
 // The Tree carries the generated structural settings. Derived tree fields and
@@ -98,6 +48,7 @@ struct Snapshot {
             !std::isfinite(candidate.cursor) ||
             candidate.cursor < 0.0 || candidate.cursor > 1.0 ||
             !validDirection(candidate.direction) ||
+            !validTransport(candidate) ||
             !validPulse(candidate.nodePulseRemaining) ||
             !validPulse(candidate.mutationPulseRemaining) ||
             !validPulse(candidate.mrcaPulseRemaining))
@@ -132,6 +83,14 @@ struct Snapshot {
 private:
     static bool validDirection(Direction value) {
         return value == Direction::Ancestry || value == Direction::Descent;
+    }
+
+    static bool validTransport(const Snapshot& candidate) {
+        const bool atDestination = candidate.direction == Direction::Ancestry
+            ? candidate.cursor == 1.0 : candidate.cursor == 0.0;
+        if (!candidate.running)
+            return atDestination;
+        return candidate.loop || !atDestination;
     }
 
     static bool validPulse(float remaining) {

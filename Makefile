@@ -39,9 +39,11 @@ CHECK_CXX ?= g++ -std=c++17 -O2
 # `check` is deliberately SDK-free (the CI guardrail runs it before the Rack SDK is
 # downloaded). Anything needing Rack headers (simd/*) goes in `check-simd`, which CI
 # runs as a separate post-SDK step.
-.PHONY: check check-simd
+.PHONY: check check-simd check-rack
 check:
 	jq . plugin.json >/dev/null
+	python3 tools/validate_assets.py
+	python3 tools/check_patch_reproducibility.py
 	$(CHECK_CXX) tools/completed_path_test.cpp -o /tmp/coalescent_check_path && /tmp/coalescent_check_path
 	$(CHECK_CXX) tools/stability/gendyn.cpp -o /tmp/coalescent_check_gendyn && /tmp/coalescent_check_gendyn
 	$(CHECK_CXX) tools/stability/axon.cpp   -o /tmp/coalescent_check_axon   && /tmp/coalescent_check_axon
@@ -59,3 +61,23 @@ check:
 # Needs Rack headers (simd). Run after the SDK is available: make check-simd
 check-simd:
 	$(CHECK_CXX) -funsafe-math-optimizations -march=nehalem -DARCH_X64 -DARCH_LIN -I$(RACK_DIR)/include -I$(RACK_DIR)/dep/include tools/simd_equiv.cpp -o /tmp/coalescent_check_simd && /tmp/coalescent_check_simd
+
+# Linux-only integration harnesses compile the production Rack wrappers and use
+# Engine::resetModule() for the same ResetEvent path as context-menu Initialize.
+RACK_CHECK_CXX ?= $(CXX)
+RACK_CHECK_FLAGS ?= -std=c++17 -O2 -Isrc -I$(RACK_DIR)/include -I$(RACK_DIR)/dep/include
+RACK_CHECK_LDFLAGS ?= -L$(RACK_DIR) -Wl,-rpath,$(abspath $(RACK_DIR)) -Wl,--allow-shlib-undefined -lRack
+RACK_CHECK_LIBRARY_PATH = $(abspath $(RACK_DIR))$(if $(RACK_RUNTIME_LIBRARY_PATH),:$(RACK_RUNTIME_LIBRARY_PATH))
+
+ifeq ($(shell uname -s),Linux)
+check-rack:
+	$(RACK_CHECK_CXX) $(RACK_CHECK_FLAGS) tools/stability/finches_rack.cpp $(RACK_CHECK_LDFLAGS) -o /tmp/coalescent_check_finches_rack
+	$(RACK_CHECK_CXX) $(RACK_CHECK_FLAGS) tools/stability/islands_rack.cpp $(RACK_CHECK_LDFLAGS) -o /tmp/coalescent_check_islands_rack
+	$(RACK_CHECK_CXX) $(RACK_CHECK_FLAGS) tools/stability/lineages_rack.cpp $(RACK_CHECK_LDFLAGS) -o /tmp/coalescent_check_lineages_rack
+	env LD_LIBRARY_PATH="$(RACK_CHECK_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$${LD_LIBRARY_PATH}}" /tmp/coalescent_check_finches_rack
+	env LD_LIBRARY_PATH="$(RACK_CHECK_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$${LD_LIBRARY_PATH}}" /tmp/coalescent_check_islands_rack
+	env LD_LIBRARY_PATH="$(RACK_CHECK_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$${LD_LIBRARY_PATH}}" /tmp/coalescent_check_lineages_rack
+else
+check-rack:
+	@echo "check-rack is available on Linux only"; exit 1
+endif

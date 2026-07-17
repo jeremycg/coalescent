@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
+#include <vector>
 
 static constexpr float HSUB_MAX = 0.05f, STATE_MAX = 1e3f, BIAS_EPS = 1e-6f;
 static constexpr int   MIN_SUB = 2, MAX_SUB = 64;
@@ -56,6 +57,53 @@ static inline void rk4(float y[6], float h, const Par& p, float perturb) {
 
 static inline int subK(float dtau) {
     return std::min(MAX_SUB, std::max(MIN_SUB, (int) std::ceil(std::min(dtau, HSUB_MAX * MAX_SUB) / HSUB_MAX)));
+}
+
+// Armed Schmitt detector used by the module's three gate lanes. A lane must first
+// visit the low side, then fires exactly once on reaching the high side. This is
+// deliberately not a one-step low->high jump: a smooth RK4 trajectory normally
+// visits the deadband on its way through it.
+static bool gateStep(float centered, bool& armed) {
+    constexpr float LOW = -0.05f, HIGH = 0.05f;
+    if (centered <= LOW) {
+        armed = true;
+    }
+    else if (armed && centered >= HIGH) {
+        armed = false;
+        return true;
+    }
+    return false;
+}
+
+// Gate contract from the production seed. Also counts the former one-step
+// detector so this regression proves that it distinguishes the silent-gate bug.
+static void gateContract(const Par& p, float dtau, int NS, int counts[3],
+                         int legacyCounts[3], std::vector<int>& order) {
+    float y[6] = {0.2f, 0.1f, 0.3f, 0.1f, 0.4f, 0.15f};
+    const float center = pStarBisect(p.alpha, p.n, p.a0, 40);
+    const int K = subK(dtau);
+    const float h = std::min(dtau, HSUB_MAX * MAX_SUB) / K;
+    bool armed[3] = {};
+    float legacyPrev[3] = {y[3] - center, y[4] - center, y[5] - center};
+    std::fill(counts, counts + 3, 0);
+    std::fill(legacyCounts, legacyCounts + 3, 0);
+    order.clear();
+    for (int s = 0; s < NS; ++s) {
+        for (int k = 0; k < K; ++k) {
+            rk4(y, h, p, 0.f);
+            for (int lane = 0; lane < 3; ++lane) {
+                const float c = y[3 + lane] - center;
+                const bool fired = gateStep(c, armed[lane]);
+                const bool legacyFired = legacyPrev[lane] <= -0.05f && c >= 0.05f;
+                legacyPrev[lane] = c;
+                if (s > NS / 2 && fired) {
+                    ++counts[lane];
+                    if (order.size() < 24) order.push_back(lane);
+                }
+                if (s > NS / 2 && legacyFired) ++legacyCounts[lane];
+            }
+        }
+    }
 }
 // Fast finite/bounded check — single pass, no measurement.
 static bool bounded(const Par& p, float dtau, int NS) {
@@ -192,6 +240,58 @@ int main() {
         if (comps < 1) { gateOk = false; printf("  LUT gate: static n never completed a build\n"); }
         printf("Hill LUT gate: slow-LFO + micro-oscillation no-thrash, static completes: %s\n", gateOk ? "PASS" : "FAIL");
         if (!gateOk) ++fails;
+    }
+
+    // Gate regression: default oscillation must produce three balanced lanes in
+    // a stable cyclic order. The old detector required a single substep to jump
+    // across the whole deadband and is expected to miss essentially everything.
+    {
+        int counts[3], legacy[3];
+        std::vector<int> order;
+        gateContract(def, 0.02f, 100000, counts, legacy, order);
+        const int total = counts[0] + counts[1] + counts[2];
+        const int legacyTotal = legacy[0] + legacy[1] + legacy[2];
+        bool balanced = counts[0] > 20
+                     && std::abs(counts[0] - counts[1]) <= 1
+                     && std::abs(counts[1] - counts[2]) <= 1;
+        bool cyclic = order.size() >= 12;
+        int direction = 0;
+        if (cyclic) {
+            const int d = (order[1] - order[0] + 3) % 3;
+            direction = d;
+            cyclic = d == 1 || d == 2;
+            for (std::size_t i = 1; cyclic && i < order.size(); ++i)
+                cyclic = (order[i] - order[i - 1] + 3) % 3 == d;
+        }
+        const bool discriminates = legacyTotal * 4 < total;
+        const char* orderName = direction == 1 ? "+1" : (direction == 2 ? "-1" : "invalid");
+        printf("gate contract: armed=%d/%d/%d legacy=%d/%d/%d order=%s: %s\n",
+               counts[0], counts[1], counts[2], legacy[0], legacy[1], legacy[2],
+               orderName,
+               (balanced && cyclic && discriminates) ? "PASS" : "FAIL");
+        if (!(balanced && cyclic && discriminates)) ++fails;
+
+        // Near-threshold chatter contract: reaching HIGH without first visiting
+        // LOW is silent; one armed crossing fires once; hovering around HIGH and
+        // returning only to the deadband cannot retrigger.
+        bool armed = false;
+        int nearFires = 0;
+        for (float c : {0.051f, 0.049f, 0.052f, -0.049f, 0.051f,
+                        -0.051f, -0.02f, 0.051f, 0.049f, 0.052f})
+            if (gateStep(c, armed)) ++nearFires;
+        printf("gate near-threshold hysteresis: fires=%d (want 1): %s\n",
+               nearFires, nearFires == 1 ? "PASS" : "FAIL");
+        if (nearFires != 1) ++fails;
+    }
+
+    // Hostile-CV policy used by the Rack wrapper: non-finite modulation is
+    // neutral, while a finite value is bounded before entering the ODE/pitch map.
+    {
+        auto finiteOr = [](float v, float fallback) { return std::isfinite(v) ? v : fallback; };
+        bool cvOk = finiteOr(NAN, 0.f) == 0.f && finiteOr(INFINITY, 0.f) == 0.f
+                 && finiteOr(-INFINITY, 2.5f) == 2.5f && finiteOr(3.f, 0.f) == 3.f;
+        printf("hostile-CV neutralization: %s\n", cvOk ? "PASS" : "FAIL");
+        if (!cvOk) ++fails;
     }
 
     if (fails) { printf("FAIL: %d unbounded runs\n", fails); return 1; }

@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 // SOMA — a bursting/chaotic neuron oscillator on the Hindmarsh-Rose (HR) system.
 //
@@ -169,7 +170,8 @@ struct Soma : Module {
         }
     }
 
-    void onReset() override {
+    void onReset(const ResetEvent& event) override {
+        Module::onReset(event);
         oversampleMode = 2;   // restore default anti-aliasing (×4) on Initialize
         for (int g = 0; g < GROUPS; g++) {
             xx4[g] = -1.6f; yy4[g] = -11.8f; zz4[g] = 2.f; trigPulse4[g] = 0.f;
@@ -182,7 +184,16 @@ struct Soma : Module {
             zFast[c] = zSlow[c] = 0.f;
             zFilterInit[c] = false;
             orbitCommitClock[c] = 1 << 24;
+            std::fill(trailX[c], trailX[c] + TRAIL, 0.f);
+            std::fill(trailZ[c], trailZ[c] + TRAIL, 0.f);
         }
+        trailIdx = trailDecim = 0;
+        channels = 1;
+        dispClock = 0;
+        displaySnapshot.writable() = DisplayFrame{};
+        displaySnapshot.publish();
+        lastFs = 0.f;
+        lastOs = -1;
     }
 
     json_t* dataToJson() override {
@@ -260,8 +271,11 @@ struct Soma : Module {
         // Shared knob values; per-voice CV is added inside the loop.
         const float Ibase     = params[CURRENT_PARAM].getValue();
         const float Iatt      = params[CURRENT_ATT_PARAM].getValue();
-        const float rLogBase  = params[BURST_PARAM].getValue();
-        const float rAtt      = params[BURST_ATT_PARAM].getValue();
+        const float rLogDefault = std::log2(0.03f);
+        const float rLogRaw = params[BURST_PARAM].getValue();
+        const float rLogBase = std::isfinite(rLogRaw) ? clamp(rLogRaw, -30.f, 30.f) : rLogDefault;
+        const float rAttRaw = params[BURST_ATT_PARAM].getValue();
+        const float rAtt = std::isfinite(rAttRaw) ? rAttRaw : 0.f;
         const float s         = params[ADAPT_PARAM].getValue();
         const float pitchKnob = params[PITCH_PARAM].getValue();
 
@@ -284,8 +298,15 @@ struct Soma : Module {
             simd::float_4 I = Ibase
                 + inputs[CURRENT_INPUT].getPolyVoltageSimd<simd::float_4>(base) * Iatt * CV_DEPTH;
             // BURST is log₂(r); CV adds in the log domain (a multiplicative nudge on r).
-            simd::float_4 r = simd::clamp(dsp::approxExp2_taylor5(rLogBase
-                + inputs[BURST_INPUT].getPolyVoltageSimd<simd::float_4>(base) * rAtt * CV_DEPTH), R_MIN, R_MAX);
+            simd::float_4 rExp = rLogBase
+                + inputs[BURST_INPUT].getPolyVoltageSimd<simd::float_4>(base) * rAtt * CV_DEPTH;
+            // approxExp2 converts part of its exponent to an integer, so NaN/inf
+            // must be neutralized before it is called. Finite extremes are simply
+            // bounded; a hostile lane falls back to the knob-only exponent.
+            const float floatMax = std::numeric_limits<float>::max();
+            simd::float_4 finiteMask = (rExp >= -floatMax) & (rExp <= floatMax);
+            rExp = simd::ifelse(finiteMask, simd::clamp(rExp, -30.f, 30.f), rLogBase);
+            simd::float_4 r = simd::clamp(dsp::approxExp2_taylor5(rExp), R_MIN, R_MAX);
 
             simd::float_4 x = xx4[g], y = yy4[g], z = zz4[g];
 

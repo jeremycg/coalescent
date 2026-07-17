@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 #include "dsp/display_snapshot.hpp"
+#include "dsp/hex64.hpp"
 #include "dsp/islands_model.hpp"
 
 #include <algorithm>
@@ -540,34 +541,13 @@ struct Islands : Module {
         return true;
     }
 
-    static void uint64ToHex(std::uint64_t value, char text[17]) {
-        static const char digits[] = "0123456789abcdef";
-        for (int i = 15; i >= 0; --i) {
-            text[i] = digits[value & 0xfu];
-            value >>= 4u;
-        }
-        text[16] = '\0';
-    }
-
     static bool readHex64(json_t* root, const char* key, std::uint64_t& value) {
         json_t* item = json_object_get(root, key);
         if (!item || !json_is_string(item))
             return false;
         const char* source = json_string_value(item);
-        if (!source || std::strlen(source) != 16u)
-            return false;
-        std::uint64_t parsed = 0u;
-        for (int i = 0; i < 16; ++i) {
-            char c = source[i];
-            unsigned digit;
-            if (c >= '0' && c <= '9') digit = static_cast<unsigned>(c - '0');
-            else if (c >= 'a' && c <= 'f') digit = static_cast<unsigned>(c - 'a' + 10);
-            else if (c >= 'A' && c <= 'F') digit = static_cast<unsigned>(c - 'A' + 10);
-            else return false;
-            parsed = (parsed << 4u) | digit;
-        }
-        value = parsed;
-        return true;
+        return source && coalescent::Hex64Codec::parse(
+            source, json_string_length(item), value);
     }
 
     static bool readBoolean(json_t* root, const char* key, bool& value) {
@@ -611,14 +591,14 @@ struct Islands : Module {
         json_object_set_new(root, "islandsVersion", json_integer(2));
         appendUintArray(root, "counts", saved.modelState.counts);
         appendUintArray(root, "denominators", saved.modelState.denominators);
-        char rngState[17];
-        char rngIncrement[17];
-        char resetSeedText[17];
-        char resetStreamText[17];
-        uint64ToHex(saved.modelState.rngState, rngState);
-        uint64ToHex(saved.modelState.rngIncrement, rngIncrement);
-        uint64ToHex(saved.resetSeed, resetSeedText);
-        uint64ToHex(saved.resetStream, resetStreamText);
+        char rngState[coalescent::Hex64Codec::TEXT_SIZE];
+        char rngIncrement[coalescent::Hex64Codec::TEXT_SIZE];
+        char resetSeedText[coalescent::Hex64Codec::TEXT_SIZE];
+        char resetStreamText[coalescent::Hex64Codec::TEXT_SIZE];
+        coalescent::Hex64Codec::format(saved.modelState.rngState, rngState);
+        coalescent::Hex64Codec::format(saved.modelState.rngIncrement, rngIncrement);
+        coalescent::Hex64Codec::format(saved.resetSeed, resetSeedText);
+        coalescent::Hex64Codec::format(saved.resetStream, resetStreamText);
         json_object_set_new(root, "rngState", json_string(rngState));
         json_object_set_new(root, "rngIncrement", json_string(rngIncrement));
         json_object_set_new(root, "resetSeed", json_string(resetSeedText));

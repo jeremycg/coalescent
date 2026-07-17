@@ -148,6 +148,21 @@ int main() {
         if (got < 0 || std::fabs(cents) > 60.0) { printf("  FAIL: spike pitch off >60 cents\n"); failures++; }
     }
 
+    // Rack-wrapper guard before approxExp2: non-finite BURST modulation is
+    // neutral (knob-only), while extreme finite exponents are bounded.
+    {
+        const float base = std::log2(DEF_R);
+        auto sanitizeBurstExp = [=](float exponent) {
+            return std::isfinite(exponent) ? clampf(exponent, -30.f, 30.f) : base;
+        };
+        bool burstCvOk = sanitizeBurstExp(NAN) == base
+                      && sanitizeBurstExp(INFINITY) == base
+                      && sanitizeBurstExp(-INFINITY) == base
+                      && sanitizeBurstExp(1e30f) == 30.f;
+        printf("BURST hostile-CV exponent guard: %s\n", burstCvOk ? "PASS" : "FAIL");
+        if (!burstCvOk) failures++;
+    }
+
     if (failures) { printf("\n%d CHECK(S) FAILED\n", failures); return 1; }
     printf("\nAll checks passed.\n");
     return 0;

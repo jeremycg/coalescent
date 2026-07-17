@@ -1,6 +1,7 @@
 // SDK-free stochastic and state contract for src/dsp/islands_model.hpp.
 //
 //   g++ -std=c++11 -O2 tools/stability/islands.cpp -o /tmp/islands && /tmp/islands
+#include "../../src/dsp/hex64.hpp"
 #include "../../src/dsp/islands_model.hpp"
 
 #include <array>
@@ -11,6 +12,7 @@
 #include <limits>
 
 using coalescent::IslandsModel;
+using coalescent::Hex64Codec;
 
 static int failures = 0;
 
@@ -82,6 +84,14 @@ int main() {
     for (std::size_t i = 0; i < sizeof(reference) / sizeof(reference[0]); ++i)
         if (rng.next() != reference[i])
             fail("PCG32 reference sequence changed");
+
+    const std::uint64_t hexReference = UINT64_C(0xfedcba9876543210);
+    char hexText[Hex64Codec::TEXT_SIZE];
+    Hex64Codec::format(hexReference, hexText);
+    std::uint64_t hexRoundTrip = 0u;
+    if (!Hex64Codec::parseCString(hexText, hexRoundTrip) ||
+        hexRoundTrip != hexReference)
+        fail("shared Hex64 codec changed Islands persistence bits");
 
     IslandsModel model;
     if (!valid(model) || model.metrics().mean != 0.5 ||

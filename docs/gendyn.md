@@ -115,6 +115,9 @@ evolving from there — not re-seeded from scratch. Playback resumes from a clea
 cycle boundary (breakpoint 0) rather than the exact mid-segment sample it was at,
 so the timbre and pitch are preserved but the phase restarts. (OUT is also
 DC-blocked internally at ~5 Hz, so the walk's mean drift can't offset the signal.)
+Rack's process-global random stream is not serialized, so reloading preserves the
+authored waveform and walk state but does not promise the identical sequence of
+future random draws.
 
 ## Tuning notes
 

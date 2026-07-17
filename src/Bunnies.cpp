@@ -66,7 +66,7 @@ struct Bunnies : Module {
     bool  risingPrey = false, risingPred = false;
     dsp::PulseGenerator popGen[2];
 
-    // ─── Visualizer: live ring + lock-free double-buffered snapshot ──────────
+    // ─── Visualizer: live ring + lock-free triple-buffered snapshot ──────────
     // Orbit stored as a phase-averaged closed loop: cycle-phase 0..1 indexes the
     // bins, so the loop closes seamlessly (no ring-buffer seam) and averaging over
     // cycles kills audio-rate aliasing. Phase 0 = centered prey crossing 0 upward.
@@ -127,12 +127,17 @@ struct Bunnies : Module {
     // (harmless, and avoids chopping a gate). onReset() clears popGen fully.
     void resetPeakMemory() { prevPrey = prevPred = 0.f; risingPrey = risingPred = false; }
 
-    void onReset() override {
+    void onReset(const ResetEvent& event) override {
+        Module::onReset(event);
         x = 1.3f; y = 0.9f; cx = cy = 1.f; rmCx = rmCy = 1.f;
         rmValid = false; rmA = rmB = rmC = -1.f; lastMode = -1;
         resetPeakMemory();
         for (int i = 0; i < 2; ++i) popGen[i].reset();
         liveLoop = Loop{}; vPhase = 0.f; vInc = 0.002f; vPrev = 0.f; vSince = 0;
+        displaySnapshot.writable() = liveLoop;
+        displaySnapshot.publish();
+        pubDiv.reset();
+        lastDisplayFs = 0.f;
     }
 
     // rising→falling local max above POP_MIN on the centered signal.
@@ -145,16 +150,30 @@ struct Bunnies : Module {
         prev = c;
     }
 
+    static float finiteOr(float value, float fallback) {
+        return std::isfinite(value) ? value : fallback;
+    }
+
+    float modulatedParam(ParamId param, InputId input, ParamId attenuverter,
+                         float depth, float fallback) {
+        const float base = finiteOr(params[param].getValue(), fallback);
+        const float cv = finiteOr(inputs[input].getVoltage(), 0.f);
+        const float att = finiteOr(params[attenuverter].getValue(), 0.f);
+        return finiteOr(base + finiteOr(cv * att * depth, 0.f), base);
+    }
+
     void process(const ProcessArgs& args) override {
         const float fs = args.sampleRate;
 
         // ── read + map params ──
-        float balance = clamp(params[BALANCE_PARAM].getValue()
-            + inputs[BALANCE_INPUT].getVoltage() * params[BALANCE_ATT_PARAM].getValue() * BALANCE_CV_DEPTH, 0.f, 1.f);
-        float wild = clamp(params[WILD_PARAM].getValue()
-            + inputs[WILD_INPUT].getVoltage() * params[WILD_ATT_PARAM].getValue() * WILD_CV_DEPTH, 0.f, 1.f);
-        float kick = inputs[KICK_INPUT].isConnected() ? inputs[KICK_INPUT].getVoltage() * KICK_GAIN : 0.f;
-        int   mode = params[MODE_PARAM].getValue() > 0.5f ? RM : LV;
+        float balance = clamp(modulatedParam(BALANCE_PARAM, BALANCE_INPUT, BALANCE_ATT_PARAM,
+                                              BALANCE_CV_DEPTH, 0.5f), 0.f, 1.f);
+        float wild = clamp(modulatedParam(WILD_PARAM, WILD_INPUT, WILD_ATT_PARAM,
+                                           WILD_CV_DEPTH, 0.4f), 0.f, 1.f);
+        float kickV = inputs[KICK_INPUT].isConnected()
+                    ? clamp(finiteOr(inputs[KICK_INPUT].getVoltage(), 0.f), -15.f, 15.f) : 0.f;
+        float kick = kickV * KICK_GAIN;
+        int   mode = finiteOr(params[MODE_PARAM].getValue(), 0.f) > 0.5f ? RM : LV;
 
         float gamma = 0.f, V0 = 0.f, K = 0.f, c = 0.f;
         if (mode == LV) {
@@ -183,7 +202,9 @@ struct Bunnies : Module {
         if (mode != lastMode) { reseed(); resetPeakMemory(); lastMode = mode; }
 
         // ── pitch (+ LV √gamma compensation), adaptive substepping ──
-        float pitchTotal = clamp(params[RATE_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage(),
+        const float pitchBase = finiteOr(params[RATE_PARAM].getValue(), 0.f);
+        const float pitchCv = finiteOr(inputs[VOCT_INPUT].getVoltage(), 0.f);
+        float pitchTotal = clamp(finiteOr(pitchBase + pitchCv, pitchBase),
                                  PITCH_TOTAL_MIN, PITCH_TOTAL_MAX);
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pitchTotal);
         float dtau = RATE_CAL * pitchHz / fs;
@@ -208,6 +229,10 @@ struct Bunnies : Module {
             if (!std::isfinite(st[0]) || !std::isfinite(st[1])) { reseed(); st[0] = x; st[1] = y; resetPeakMemory(); break; }
             st[0] = clamp(st[0], POS_FLOOR, STATE_MAX);
             st[1] = clamp(st[1], POS_FLOOR, STATE_MAX);
+            // Observe accepted RK4 states so a fast orbit cannot hide a local
+            // maximum between audio samples.
+            firePeak(st[0] - cx, prevPrey, risingPrey, popGen[0]);
+            firePeak(st[1] - cy, prevPred, risingPred, popGen[1]);
         }
 
         // ── LV conserved-quantity servo — kills drift AND sets amplitude ──
@@ -229,8 +254,11 @@ struct Bunnies : Module {
         outputs[PREY_OUTPUT].setVoltage(5.f * coalescent::fastTanh(cX * OUT_GAIN));
         outputs[PRED_OUTPUT].setVoltage(5.f * coalescent::fastTanh(cY * OUT_GAIN));
         if (std::fabs(cX) < POP_MIN && std::fabs(cY) < POP_MIN) { risingPrey = risingPred = false; }
-        firePeak(cX, prevPrey, risingPrey, popGen[0]);
-        firePeak(cY, prevPred, risingPred, popGen[1]);
+        // The LV amplitude servo is a numerical drift correction, not a second
+        // ecological step. Synchronize to its corrected endpoint without
+        // manufacturing an extra peak at the next sample boundary.
+        prevPrey = cX;
+        prevPred = cY;
         outputs[PREY_POP_OUTPUT].setVoltage(popGen[0].process(args.sampleTime) ? GATE_LEVEL : 0.f);
         outputs[PRED_POP_OUTPUT].setVoltage(popGen[1].process(args.sampleTime) ? GATE_LEVEL : 0.f);
 

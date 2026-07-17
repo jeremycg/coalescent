@@ -95,7 +95,9 @@ to ENV, so moving the environment also moves the intended seed location; the
 result is clamped to the interior trait range. A seed is only an invasion
 attempt: it does not force a split and does not fire SPLIT immediately. Selection
 may eliminate it. **RESET** returns to one narrow ancestor at the current
-environment without generating a false merge event.
+environment without generating a false merge event. Rack's context-menu
+**Initialize** additionally returns all panel parameters to their defaults before
+constructing that ancestor.
 
 ## Outputs
 
@@ -114,6 +116,11 @@ MASS L carries the full 10 V population, and MASS R is 0 V. After a split, the
 peak identities are always sorted by trait coordinate, so they cannot exchange
 merely because one becomes taller. MASS is integrated on each side of the valley
 rather than sampled only at the peak bin.
+
+MASS L/R, PITCH L/R, and SPREAD use a 20 ms audio-rate one-pole presentation
+smoother, removing the nominal 500 Hz field cadence without adding ecological
+updates. SPLIT and MERGE follow the accepted detector state immediately and are
+not smoothed.
 
 SPLIT and MERGE use prominence, separation, basin-mass thresholds, persistence,
 and different enter/leave thresholds. A broad or momentarily flat-topped hill
@@ -161,16 +168,27 @@ hysteresis around shallow valleys.
 
 ## State, performance, and limits
 
-- **The evolved density is saved with the patch.** A split you cultivated, or a
-  slowly changing population, reloads as authored state. Invalid saved data is
-  rejected and cannot introduce negative or non-finite mass. A dedicated
-  lock-free save snapshot is refreshed on every 500 Hz ecological update.
+- **The complete musical state is saved with the patch.** Schema version 1 stores
+  all 64 bin masses, the accepted split latch, and the pending split/merge
+  persistence timers. A split held in the detector's weak hysteresis band and a
+  transition partway toward its next event therefore resume as authored. Invalid
+  versions, masses, latches, or timers are rejected transactionally. Older
+  density-only patches still load; because they did not store detector history,
+  their initial split state is inferred from the stronger entry threshold.
+- SPLIT and MERGE pulses are transient signals, not saved state. Loading never
+  manufactures an event or replays a pulse that occurred before the save. A
+  pending detector timer continues after loading and fires only when its
+  remaining persistence time completes. The lock-free save snapshot is refreshed
+  on every 500 Hz ecological update; a save racing that publication can receive
+  the previous complete field frame, at most roughly one 2 ms interval old.
 - The solver is a fixed 64-bin field. Selection uses a bounded `O(64²)` Gaussian
   competition convolution; mutation uses a linear-time implicit tridiagonal
   solve. It allocates nothing in the audio callback.
 - Reaction uses a positivity-preserving exponential update. Mutation uses
   backward-Euler diffusion, followed by normalization. The numerical workload is
-  bounded even under hostile CV or corrupted patch input.
+  bounded even under hostile CV or corrupted patch input. Positive masses below
+  `1e-30` are treated as numerically extinct before normalization, preventing
+  float-subnormal slowdowns without affecting a biologically meaningful bin.
 - Finches is intended as a slow CV instrument. The ecological field runs at a
   fixed 500 Hz control cadence and the display receives lock-free snapshots; it
   is not an audio-rate waveshaper. RATE is bounded so a control tick cannot ask
@@ -184,11 +202,22 @@ hysteresis around shallow valleys.
 - The discretized replicator–mutator field is a musically controllable rendering
   of evolutionary branching. It should not be used as a quantitative population
   genetics simulator.
+- On the development i5-9600K, the standalone `-O2` field benchmark uses about
+  0.3% of one core at the default RATE and 4.5% at the maximum bounded RATE
+  request, assuming 500 updates/s. These are diagnostic hardware-dependent
+  figures, not real-time deadlines; the stability suite uses a deliberately loose
+  ceiling and separately verifies that reachable states contain no subnormals.
+- Saved values are portable and reload exactly as finite IEEE-754 floats. Future
+  evolution is deterministic for the same build and controls, but different
+  compilers, `libm` implementations, or fast-math choices can eventually diverge
+  by rounding around a split/merge threshold. This is not cross-platform
+  bit-identical simulation.
 
 `tools/stability/finches.cpp` exercises the defining one-to-two-to-one gesture,
 the full exposed parameter box, no-flux boundaries, deterministic replay, state
-restore, hostile inputs, event counts, positivity, normalization, and timestep
-convergence. It runs in `make check`.
+restore including detector hysteresis and pending timers, hostile inputs, event
+counts, the no-subnormal invariant, performance, positivity, normalization, and
+timestep convergence. It runs in `make check`.
 
 ## Demo patches
 

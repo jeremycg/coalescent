@@ -56,21 +56,22 @@ The **MODE** switch picks how fast the ring itself evolves:
 | **COUPLE** | 0–0.9 | neighbour stiffness; the main timbral control (hard-capped at 0.9 for stability) |
 | **DAMP** | 0–1 | energy loss; 0 = lossless drone |
 | **INJECT** | 0–1 | excitation amount + EXT IN gain |
-| **EXCITE** | Impulse / Bump / Noise / Continuous | Impulse/Bump/Noise are applied on each TRIG; Continuous drives the ring constantly (no trigger) |
+| **EXCITE** | Impulse / Bump / Noise / Continuous | Impulse/Bump/Noise are applied on each TRIG; Continuous adds low-level random force continuously (no trigger) |
 | **DRIVER** | 0–100% | where excitation / EXT IN enters the ring (default 25%) |
 | **FREEZE** | Run / Freeze | hold the current shape as a static tone |
 | **MODE** | Fast / Slow | audio-rate resonator vs haptic-rate morphing wavetable |
 
 CV inputs (RATE, COUPLE, DAMP, INJECT) each have an attenuverter. **V/OCT** sums
 with PITCH. **TRIG** re-excites with the current EXCITE shape on each rising edge
-(Impulse/Bump/Noise; Continuous ignores TRIG and drives constantly).
+(Impulse/Bump/Noise; Continuous ignores TRIG and supplies a quiet noise drive).
 **EXT IN** injects external audio as a force at the DRIVER mass (level scales with
 INJECT). A polyphonic cable is summed to mono (Haptik has a single lattice).
 
 Outputs: **OUT** — the scanned waveform, soft-clipped to ±5 V and internally
 DC-blocked at ~20 Hz. **MOTION** — the displacement of **mass 0** (a fixed point
 on the ring, *not* the driver mass) as a ±5 V CV; audio-rate in this build and
-deliberately not high-passed.
+deliberately not high-passed. In Slow mode it follows the same inter-frame
+interpolation as OUT, so it morphs smoothly rather than stepping every 256 samples.
 
 ## Display
 
@@ -92,7 +93,8 @@ Two deliberate fudges, both for legibility:
 
 ## Playing it
 
-**Out of the box** Haptik defaults to **EXCITE = Continuous** (constant drive),
+**Out of the box** Haptik defaults to **EXCITE = Continuous** (continuous low-level
+noise drive),
 so patching `V/OCT` + `OUT → audio` gives an immediate, sustaining, evolving tone —
 no trigger needed. Switch EXCITE to **Impulse / Bump / Noise** for the
 struck/plucked behaviour instead.
@@ -127,7 +129,12 @@ rings forever) or EXCITE = Continuous.
 
 - Lattice state (displacement / velocity / scan phase) **is saved** with the patch,
   so an evolved or frozen sound reloads as itself. (Pre-2.2.1 patches, and any with
-  malformed data, fall back to a fresh bump.)
+  malformed data, fall back to a fresh bump.) The race-free save copy is refreshed
+  with the display snapshot at about 45 Hz, so a save can capture a lattice frame
+  up to roughly 22 ms behind the live audio state.
+- Haptik does not serialize Rack's process-global random stream. The saved lattice
+  reloads as captured, but subsequent Noise excitations or Continuous-drive samples
+  are not guaranteed to repeat the same future random sequence.
 - **FREEZE** holds the shape completely: while frozen, TRIG and excitation are
   ignored so plucking can't alter the held waveform (the scan keeps reading it).
 - Excitations are zero-mean, so a pluck adds shape but no DC step — no click/thump

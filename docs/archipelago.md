@@ -18,6 +18,8 @@ Archipelago is part of the **Coalescent** plugin's *Fluctuations* series. It is
 a deterministic spatial trait-density instrument, not an individual-based or
 finite-population genetics simulator.
 
+![Archipelago](img/archipelago.png)
+
 ## How it works
 
 The state is a fixed `8 x 32` field. Habitat `i = 0 ... 7` contains non-negative

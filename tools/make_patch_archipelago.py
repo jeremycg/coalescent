@@ -11,11 +11,11 @@ Archipelago positional IDs (must match enum order in src/Archipelago.cpp):
             5 COLONIZE, 6 EXTINCT
 
 Fundamental v2 IDs used here:
-  LFO     : OFFSET_PARAM=0 (0=bipolar); FREQ_PARAM=2; TRI_OUTPUT=1 (6 HP)
-  VCO     : FREQ_PARAM=2; PITCH_INPUT=0; SIN_OUTPUT=0 (10 HP, poly)
+  LFO     : OFFSET_PARAM=0 (0=bipolar); FREQ_PARAM=2; TRI_OUTPUT=1 (9 HP)
+  VCO     : FREQ_PARAM=2; PITCH_INPUT=0; SIN_OUTPUT=0 (9 HP, poly)
   VCA-1   : LEVEL_PARAM=0; EXP_PARAM=1; CV_INPUT=0; IN_INPUT=1;
-            OUT_OUTPUT=0 (5 HP, poly)
-  Sum     : LEVEL_PARAM=0; POLY_INPUT=0; MONO_OUTPUT=0 (2 HP)
+            OUT_OUTPUT=0 (3 HP, poly)
+  Sum     : LEVEL_PARAM=0; POLY_INPUT=0; MONO_OUTPUT=0 (3 HP)
   8vert   : LEVEL_PARAMS/INPUTS/OUTPUTS=0..7 (8 HP)
   VCMixer : MASTER_PARAM=0; CH_LEVEL_PARAMS=1..4; CH_INPUTS=1..4;
             MIX_OUTPUT=0 (9 HP)
@@ -31,16 +31,14 @@ Archipelago parameter storage:
   TOPOLOGY  : 0 row, 1 ring
 """
 
-import glob
-import io
 import json
 import math
 import os
 import random
 import shutil
-import subprocess
 import sys
-import tarfile
+
+from patch_utils import windows_patch_directories, write_patch_archive
 
 
 random.seed(61)
@@ -249,26 +247,10 @@ def write_patch(name, modules, cables, master_id):
     out_dir = os.path.join(ROOT, "..", "patches")
     os.makedirs(out_dir, exist_ok=True)
     out_file = os.path.join(out_dir, name)
-    patch_json = json.dumps(patch, indent=2).encode("utf-8")
-    archive = io.BytesIO()
-    with tarfile.open(fileobj=archive, mode="w:") as tar:
-        info = tarfile.TarInfo("patch.json")
-        info.size = len(patch_json)
-        info.mtime = 0
-        info.mode = 0o644
-        tar.addfile(info, io.BytesIO(patch_json))
-        result = subprocess.run(
-            ["zstd", "-19", "-o", out_file, "-f"],
-            input=archive.getvalue(),
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode:
-            print("zstd error:", result.stderr.decode(), file=sys.stderr)
-            sys.exit(1)
+    write_patch_archive(out_file, patch)
 
     print(f"  {name}: {len(modules)} modules, {len(cables)} cables")
-    for windows_dir in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"):
+    for windows_dir in windows_patch_directories():
         try:
             shutil.copy2(out_file, os.path.join(windows_dir, name))
         except OSError as error:
@@ -278,9 +260,9 @@ def write_patch(name, modules, cables, master_id):
 def add_poly_local_adaptation_instrument(modules, cables, source, first_x):
     """Map the eight local populations literally to one polyphonic instrument."""
     oscillator = vco(-12.0, (first_x, 0))
-    amplifier = vca((first_x + 10, 0))
-    voice_sum = summ(0.12, (first_x + 15, 0))
-    interface = audio((first_x + 17, 0))
+    amplifier = vca((first_x + 9, 0))
+    voice_sum = summ(0.12, (first_x + 12, 0))
+    interface = audio((first_x + 15, 0))
     modules.extend([oscillator, amplifier, voice_sum, interface])
     cables.extend(
         [
@@ -315,13 +297,13 @@ def patch_local_adaptation():
 def patch_migration_modulation():
     modulator = lfo(-5.0, (0, 0))
     source = archipelago(
-        (6, 0), rate=1.0, selection=0.62, mutation=0.42,
+        (9, 0), rate=1.0, selection=0.62, mutation=0.42,
         migration=0.50, gradient=0.58, barrier=0.0, climate=0.0,
         migrate_att=0.75, topology=0.0,
     )
     modules = [modulator, source]
     cables = [cable(modulator["id"], 1, source["id"], 3, 0)]
-    master = add_poly_local_adaptation_instrument(modules, cables, source, 24)
+    master = add_poly_local_adaptation_instrument(modules, cables, source, 27)
     write_patch("archipelago_2_migration.vcv", modules, cables, master)
 
 
@@ -331,16 +313,16 @@ def patch_migration_modulation():
 def patch_climate_range_shift():
     climate = lfo(-5.0, (0, 0))
     source = archipelago(
-        (6, 0), rate=1.0, selection=0.78, mutation=0.40,
+        (9, 0), rate=1.0, selection=0.78, mutation=0.40,
         migration=0.42, gradient=0.82, barrier=0.0, climate=0.0,
         topology=0.0,
     )
-    oscillator = vco(-12.0, (24, 0))
-    amplifier = vca((34, 0))
+    oscillator = vco(-12.0, (27, 0))
+    amplifier = vca((36, 0))
     voice_sum = summ(0.10, (39, 0))
-    event_level = eightvert([0.08, 0.08], (41, 0))
-    mixer = vcmixer([0.75, 0.45, 0.45], (49, 0))
-    interface = audio((58, 0))
+    event_level = eightvert([0.08, 0.08], (42, 0))
+    mixer = vcmixer([0.75, 0.45, 0.45], (50, 0))
+    interface = audio((59, 0))
     modules = [climate, source, oscillator, amplifier, voice_sum,
                event_level, mixer, interface]
     cables = [

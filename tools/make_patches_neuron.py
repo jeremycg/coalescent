@@ -8,11 +8,13 @@ Axon positional ids (must match enum order in src/Axon.cpp):
 Axon is 12 HP wide → place downstream modules at x >= 12.
 
 Third-party enum orders (verified from Fundamental v2 source):
-  LFO : FREQ_PARAM=2; SQR_OUTPUT=3                (6 HP)
-  VCO : FREQ_PARAM=2; PITCH_INPUT=0; SAW_OUTPUT=2; SQR_OUTPUT=3  (10 HP)
+  LFO : FREQ_PARAM=2; SQR_OUTPUT=3                (9 HP)
+  VCO : FREQ_PARAM=2; PITCH_INPUT=0; SAW_OUTPUT=2; SQR_OUTPUT=3  (9 HP)
 """
 
-import json, os, io, glob, shutil, subprocess, sys, tarfile, tempfile, random
+import json, os, shutil, random
+
+from patch_utils import windows_patch_directories, write_patch_archive
 
 random.seed(11)
 def uid():
@@ -26,7 +28,7 @@ def axon(params, pos):
             "version": PLUGIN_VERSION, "params": params, "pos": pos}
 
 def vco(freq=0.0, pos=(0, 0)):
-    # Fundamental VCO as a hard-sync master: FREQ_PARAM=2, SQR_OUTPUT=3. 10 HP.
+    # Fundamental VCO as a hard-sync master: FREQ_PARAM=2, SQR_OUTPUT=3. 9 HP.
     return {"id": uid(), "plugin": "Fundamental", "model": "VCO", "version": "2.6.4",
             "params": [{"id": 2, "value": float(freq)}], "pos": list(pos)}
 
@@ -34,8 +36,8 @@ def vco(freq=0.0, pos=(0, 0)):
 #   8vert : GAIN_PARAMS 0..7; IN_INPUTS 0..7; OUT_OUTPUTS 0..7.  With an output
 #           connected but its input unpatched, out = gain*10 V (a mono constant) — so
 #           the gain knob doubles as a fixed V/oct source. 8 HP.
-#   Merge : MONO_INPUTS 0..15; POLY_OUTPUT 0. Channels auto = last connected +1. 2 HP.
-#   Sum   : LEVEL_PARAM 0 (0..1); POLY_INPUT 0; MONO_OUTPUT 0. out = sum(poly)*level. 2 HP.
+#   Merge : MONO_INPUTS 0..15; POLY_OUTPUT 0. Channels auto = last connected +1. 5 HP.
+#   Sum   : LEVEL_PARAM 0 (0..1); POLY_INPUT 0; MONO_OUTPUT 0. out = sum(poly)*level. 3 HP.
 def eightvert(gains, pos):
     params = [{"id": i, "value": float(gains[i] if i < len(gains) else 0.0)} for i in range(8)]
     return {"id": uid(), "plugin": "Fundamental", "model": "8vert", "version": "2.6.4",
@@ -101,21 +103,14 @@ def write_patch(name, modules, cables, master_id):
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "patches")
     os.makedirs(out_dir, exist_ok=True)
     out_file = os.path.join(out_dir, name)
-    with tempfile.TemporaryDirectory() as tmp:
-        jp = os.path.join(tmp, "patch.json")
-        with open(jp, "w") as f:
-            json.dump(patch, f, indent=2)
-        tar_buf = io.BytesIO()
-        with tarfile.open(fileobj=tar_buf, mode="w:") as tf:
-            tf.add(jp, arcname="patch.json")
-        r = subprocess.run(["zstd", "-19", "-o", out_file, "-f"],
-                           input=tar_buf.getvalue(), capture_output=True)
-        if r.returncode != 0:
-            print("zstd error:", r.stderr.decode(), file=sys.stderr); sys.exit(1)
+    write_patch_archive(out_file, patch)
     print(f"  {name}: {len(modules)} modules, {len(cables)} cables, {os.path.getsize(out_file)} bytes")
-    for win in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"):
-        shutil.copy2(out_file, os.path.join(win, name))
-        print(f"    installed -> {win}/{name}")
+    for win in windows_patch_directories():
+        try:
+            shutil.copy2(out_file, os.path.join(win, name))
+            print(f"    installed -> {win}/{name}")
+        except OSError as error:
+            print(f"    (skipped Windows copy: {error})")
 
 # ── 1. Free-run tone: default voicing → audio ────────────────────────────────
 def patch_freerun():
@@ -128,8 +123,8 @@ def patch_freerun():
 def patch_blips():
     lfo = {"id": uid(), "plugin": "Fundamental", "model": "LFO", "version": "2.6.4",
            "params": [{"id": 2, "value": 1.0}], "pos": [0, 0]}        # FREQ=1 → 2 Hz
-    x = axon(ap(current=0.1, eps=0.08, shape=0.7), [6, 0])            # LFO is 6 HP
-    a = audio([18, 0])                                                # Axon spans 6..18
+    x = axon(ap(current=0.1, eps=0.08, shape=0.7), [9, 0])            # LFO is 9 HP
+    a = audio([21, 0])                                                # Axon spans 9..21
     cs = [
         cable(lfo["id"], 3, x["id"], 3, 0),   # LFO SQR -> Axon TRIG
         cable(x["id"], 0, a["id"], 0, 1),     # Axon OUT -> L
@@ -151,9 +146,9 @@ def patch_selfevolving():
 # ── 4. Cross-mod: VCO SAW into CURRENT CV for FM-like sidebands ───────────────
 def patch_crossmod():
     vco = {"id": uid(), "plugin": "Fundamental", "model": "VCO", "version": "2.6.4",
-           "params": [{"id": 2, "value": 0.0}], "pos": [0, 0]}        # VCO is 10 HP
-    x = axon(ap(current=0.6, eps=0.08, shape=0.7, current_att=0.4), [10, 0])
-    a = audio([22, 0])                                                # Axon spans 10..22
+           "params": [{"id": 2, "value": 0.0}], "pos": [0, 0]}        # VCO is 9 HP
+    x = axon(ap(current=0.6, eps=0.08, shape=0.7, current_att=0.4), [9, 0])
+    a = audio([21, 0])                                                # Axon spans 9..21
     cs = [
         cable(vco["id"], 2, x["id"], 1, 0),   # VCO SAW -> Axon CURRENT CV
         cable(x["id"], 0, a["id"], 0, 1),
@@ -164,8 +159,8 @@ def patch_crossmod():
 # ── 5. Hard sync: a master VCO resets Axon each cycle (classic sync sweep) ─────
 def patch_sync():
     master = vco(freq=-1.0, pos=(0, 0))                              # VCO master, ~C3
-    x = axon(ap(pitch=0.0, current=0.6, eps=0.08, shape=0.7), [10, 0])  # free-running
-    a = audio([22, 0])                                              # Axon spans 10..22
+    x = axon(ap(pitch=0.0, current=0.6, eps=0.08, shape=0.7), [9, 0])  # free-running
+    a = audio([21, 0])                                              # Axon spans 9..21
     cs = [
         cable(master["id"], 3, x["id"], 4, 0),   # VCO SQR -> Axon SYNC
         cable(x["id"], 0, a["id"], 0, 1),         # Axon OUT -> L
@@ -183,10 +178,10 @@ def patch_poly():
     cur_cv = [-1.5, 1.0, 4.0, 7.5]                          # ×0.1 → I ≈ 0.45,0.70,1.00,1.35
     evP = eightvert([s / 120.0 for s in semis], (0, 0))    # pitch source (8 HP)
     evC = eightvert([v / 10.0 for v in cur_cv], (8, 0))    # current-CV source (8 HP)
-    mgP = merge((16, 0)); mgC = merge((18, 0))             # 2 HP each
-    x   = axon(ap(current=0.6, eps=0.08, shape=0.7, current_att=1.0), [20, 0])
-    sm  = summ(0.25, (32, 0))
-    a   = audio([34, 0])
+    mgP = merge((16, 0)); mgC = merge((21, 0))             # 5 HP each
+    x   = axon(ap(current=0.6, eps=0.08, shape=0.7, current_att=1.0), [26, 0])
+    sm  = summ(0.25, (38, 0))
+    a   = audio([41, 0])
     cs  = [cable(evP["id"], i, mgP["id"], i, i) for i in range(4)]   # pitch chord
     cs += [cable(evC["id"], i, mgC["id"], i, i) for i in range(4)]   # current spread
     cs += [
@@ -206,10 +201,10 @@ def patch_poly():
 def patch_midipoly():
     m  = midicv(4, (0, 0))                                  # 8 HP — pick device, poly=4
     x  = axon(ap(current=0.6, eps=0.08, shape=0.7), [8, 0])   # 12 HP → 4 voices
-    en = adsr(0.2, 0.3, 0.8, 0.4, (20, 0))                 # 6 HP — gentle pad
-    vc = vca1(1.0, (26, 0))                                 # 3 HP
-    sm = summ(0.3, (29, 0))                                 # 2 HP
-    a  = audio([31, 0])
+    en = adsr(0.2, 0.3, 0.8, 0.4, (20, 0))                 # 9 HP — gentle pad
+    vc = vca1(1.0, (29, 0))                                 # 3 HP
+    sm = summ(0.3, (32, 0))                                 # 3 HP
+    a  = audio([35, 0])
     cs = [
         cable(m["id"],  0, x["id"],  0, 0),   # MIDI PITCH -> Axon V/OCT
         cable(m["id"],  1, en["id"], 4, 1),   # MIDI GATE  -> ADSR GATE
@@ -257,8 +252,8 @@ def patch_soma_chaos():
 def patch_soma_blips():
     lfo = {"id": uid(), "plugin": "Fundamental", "model": "LFO", "version": "2.6.4",
            "params": [{"id": 2, "value": -0.5}], "pos": [0, 0]}       # FREQ ~ 0.7 Hz
-    x = soma(sp(current=0.6, r=0.006, adapt=4.0), [6, 0])             # sub-threshold; trig fires a burst
-    a = audio([18, 0])
+    x = soma(sp(current=0.6, r=0.006, adapt=4.0), [9, 0])             # sub-threshold; trig fires a burst
+    a = audio([21, 0])
     cs = [
         cable(lfo["id"], 3, x["id"], 3, 0),   # LFO SQR -> Soma TRIG
         cable(x["id"], 0, a["id"], 0, 1),
@@ -282,8 +277,8 @@ def patch_soma_zmod():
 def patch_soma_sync():
     lfo = {"id": uid(), "plugin": "Fundamental", "model": "LFO", "version": "2.6.4",
            "params": [{"id": 2, "value": 1.0}], "pos": [0, 0]}       # FREQ=1 → 2 Hz clock
-    x = soma(sp(current=2.0, r=0.006, adapt=4.0), [6, 0])            # bursting voicing
-    a = audio([18, 0])
+    x = soma(sp(current=2.0, r=0.006, adapt=4.0), [9, 0])            # bursting voicing
+    a = audio([21, 0])
     cs = [
         cable(lfo["id"], 3, x["id"], 4, 0),   # LFO SQR -> Soma SYNC (restarts the burst)
         cable(x["id"], 0, a["id"], 0, 1),
@@ -300,10 +295,10 @@ def patch_soma_poly():
     cur_cv = [-2.5, 0.0, 4.0, 6.25]                         # ×0.2 → I ≈ 1.5,2.0,2.8,3.25
     evP = eightvert([s / 120.0 for s in semis], (0, 0))
     evC = eightvert([v / 10.0 for v in cur_cv], (8, 0))
-    mgP = merge((16, 0)); mgC = merge((18, 0))
-    x   = soma(sp(current=2.0, r=0.006, adapt=4.0, current_att=1.0), [20, 0])
-    sm  = summ(0.3, (32, 0))
-    a   = audio([34, 0])
+    mgP = merge((16, 0)); mgC = merge((21, 0))
+    x   = soma(sp(current=2.0, r=0.006, adapt=4.0, current_att=1.0), [26, 0])
+    sm  = summ(0.3, (38, 0))
+    a   = audio([41, 0])
     cs  = [cable(evP["id"], i, mgP["id"], i, i) for i in range(4)]
     cs += [cable(evC["id"], i, mgC["id"], i, i) for i in range(4)]
     cs += [
@@ -322,11 +317,11 @@ def patch_soma_poly():
 def patch_polytrig():
     freqs = [-1.0, 0.5, 1.6]          # LFO FREQ (V) → ~1, 3, 6 Hz: three distinct rates
     lfos = [{"id": uid(), "plugin": "Fundamental", "model": "LFO", "version": "2.6.4",
-             "params": [{"id": 2, "value": f}], "pos": [i * 6, 0]} for i, f in enumerate(freqs)]
-    mg = merge((18, 0))
-    x  = axon(ap(current=0.1, eps=0.08, shape=0.7), [20, 0])   # CURRENT=0.1 → rest (silent until triggered)
-    sm = summ(0.3, (32, 0))
-    a  = audio([34, 0])
+             "params": [{"id": 2, "value": f}], "pos": [i * 9, 0]} for i, f in enumerate(freqs)]
+    mg = merge((27, 0))
+    x  = axon(ap(current=0.1, eps=0.08, shape=0.7), [32, 0])   # CURRENT=0.1 → rest (silent until triggered)
+    sm = summ(0.3, (44, 0))
+    a  = audio([47, 0])
     cs  = [cable(lfos[i]["id"], 3, mg["id"], i, i) for i in range(3)]  # LFO SQR → Merge ch i
     cs += [
         cable(mg["id"], 0, x["id"], 3, 3),    # Merge poly (3ch) → Axon TRIG
@@ -344,15 +339,15 @@ def patch_polytrig():
 def patch_polyvoice():
     gfreq = [-1.0, 0.4, 1.3]           # three gate rates → notes at different times
     lfos = [{"id": uid(), "plugin": "Fundamental", "model": "LFO", "version": "2.6.4",
-             "params": [{"id": 2, "value": f}], "pos": [i * 6, 0]} for i, f in enumerate(gfreq)]
-    mgG = merge((18, 0))                                     # 3 gates → poly gate
-    ev  = eightvert([s / 120.0 for s in (0, 4, 7)], (20, 0))  # C-E-G: 3 poly V/OCT pitches
-    mgP = merge((28, 0))
-    x   = axon(ap(current=0.6, eps=0.08, shape=0.7), [30, 0])  # oscillating → a pitched voice
-    env = adsr(a=0.01, d=0.3, s=0.6, r=0.9, pos=(42, 0))       # release 0.9 s → ring-out
-    vca = vca1(1.0, (52, 0))
-    sm  = summ(0.3, (56, 0))
-    a   = audio([58, 0])
+             "params": [{"id": 2, "value": f}], "pos": [i * 9, 0]} for i, f in enumerate(gfreq)]
+    mgG = merge((27, 0))                                     # 3 gates → poly gate
+    ev  = eightvert([s / 120.0 for s in (0, 4, 7)], (32, 0))  # C-E-G: 3 poly V/OCT pitches
+    mgP = merge((40, 0))
+    x   = axon(ap(current=0.6, eps=0.08, shape=0.7), [45, 0])  # oscillating → a pitched voice
+    env = adsr(a=0.01, d=0.3, s=0.6, r=0.9, pos=(57, 0))       # release 0.9 s → ring-out
+    vca = vca1(1.0, (66, 0))
+    sm  = summ(0.3, (69, 0))
+    a   = audio([72, 0])
     cs  = [cable(lfos[i]["id"], 3, mgG["id"], i, i) for i in range(3)]   # gates → Merge
     cs += [cable(ev["id"], i, mgP["id"], i, i) for i in range(3)]        # pitches → Merge
     cs += [

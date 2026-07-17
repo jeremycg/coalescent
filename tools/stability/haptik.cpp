@@ -166,6 +166,36 @@ int main() {
         ok = ok && contOk && discOk;
     }
 
+    // [7] MOTION follows the same yPrev->y interpolation as the scanned OUT in
+    // Slow mode. Across a frame boundary the interpolated mass-0 trajectory is
+    // continuous to one frame increment, whereas reading raw y[0] produces a
+    // 256-sample hold followed by the full endpoint jump.
+    {
+        const int D = 256;
+        const float frame[3] = {-0.8f, 0.8f, -0.2f};
+        float prevLerp = frame[0], prevRaw = frame[1];
+        double maxLerpStep = 0.0, maxRawStep = 0.0;
+        for (int segment = 0; segment < 2; ++segment) {
+            for (int divc = 0; divc < D; ++divc) {
+                const float fr = (float) divc / (float) D;
+                const float lerp = frame[segment] + fr * (frame[segment + 1] - frame[segment]);
+                const float raw = frame[segment + 1];
+                maxLerpStep = std::max(maxLerpStep, (double) std::fabs(lerp - prevLerp));
+                maxRawStep = std::max(maxRawStep, (double) std::fabs(raw - prevRaw));
+                prevLerp = lerp;
+                prevRaw = raw;
+            }
+        }
+        const double largestFrameDelta = 1.6;
+        bool motionOk = maxLerpStep <= largestFrameDelta / D + 1e-6;
+        bool motionDiscriminates = maxRawStep > 0.5;
+        printf("[7] Slow-mode MOTION interpolation continuity\n");
+        printf("    interpolated max step=%.6f; raw endpoint max step=%.3f: %s\n",
+               maxLerpStep, maxRawStep,
+               (motionOk && motionDiscriminates) ? "PASS" : "FAIL");
+        ok = ok && motionOk && motionDiscriminates;
+    }
+
     printf("%s\n", ok ? "ALL PASS" : "FAILURES PRESENT");
     return ok ? 0 : 1;
 }

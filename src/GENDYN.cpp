@@ -257,7 +257,8 @@ struct GENDYN : Module {
         restoredPending = true;   // first process() recomputes norm_k / freq_cv / current_dur (needs sampleRate)
     }
 
-    void onReset() override {
+    void onReset(const ResetEvent& event) override {
+        Module::onReset(event);
         // Restore factory menu state and force a clean, unconditional re-seed on
         // the next process() (covers the case where N didn't change).
         initShape = 0;
@@ -266,6 +267,11 @@ struct GENDYN : Module {
         dcBlock.reset();
         cycleTrigger.reset();   // drop any in-flight cycle pulse so OUT/CYCLE start clean
         cycleAcc = 0;
+        dispClock = 0;
+        displaySnapshot.writable() = DisplayFrame{};
+        displaySnapshot.publish();
+        saveSnapshot.writable() = SaveFrame{};
+        saveSnapshot.publish();
     }
 
     // ── DSP helpers ───────────────────────────────────────────────────────────

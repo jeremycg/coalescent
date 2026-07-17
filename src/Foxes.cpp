@@ -152,13 +152,21 @@ struct Foxes : Module {
     // resets the post-change point counter so a fresh portrait must be re-collected.
     void resetTrail() { liveTrail.head = liveTrail.count = 0; capAccum = 0.f; resetGen++; ptsSinceGen = 0; }
 
-    void onReset() override {
+    void onReset(const ResetEvent& event) override {
+        Module::onReset(event);
         reseed(); cx = SEED_X; cy = SEED_Y; cz = SEED_Z;
         cachedB1 = cachedB2 = -1.f; centerValid = false;
         resetPeakMemory();
         for (int i = 0; i < 3; ++i) peakGen[i].reset();
         resetTrail();
         regB1 = regB2 = -1.f; regKick = 0.f;
+        liveTrail.resetGen = resetGen;
+        liveTrail.regimeGen = dispGen;
+        liveTrail.clean = false;
+        displaySnapshot.writable() = liveTrail;
+        displaySnapshot.publish();
+        pubDiv.reset();
+        lastDisplayFs = 0.f;
     }
 
     // Analytic interior coexistence point; caches on (b1,b2). Returns false and
@@ -436,9 +444,10 @@ struct FoxTrailView : widget::TransparentWidget {
         // slow playhead over it would strobe and would ride a different dataset than
         // the drawn trail. Instead LATCH one stable copy and draw BOTH the trail and
         // the fox from it (a stable attractor *portrait*, not a live scope). The latch
-        // is swapped only for a good reason: initial fill, or a complete fresh portrait
-        // after reset/recovery or a new regime (tr.clean). An existing valid portrait
-        // stays visible while its replacement is collected. The swap is deferred toward
+        // is swapped only for a good reason: initial fill, an explicit reset, or a
+        // complete fresh portrait after recovery or a new regime (tr.clean). Initialize
+        // clears the old portrait immediately; ordinary control changes keep it visible
+        // while a replacement is collected. A completed swap is deferred toward
         // a sweep endpoint (fox near-stationary)
         // to soften it, but it is a deliberate portrait UPDATE, not seamless: the new
         // ring's endpoint is unrelated to the old, so the trace and fox do step to the
@@ -449,9 +458,10 @@ struct FoxTrailView : widget::TransparentWidget {
         // Swap to a settled portrait (tr.clean) once one is available for a NEW regime,
         // or once the current latch — which may have been an unclean fill/transient —
         // is superseded by a clean one of the same regime. Deferred to a sweep endpoint.
-        bool freshPortrait = tr.clean && (tr.resetGen != latched.resetGen
+        const bool resetChanged = tr.resetGen != latched.resetGen;
+        bool freshPortrait = tr.clean && (resetChanged
             || tr.regimeGen != latched.regimeGen || !latchedClean) && atEndpoint;
-        if (!haveLatch || latched.count < TRAIL_N || freshPortrait) {
+        if (!haveLatch || resetChanged || latched.count < TRAIL_N || freshPortrait) {
             latched = tr; latchedClean = tr.clean; haveLatch = true;
         }
 

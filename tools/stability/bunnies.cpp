@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
+#include <vector>
 
 static constexpr float POS = 1e-4f, STATE_MAX = 1e3f, HSUB_MAX = 0.05f;
 static constexpr float STAB_K = 0.5f, STAB_FLOOR = 0.2f, MAX_STAB_STEP = 0.25f, LV_V0_RANGE = 3.5f;
@@ -33,6 +34,79 @@ static inline void rk4(float y[2], float h, int mode, float gamma, float K, floa
 }
 
 struct Diag { float amp = 0, period = 0, minState = 0, maxVerr = 0, clampFrac = 0; };
+
+struct PeakDetector {
+    float prev = 0.f;
+    bool rising = false;
+
+    bool step(float centered) {
+        if (centered > prev + 1e-7f) rising = true;
+        else if (centered < prev - 1e-7f) {
+            const bool fire = rising && prev > 0.05f;
+            rising = false;
+            prev = centered;
+            return fire;
+        }
+        prev = centered;
+        return false;
+    }
+};
+
+// Event replica for the default LV orbit. `perSubstep` is the production policy;
+// false reproduces the former once-per-audio-sample detector for discrimination.
+static void gateContract(float dtau, int NS, bool perSubstep, int counts[2],
+                         std::vector<int>& order) {
+    const float balance = 0.5f, wild = 0.4f;
+    const float gamma = 0.2f + balance * 4.8f;
+    const float V0 = gamma + 1.f + wild * LV_V0_RANGE;
+    float dt = std::min(dtau / std::sqrt(gamma), HSUB_MAX * MAX_SUB);
+    int Ksub = std::min(MAX_SUB, std::max(MIN_SUB, (int) std::ceil(dt / HSUB_MAX)));
+    float h = dt / Ksub;
+    float y[2] = {1.15f, 0.92f};
+    PeakDetector det[2];
+    counts[0] = counts[1] = 0;
+    order.clear();
+    auto observe = [&](int lane, float centered, int sample) {
+        if (det[lane].step(centered) && sample > NS / 3) {
+            ++counts[lane];
+            if (order.size() < 24) order.push_back(lane);
+        }
+    };
+    for (int sample = 0; sample < NS; ++sample) {
+        for (int k = 0; k < Ksub; ++k) {
+            rk4(y, h, 0, gamma, 0.f, 0.f, 0.f);
+            y[0] = std::min(std::max(y[0], POS), STATE_MAX);
+            y[1] = std::min(std::max(y[1], POS), STATE_MAX);
+            if (perSubstep) {
+                observe(0, y[0] - 1.f, sample);
+                observe(1, y[1] - 1.f, sample);
+            }
+        }
+        float X = y[0], Y = y[1];
+        float V = gamma * (X - std::log(X)) + (Y - std::log(Y));
+        float dVx = gamma * (1.f - 1.f / std::max(X, STAB_FLOOR));
+        float dVy = 1.f - 1.f / std::max(Y, STAB_FLOOR);
+        float sx = std::clamp(-STAB_K * dt * (V - V0) * dVx, -MAX_STAB_STEP, MAX_STAB_STEP);
+        float sy = std::clamp(-STAB_K * dt * (V - V0) * dVy, -MAX_STAB_STEP, MAX_STAB_STEP);
+        y[0] = std::max(X + sx, POS);
+        y[1] = std::max(Y + sy, POS);
+
+        const float cx = y[0] - 1.f, cy = y[1] - 1.f;
+        if (std::fabs(cx) < 0.05f && std::fabs(cy) < 0.05f)
+            det[0].rising = det[1].rising = false;
+        if (!perSubstep) {
+            observe(0, cx, sample);
+            observe(1, cy, sample);
+        }
+        else {
+            // The LV amplitude servo is a numerical drift correction, not part of
+            // the ecological trajectory. Synchronize the detector to its corrected
+            // endpoint without manufacturing a second peak at the sample boundary.
+            det[0].prev = cx;
+            det[1].prev = cy;
+        }
+    }
+}
 
 // returns finite+positive+bounded ok; fills Diag (amp/period 2nd half; LV servo health).
 static bool run(int mode, float balance, float wild, float kick, float dtau, int NS, Diag& dg) {
@@ -114,6 +188,42 @@ int main() {
     for (float bal : {0.f, 0.5f, 1.f}) { printf("bal%.1f[", bal);
         for (float wild = 0.f; wild <= 1.f; wild += 0.25f) { run(1, bal, wild, 0.f, 0.02f, 60000, dg);
             printf("%s", dg.amp > 0.05f ? "o" : "."); } printf("] "); } printf("(o=cycle .=rest)\n");
+
+    // Peak events must remain a two-phase alternating clock at normal speed and
+    // must not disappear when one audio sample spans a large fraction of a cycle.
+    {
+        auto alternating = [](const std::vector<int>& order) {
+            if (order.size() < 8) return false;
+            for (std::size_t i = 1; i < order.size(); ++i)
+                if (order[i] == order[i - 1]) return false;
+            return true;
+        };
+        int normal[2], fast[2], sampledFast[2];
+        std::vector<int> normalOrder, fastOrder, sampledOrder;
+        gateContract(0.02f, 100000, true, normal, normalOrder);
+        gateContract(3.2f, 12000, true, fast, fastOrder);
+        gateContract(3.2f, 12000, false, sampledFast, sampledOrder);
+        bool normalOk = normal[0] > 20 && std::abs(normal[0] - normal[1]) <= 1
+                     && alternating(normalOrder);
+        bool fastOk = fast[0] > 100 && std::abs(fast[0] - fast[1]) <= 1
+                   && alternating(fastOrder);
+        bool discriminates = sampledFast[0] + sampledFast[1] < fast[0] + fast[1];
+        printf("peak gates: normal=%d/%d fast-substep=%d/%d fast-sampled=%d/%d: %s\n",
+               normal[0], normal[1], fast[0], fast[1], sampledFast[0], sampledFast[1],
+               (normalOk && fastOk && discriminates) ? "PASS" : "FAIL");
+        if (!(normalOk && fastOk && discriminates)) ++fails;
+    }
+
+    // Rack wrapper policy: hostile non-finite CV is neutral and an extreme finite
+    // KICK is bounded before entering all RK stages.
+    {
+        auto finiteOr = [](float v, float fallback) { return std::isfinite(v) ? v : fallback; };
+        auto kickInput = [&](float v) { return std::clamp(finiteOr(v, 0.f), -15.f, 15.f); };
+        bool cvOk = finiteOr(NAN, 0.f) == 0.f && finiteOr(INFINITY, 0.f) == 0.f
+                 && kickInput(INFINITY) == 0.f && kickInput(1e30f) == 15.f;
+        printf("hostile-CV neutralization/bounding: %s\n", cvOk ? "PASS" : "FAIL");
+        if (!cvOk) ++fails;
+    }
 
     if (fails) { printf("FAIL: %d runs left the positive-bounded region\n", fails); return 1; }
     if (worstClamp > 60.f) { printf("WARN: LV servo clamps %.0f%% — consider lowering STAB_K\n", worstClamp); }

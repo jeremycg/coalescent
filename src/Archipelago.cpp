@@ -154,6 +154,7 @@ struct Archipelago : Module {
     static constexpr float CLIMATE_DEPTH = 0.1f;
     static constexpr float TRAIT_VOLTS = 2.f;
     static constexpr float OUTPUT_TAU = 0.02f;
+    static constexpr float OUTPUT_SNAP_EPSILON = 1e-9f;
     static constexpr float EVENT_TIME = 1e-3f;
     static constexpr float EVENT_LEVEL = 10.f;
     static constexpr float EVENT_GLOW_TIME = 1.1f;
@@ -524,8 +525,13 @@ struct Archipelago : Module {
             publishSaveFrame();
         }
 
-        for (int i = 0; i < SMOOTH_LEN; ++i)
-            smooth[i] += (target[i] - smooth[i]) * outputAlpha;
+        for (int i = 0; i < SMOOTH_LEN; ++i) {
+            const float delta = target[i] - smooth[i];
+            if (std::fabs(delta) <= OUTPUT_SNAP_EPSILON)
+                smooth[i] = target[i];
+            else
+                smooth[i] += delta * outputAlpha;
+        }
 
         outputs[TRAIT_OUTPUT].setChannels(HABITATS);
         outputs[MASS_OUTPUT].setChannels(HABITATS);

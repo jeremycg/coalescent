@@ -48,7 +48,7 @@ gene copies rather than a census of organisms.
 
 | Control | Range | Purpose |
 | --- | --- | --- |
-| **SIZE** | `N = 8 ... 4096` allele copies | effective population size on a log2 scale; clockwise makes smaller, smoother changes |
+| **SIZE** | `N = 8 ... 4096` allele copies | effective population size on a log2 scale; clockwise makes each random step smaller and smoother |
 | **SELECT** | `s = -0.25 ... +0.25` | signed log-fitness advantage; left favours B, right favours A |
 | **MUTATE** | exact `0`, then `1e-6 ... 0.05` | symmetric mutation probability per copy and generation |
 | **MIGRATE** | `m = 0 ... 1` | coupling through the common migrant pool; 1 gives all islands the same pre-sampling probability |
@@ -217,8 +217,9 @@ guarantee statistical independence.
 - The PCG used for evolutionary draws is owned by the module. Rack's global random
   source is consulted only when New random seed or Randomize explicitly reseeds it.
 - Simulation work occurs only when a generation is due. The audio callback does a
-  bounded amount of interpolation and trigger handling; even 200 generations/s is
-  tiny compared with the audio sample rate.
+  bounded amount of interpolation and trigger handling. On the development x86-64
+  machine, 200 generations/s used about 0.35% of one core; the exact cost varies by
+  CPU, compiler, and host settings.
 - The four islands have equal `N`, mutation, and selection. They differ only through
   stochastic history and founder events; there is no per-island environment knob.
 - Migration mixes probabilities before reproduction. Even at MIGRATE = 1, the four

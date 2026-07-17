@@ -20,7 +20,9 @@ Merge poly sources) live on the second row (y=1) so a screenshot can crop to
 the top row cleanly. No audio cables — the displays animate regardless.
 """
 
-import json, math, os, io, glob, shutil, subprocess, sys, tarfile, random
+import json, math, os, shutil, sys, random
+
+from patch_utils import windows_patch_directories, write_patch_archive
 
 random.seed(40)
 def uid():
@@ -128,10 +130,10 @@ axon_semis, axon_cur = [0, 4, 7, 11], [-1.5, 1.0, 4.0, 7.5]     # I ≈ 0.45..1.
 soma_semis, soma_cur = [0, 3, 7, 10], [-2.5, 0.0, 4.0, 6.25]    # I ≈ 1.5..3.25
 evPa = eightvert([s / 120.0 for s in axon_semis], 0)
 evCa = eightvert([v / 10.0 for v in axon_cur], 8)
-mgPa, mgCa = merge(16), merge(18)
-evPs = eightvert([s / 120.0 for s in soma_semis], 24)
-evCs = eightvert([v / 10.0 for v in soma_cur], 32)
-mgPs, mgCs = merge(40), merge(42)
+mgPa, mgCa = merge(16), merge(21)
+evPs = eightvert([s / 120.0 for s in soma_semis], 26)
+evCs = eightvert([v / 10.0 for v in soma_cur], 34)
+mgPs, mgCs = merge(42), merge(47)
 
 modules = [gendyn, haptik, axon, soma, operon, bunnies, foxes, finches, islands,
            archipelago, lineages,
@@ -153,21 +155,10 @@ name = "coalescent_gallery.vcv"
 out_dir = os.path.join(ROOT, "..", "patches")
 os.makedirs(out_dir, exist_ok=True)
 out_file = os.path.join(out_dir, name)
-patch_json = json.dumps(patch, indent=2).encode("utf-8")
-tar_buf = io.BytesIO()
-with tarfile.open(fileobj=tar_buf, mode="w:") as tf:
-    info = tarfile.TarInfo("patch.json")
-    info.size = len(patch_json)
-    info.mtime = 0
-    info.mode = 0o644
-    tf.addfile(info, io.BytesIO(patch_json))
-    r = subprocess.run(["zstd", "-19", "-o", out_file, "-f"],
-                       input=tar_buf.getvalue(), capture_output=True)
-if r.returncode != 0:
-    print("zstd error:", r.stderr.decode(), file=sys.stderr); sys.exit(1)
+write_patch_archive(out_file, patch)
 
 print(f"  {name}: {len(modules)} modules, {len(cables)} cables (v{VER}), {os.path.getsize(out_file)} bytes")
-for win in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"):
+for win in windows_patch_directories():
     try:   # optional convenience copy — never fail generation on it
         shutil.copy2(out_file, os.path.join(win, name))
         print(f"    installed -> {win}/{name}")
