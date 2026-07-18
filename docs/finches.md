@@ -95,9 +95,12 @@ to ENV, so moving the environment also moves the intended seed location; the
 result is clamped to the interior trait range. A seed is only an invasion
 attempt: it does not force a split and does not fire SPLIT immediately. Selection
 may eliminate it. **RESET** returns to one narrow ancestor at the current
-environment without generating a false merge event. Rack's context-menu
-**Initialize** additionally returns all panel parameters to their defaults before
-constructing that ancestor.
+environment without generating a false merge event. It is applied on the next
+500 Hz field tick, and that tick does not also advance evolutionary time; normal
+evolution resumes on the following tick. If RESET and SEED arrive together,
+RESET takes priority and the seed is discarded. Rack's context-menu **Initialize**
+additionally returns all panel parameters to their defaults before constructing
+that ancestor.
 
 ## Outputs
 
@@ -168,10 +171,11 @@ hysteresis around shallow valleys.
 
 ## State, performance, and limits
 
-- **The complete musical state is saved with the patch.** Schema version 1 stores
-  all 64 bin masses, the accepted split latch, and the pending split/merge
-  persistence timers. A split held in the detector's weak hysteresis band and a
-  transition partway toward its next event therefore resume as authored. Invalid
+- **The complete ecological and event-detector state is saved with the patch.**
+  Schema version 1 stores all 64 bin masses, the accepted split latch, and the
+  pending split/merge persistence timers. A split held in the detector's weak
+  hysteresis band and a transition partway toward its next event therefore resume
+  as authored. Invalid
   versions, masses, latches, or timers are rejected transactionally. Older
   density-only patches still load; because they did not store detector history,
   their initial split state is inferred from the stronger entry threshold.
@@ -203,7 +207,7 @@ hysteresis around shallow valleys.
   of evolutionary branching. It should not be used as a quantitative population
   genetics simulator.
 - On the development i5-9600K, the standalone `-O2` field benchmark uses about
-  0.3% of one core at the default RATE and 4.5% at the maximum bounded RATE
+  0.3% of one core at the default RATE and 5% at the maximum bounded RATE
   request, assuming 500 updates/s. These are diagnostic hardware-dependent
   figures, not real-time deadlines; the stability suite uses a deliberately loose
   ceiling and separately verifies that reachable states contain no subnormals.

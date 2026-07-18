@@ -139,15 +139,22 @@ bundles to a GitHub Release on a `v*` tag.
 
 ### Tests
 
+Local tests require `make`, Python 3, a C++17 compiler, `jq`, and `zstd`. Among
+the test targets, the Rack SDK is needed only for `check-simd` and `check-rack`.
+
 `make check` validates the manifest, documentation links, screenshots, and demo
 patch archives/layouts, proves isolated patch regeneration parity, then runs
-production cores and standalone replicas
-(stability/calibration) plus the RK4 equivalence check — no Rack SDK needed. It's
-the same guardrail CI gates releases on. A second target,
-`make check-simd`, proves the float_4 (poly-SIMD) path matches the scalar kernel.
-On Linux, `make check-rack` compiles the production Finches, Islands, and
-Lineages wrappers and exercises persistence, finite outputs, and Rack's actual
-context-menu Initialize path. Both SDK targets run in CI after the SDK download.
+stability/calibration contracts against the shared SDK-free production cores
+plus an independent analytic RK4 contract — no Rack SDK needed. The architecture
+check requires every wrapper, stability suite, and mapped auxiliary tool to
+include and call its shared core. It is the same guardrail CI gates releases on.
+A second target, `make check-simd`, proves the float_4 (poly-SIMD) path matches
+the scalar kernel.
+On Linux, `make check-rack` compiles all eleven production Rack wrappers. It
+exercises construction, ordinary and hostile-CV output finiteness, Rack's actual
+context-menu Initialize path, and module-specific wrapper contracts: state recall,
+event routing, polyphony, transport, and deterministic reset behavior where
+applicable. Both SDK targets run in CI after the SDK download.
 
 ```bash
 make check                                 # SDK-free stability/calibration/RK4
@@ -158,7 +165,7 @@ make check-rack RACK_DIR=~/Rack2-SDK/Rack-SDK   # Linux Rack wrapper integration
 If `libRack.so` dependencies are installed outside the system library path,
 pass their colon-separated directories as `RACK_RUNTIME_LIBRARY_PATH`.
 
-Each replica can also be built and run on its own:
+Each production-core contract can also be built and run on its own:
 
 ```bash
 g++ -O2 -o /tmp/t tools/stability/axon.cpp   && /tmp/t   # FitzHugh–Nagumo

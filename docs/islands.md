@@ -205,11 +205,15 @@ guarantee statistical independence.
 
 ### Saved state and limits
 
-- **Population state, interpolation phase, event memory, founder target, the
-  instance's RESET seed/stream pair, and the complete deterministic RNG state are
-  saved with the patch.** Reloading on the same build continues the authored
+- **Population state, interpolation phase, event-detector memory, founder target,
+  the instance's RESET seed/stream pair, and the complete deterministic RNG state
+  are saved with the patch.** Reloading on the same build continues the authored
   frequencies and future random sequence rather than merely restarting from a
   seed/stream pair.
+- LOSS and SWEEP pulses are transient signals, not saved state. Loading never
+  replays a pulse that occurred before the save. Schema-2 saves retain zero-valued
+  pulse-remainder placeholders for downgrade compatibility; their values are
+  obsolete and ignored by current builds.
 - Saved allele counts and integer RNG state are portable. Future evolution is not
   guaranteed bit-exact across platform/compiler builds because selection,
   mutation, and migration use floating-point probability math before each

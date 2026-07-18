@@ -212,8 +212,6 @@ struct Islands : Module {
         float rampCurrent[CONTINUOUS_LEN] = {};
         int lastFounder = -1;
         float founderGlow = 0.f;
-        float lossPulseRemaining = 0.f;
-        float sweepPulseRemaining = 0.f;
         bool valid = false;
     };
     coalescent::DisplaySnapshot<SaveFrame> saveSnapshot;
@@ -384,8 +382,6 @@ struct Islands : Module {
         std::copy(rampCurrent, rampCurrent + CONTINUOUS_LEN, saved.rampCurrent);
         saved.lastFounder = lastFounder;
         saved.founderGlow = founderGlow;
-        saved.lossPulseRemaining = clampf(lossPulse.remaining, 0.f, PULSE_TIME);
-        saved.sweepPulseRemaining = clampf(sweepPulse.remaining, 0.f, PULSE_TIME);
         saved.valid = true;
         saveSnapshot.publish();
     }
@@ -616,8 +612,10 @@ struct Islands : Module {
         appendFloatArray(root, "rampCurrent", saved.rampCurrent, CONTINUOUS_LEN);
         json_object_set_new(root, "lastFounder", json_integer(saved.lastFounder));
         json_object_set_new(root, "founderGlow", json_real(saved.founderGlow));
-        json_object_set_new(root, "lossPulseRemaining", json_real(saved.lossPulseRemaining));
-        json_object_set_new(root, "sweepPulseRemaining", json_real(saved.sweepPulseRemaining));
+        // Keep the schema-2 shape readable by the immediately preceding build,
+        // but never serialize an in-flight presentation pulse.
+        json_object_set_new(root, "lossPulseRemaining", json_real(0.0));
+        json_object_set_new(root, "sweepPulseRemaining", json_real(0.0));
         return root;
     }
 
@@ -681,18 +679,9 @@ struct Islands : Module {
         if (restoredLastFounder < -1 || restoredLastFounder >= 4)
             return;
         float restoredFounderGlow;
-        float restoredLossPulse = 0.f;
-        float restoredSweepPulse = 0.f;
         if (!readFinite(root, "founderGlow", restoredFounderGlow, 0.f, 1.f)
             || restoredGenerationPhase >= 1.0)
             return;
-        json_t* lossPulseItem = json_object_get(root, "lossPulseRemaining");
-        json_t* sweepPulseItem = json_object_get(root, "sweepPulseRemaining");
-        if (versionValue >= 2 || lossPulseItem || sweepPulseItem) {
-            if (!readFinite(root, "lossPulseRemaining", restoredLossPulse, 0.f, PULSE_TIME)
-                || !readFinite(root, "sweepPulseRemaining", restoredSweepPulse, 0.f, PULSE_TIME))
-                return;
-        }
 
         // Validate both biological and presentation state before changing the
         // running module. A corrupt patch cannot manufacture an arbitrary CV
@@ -727,8 +716,11 @@ struct Islands : Module {
         std::copy(restoredCurrent, restoredCurrent + CONTINUOUS_LEN, rampCurrent);
         lastFounder = static_cast<int>(restoredLastFounder);
         founderGlow = restoredFounderGlow;
-        lossPulse.remaining = restoredLossPulse;
-        sweepPulse.remaining = restoredSweepPulse;
+        // LOSS and SWEEP are one-shot presentation signals, not authored state.
+        // Schema-2 patches written by older versions may still contain their
+        // former remainder fields; unknown JSON keys are deliberately ignored.
+        lossPulse.reset();
+        sweepPulse.reset();
         stepTrigger.reset();
         founderInputTrigger.reset();
         founderButtonTrigger.reset();

@@ -1,7 +1,6 @@
 #include "plugin.hpp"
-#include "dsp/rk4.hpp"
 #include "dsp/display_snapshot.hpp"
-#include "tanh_approx.hpp"
+#include "dsp/foxes_core.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -26,16 +25,9 @@
 // it never reaches the clamps. They are a backstop for corrupt input / numerics and
 // for a sustained negative KICK (which legitimately drives grass to the floor). See
 // tools/stability/foxes.cpp for the equilibrium/Hopf/Lyapunov/RATE_CAL proofs;
-// its constants and maps mirror this file and the build fails if they drift.
+// the Rack wrapper and suite both call the SDK-free production core.
 
-static const int TRAIL_N = 2048;   // chronological phase-trail ring (long enough to reveal the chaotic attractor)
-
-// Per-species output/display gains. Equalize the very different native ranges
-// (measured centered RMS ≈ [0.071, 0.031, 0.248] at the periodic default) to
-// ~matched output RMS. Fixed after calibration — no moving normalization. File
-// scope (not a constexpr member) so a runtime-indexed read isn't an ODR-use that
-// needs an out-of-line definition under -std=c++11.
-static const float FOX_GAIN[3] = {8.f, 18.f, 2.5f};   // grass, bunny, fox
+static const int TRAIL_N = coalescent::foxes::TRAIL_N;   // chronological phase-trail ring
 
 struct Foxes : Module {
 
@@ -65,17 +57,17 @@ struct Foxes : Module {
     };
     enum LightId { LIGHTS_LEN };
 
-    // ─── Canonical Hastings–Powell constants (published; not tunable) ─────────
-    static constexpr float A1 = 5.f, A2 = 0.1f, D1 = 0.4f, D2 = 0.01f;
-
     // ─── State (transient; not saved) ─────────────────────────────────────────
     // A deterministic point on the periodic default attractor (b1=2.3, b2=2),
     // derived offline past the transient by tools/stability/foxes.cpp check [7].
     // Seeding here (not at the equilibrium) avoids a silent startup and is
     // deterministic across load/reset.
-    static constexpr float SEED_X = 0.812781f, SEED_Y = 0.104883f, SEED_Z = 12.478951f;
-    float x = SEED_X, y = SEED_Y, z = SEED_Z;
-    float cx = SEED_X, cy = SEED_Y, cz = SEED_Z;    // active center (analytic equilibrium)
+    float x = coalescent::foxes::SEED_X;
+    float y = coalescent::foxes::SEED_Y;
+    float z = coalescent::foxes::SEED_Z;
+    float cx = coalescent::foxes::SEED_X;
+    float cy = coalescent::foxes::SEED_Y;
+    float cz = coalescent::foxes::SEED_Z;    // active center (analytic equilibrium)
     float cachedB1 = -1.f, cachedB2 = -1.f;
     bool  centerValid = false;
     float prevPeak[3] = {}; bool rising[3] = {};    // per-species peak edge state
@@ -106,22 +98,12 @@ struct Foxes : Module {
     int   ptsSinceGen = 0;
     float regB1 = -1.f, regB2 = -1.f, regKick = 0.f;   // last display-regime signature
 
-    // ─── Numerical policy (mirrors tools/stability/foxes.cpp; asserted there) ──
-    static constexpr float RATE_CAL  = 61.387f;   // default period (tau) → C4; asserted within 5 cents
-    static constexpr float HSUB_MAX  = 0.1f;      // validated 0-cent at the periodic default; bounded at max WILD
-    static constexpr int   MIN_SUB   = 2;
-    static constexpr int   MAX_SUB   = 64;
+    // ─── Rack-wrapper policy; model/numerical constants live in foxes_core.hpp ──
     static constexpr float PITCH_TOTAL_MIN = -8.f, PITCH_TOTAL_MAX = 8.f;
-    static constexpr float STATE_MAX = 1e3f;
-    static constexpr float POS_FLOOR = 1e-4f;
     // Full-scale Rack signals remain stable at the production h <= 0.1 policy.
     // The standalone sweep covers the complete sanitized +/-15 V input range.
-    static constexpr float KICK_GAIN = 0.25f;
     static constexpr float BALANCE_CV_DEPTH = 0.1f, WILD_CV_DEPTH = 0.1f;
-    static constexpr float POP_GATE = 0.15f;              // peak activity threshold on the gained centered value
     static constexpr float GATE_LEVEL = 10.f, GATE_TIME = 1e-3f;
-    static constexpr float CAP_TAU = 0.225f;              // trail-capture spacing in dimensionless time
-
     Foxes() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
         configParam(RATE_PARAM, -8.f, 4.f, 0.f, "Rate", " Hz", 2.f, dsp::FREQ_C4);
@@ -143,10 +125,11 @@ struct Foxes : Module {
         configOutput(FOX_PEAK_OUTPUT, "Foxes peak");
     }
 
-    static inline float f1(float X, float b1) { return A1 * X / (1.f + b1 * X); }
-    static inline float f2(float Y, float b2) { return A2 * Y / (1.f + b2 * Y); }
-
-    void reseed() { x = SEED_X; y = SEED_Y; z = SEED_Z; }
+    void reseed() {
+        float state[3];
+        coalescent::foxes::seed(state);
+        x = state[0]; y = state[1]; z = state[2];
+    }
     void resetPeakMemory() { for (int i = 0; i < 3; ++i) { prevPeak[i] = 0.f; rising[i] = false; } }
     // Clears the ring, bumps resetGen (so the UI recognizes the replacement), and
     // resets the post-change point counter so a fresh portrait must be re-collected.
@@ -154,7 +137,10 @@ struct Foxes : Module {
 
     void onReset(const ResetEvent& event) override {
         Module::onReset(event);
-        reseed(); cx = SEED_X; cy = SEED_Y; cz = SEED_Z;
+        reseed();
+        cx = coalescent::foxes::SEED_X;
+        cy = coalescent::foxes::SEED_Y;
+        cz = coalescent::foxes::SEED_Z;
         cachedB1 = cachedB2 = -1.f; centerValid = false;
         resetPeakMemory();
         for (int i = 0; i < 3; ++i) peakGen[i].reset();
@@ -174,33 +160,19 @@ struct Foxes : Module {
     // corrupt-CV backstop — never happens inside the exposed control box).
     bool updateCenter(float b1, float b2) {
         if (centerValid && b1 == cachedB1 && b2 == cachedB2) return true;
-        float denom = A2 - b2 * D2;
-        if (denom > 0.f) {
-            float ys = D2 / denom;
-            float disc = (b1 + 1.f) * (b1 + 1.f) - 4.f * A1 * b1 * ys;
-            if (disc >= 0.f) {
-                float xs = ((b1 - 1.f) + std::sqrt(disc)) / (2.f * b1);
-                float fx = f1(xs, b1);
-                float zs = ys * (fx - D1) / D2;
-                if (xs > 0.f && ys > 0.f && fx > D1 && zs > 0.f
-                    && std::isfinite(xs) && std::isfinite(zs)) {
-                    cx = xs; cy = ys; cz = zs;
-                    cachedB1 = b1; cachedB2 = b2; centerValid = true;
-                    return true;
-                }
-            }
+        float nextX = 0.f, nextY = 0.f, nextZ = 0.f;
+        if (coalescent::foxes::equilibrium(b1, b2, nextX, nextY, nextZ)) {
+            cx = nextX; cy = nextY; cz = nextZ;
+            cachedB1 = b1; cachedB2 = b2; centerValid = true;
+            return true;
         }
         return false;
     }
 
     // rising→falling local max above POP_GATE on the gained centered value.
     void firePeak(int i, float gained, dsp::PulseGenerator& gen) {
-        if (gained > prevPeak[i] + 1e-7f) rising[i] = true;
-        else if (gained < prevPeak[i] - 1e-7f) {
-            if (rising[i] && prevPeak[i] > POP_GATE) gen.trigger(GATE_TIME);
-            rising[i] = false;
-        }
-        prevPeak[i] = gained;
+        if (coalescent::foxes::peakStep(gained, prevPeak[i], rising[i]))
+            gen.trigger(GATE_TIME);
     }
 
     void pushTrail(float sx, float sy, float sz) {
@@ -218,24 +190,21 @@ struct Foxes : Module {
         const float fs = args.sampleRate;
 
         // ── read + map params (sanitize CV before use) ──
-        float balCv  = inputs[BALANCE_INPUT].getVoltage();
-        float wildCv = inputs[WILD_INPUT].getVoltage();
-        if (!std::isfinite(balCv))  balCv = 0.f;
-        if (!std::isfinite(wildCv)) wildCv = 0.f;
+        float balCv  = coalescent::finiteOr(inputs[BALANCE_INPUT].getVoltage(), 0.f);
+        float wildCv = coalescent::finiteOr(inputs[WILD_INPUT].getVoltage(), 0.f);
         float balance = clamp(params[BALANCE_PARAM].getValue()
             + balCv * params[BALANCE_ATT_PARAM].getValue() * BALANCE_CV_DEPTH, 0.f, 1.f);
         float wild = clamp(params[WILD_PARAM].getValue()
             + wildCv * params[WILD_ATT_PARAM].getValue() * WILD_CV_DEPTH, 0.f, 1.f);
         float kickV = inputs[KICK_INPUT].isConnected() ? inputs[KICK_INPUT].getVoltage() : 0.f;
-        if (!std::isfinite(kickV)) kickV = 0.f;
-        kickV = clamp(kickV, -15.f, 15.f);   // bound an extreme finite drive, not just non-finite
-        float kick = kickV * KICK_GAIN;
+        kickV = coalescent::finiteClamp(kickV, 0.f, -15.f, 15.f);
+        float kick = kickV * coalescent::foxes::KICK_GAIN;
 
-        float b1 = 1.f + 5.2f * wild * wild;   // WILD → bifurcation parameter
+        float b1 = coalescent::foxes::b1FromWild(wild);   // WILD → bifurcation parameter
         // BALANCE → upper trophic saturation, narrowed to [1.75, 2.25] (b2=2.0 at
         // centre). Above b2≈2.35 a fox-extinction basin captures the fixed seed and
         // rails FOX at −5 V, so the range is deliberately kept clear of it.
-        float b2 = 1.75f + 0.5f * balance;
+        float b2 = coalescent::foxes::b2FromBalance(balance);
 
         // ── center (analytic); fall back to the last valid center on corrupt CV ──
         if (!updateCenter(b1, b2)) { reseed(); resetPeakMemory(); resetTrail(); }
@@ -254,64 +223,52 @@ struct Foxes : Module {
         // Sanitize V/OCT BEFORE the clamp: clamp() is fmin/fmax-based and maps a NaN
         // to a bound, so a corrupt V/OCT would otherwise pass the finite check and
         // drive full speed instead of resting.
-        float voct = inputs[VOCT_INPUT].getVoltage();
-        if (!std::isfinite(voct)) voct = 0.f;
+        float voct = coalescent::finiteOr(inputs[VOCT_INPUT].getVoltage(), 0.f);
         float pitchTotal = clamp(params[RATE_PARAM].getValue() + voct,
                                  PITCH_TOTAL_MIN, PITCH_TOTAL_MAX);
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pitchTotal);
-        float dtau = RATE_CAL * pitchHz / fs;
-        dtau = std::min(dtau, HSUB_MAX * MAX_SUB);   // documented simulation-speed ceiling
-        int   Ksub = clamp((int) std::ceil(dtau / HSUB_MAX), MIN_SUB, MAX_SUB);
-        float h = dtau / Ksub;
-
-        auto deriv = [&](const float* v, float* dv) {
-            float X = std::max(v[0], POS_FLOOR), Y = std::max(v[1], POS_FLOOR), Z = std::max(v[2], POS_FLOOR);
-            float g1 = f1(X, b1), g2 = f2(Y, b2);
-            dv[0] = X * (1.f - X) - g1 * Y + kick;   // KICK: continuous grass-force, constant across RK stages
-            dv[1] = g1 * Y - g2 * Z - D1 * Y;
-            dv[2] = g2 * Z - D2 * Z;
-        };
+        const float requestedDelta = coalescent::foxes::RATE_CAL * pitchHz / fs;
+        const coalescent::OdeStepPlan plan = coalescent::foxes::stepPlan(requestedDelta);
 
         float st[3] = {x, y, z};
-        for (int s = 0; s < Ksub; ++s) {
+        for (int s = 0; s < plan.count; ++s) {
             float pre[3] = {st[0], st[1], st[2]};   // for capture interpolation
-            coalescent::rk4<3>(st, h, deriv);
+            coalescent::foxes::step(st, plan.h, b1, b2, kick);
             // isfinite BEFORE clamp: clamp() is fmin/fmax-based and maps NaN to a
             // bound, which would hide the failure from this backstop.
-            if (!std::isfinite(st[0]) || !std::isfinite(st[1]) || !std::isfinite(st[2])) {
+            if (!coalescent::foxes::repairState(st)) {
                 reseed(); st[0] = x; st[1] = y; st[2] = z; resetPeakMemory(); resetTrail(); break;
             }
-            st[0] = clamp(st[0], POS_FLOOR, STATE_MAX);
-            st[1] = clamp(st[1], POS_FLOOR, STATE_MAX);
-            st[2] = clamp(st[2], POS_FLOOR, STATE_MAX);
 
             // peak events from substep state (so fast grass/bunny peaks aren't missed
             // at the audio-sample boundary), on the gained centered value
-            firePeak(0, (st[0] - cx) * FOX_GAIN[0], peakGen[0]);
-            firePeak(1, (st[1] - cy) * FOX_GAIN[1], peakGen[1]);
-            firePeak(2, (st[2] - cz) * FOX_GAIN[2], peakGen[2]);
+            firePeak(0, (st[0] - cx) * coalescent::foxes::gain(0), peakGen[0]);
+            firePeak(1, (st[1] - cy) * coalescent::foxes::gain(1), peakGen[1]);
+            firePeak(2, (st[2] - cz) * coalescent::foxes::gain(2), peakGen[2]);
 
             // Trail capture at uniform dimensionless time. Interpolate the point to
             // the exact CAP_TAU boundary inside this substep (h ≤ CAP_TAU, so at most
             // one boundary per substep — bounded) so the spacing is genuinely uniform
             // rather than quantized to the substep, independent of pitch.
             float before = capAccum;
-            capAccum += h;
-            if (capAccum >= CAP_TAU) {
-                float f = clamp((CAP_TAU - before) / h, 0.f, 1.f);   // where in the substep the boundary fell
-                capAccum -= CAP_TAU;
+            capAccum += plan.h;
+            if (capAccum >= coalescent::foxes::CAP_TAU) {
+                float f = clamp((coalescent::foxes::CAP_TAU - before) / plan.h, 0.f, 1.f);   // where in the substep the boundary fell
+                capAccum -= coalescent::foxes::CAP_TAU;
                 float ix = pre[0] + (st[0] - pre[0]) * f;
                 float iy = pre[1] + (st[1] - pre[1]) * f;
                 float iz = pre[2] + (st[2] - pre[2]) * f;
-                pushTrail((ix - cx) * FOX_GAIN[0], (iy - cy) * FOX_GAIN[1], (iz - cz) * FOX_GAIN[2]);
+                pushTrail((ix - cx) * coalescent::foxes::gain(0),
+                          (iy - cy) * coalescent::foxes::gain(1),
+                          (iz - cz) * coalescent::foxes::gain(2));
             }
         }
         x = st[0]; y = st[1]; z = st[2];
 
         // ── outputs: equilibrium-centered, fixed-gain, soft-clipped ──
-        outputs[GRASS_OUTPUT].setVoltage(5.f * coalescent::fastTanh((x - cx) * FOX_GAIN[0]));
-        outputs[BUNNY_OUTPUT].setVoltage(5.f * coalescent::fastTanh((y - cy) * FOX_GAIN[1]));
-        outputs[FOX_OUTPUT].setVoltage(5.f * coalescent::fastTanh((z - cz) * FOX_GAIN[2]));
+        outputs[GRASS_OUTPUT].setVoltage(coalescent::foxes::outputVoltage(x - cx, 0));
+        outputs[BUNNY_OUTPUT].setVoltage(coalescent::foxes::outputVoltage(y - cy, 1));
+        outputs[FOX_OUTPUT].setVoltage(coalescent::foxes::outputVoltage(z - cz, 2));
         outputs[GRASS_PEAK_OUTPUT].setVoltage(peakGen[0].process(args.sampleTime) ? GATE_LEVEL : 0.f);
         outputs[BUNNY_PEAK_OUTPUT].setVoltage(peakGen[1].process(args.sampleTime) ? GATE_LEVEL : 0.f);
         outputs[FOX_PEAK_OUTPUT].setVoltage(peakGen[2].process(args.sampleTime) ? GATE_LEVEL : 0.f);

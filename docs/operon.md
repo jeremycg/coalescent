@@ -137,11 +137,11 @@ PERTURB for kick-and-settle bursts.
   LFO use; add a blocker downstream if you need perfectly DC-free audio.
 - **State is not saved.** Proteins/mRNA re-seed on load; params persist.
 
-`tools/stability/operon.cpp` is a standalone replica: it sweeps DRIVE × HILL ×
-DECAY × LEAK at several pitches and asserts all six states stay finite and
-bounded, reports the default period (→ pitch calibration), finds the DRIVE
-threshold, and verifies balanced cyclic gate events plus near-threshold hysteresis.
-It runs in `make check`.
+`tools/stability/operon.cpp` exercises the shared SDK-free production core: it
+sweeps DRIVE × HILL × DECAY × LEAK at several pitches and asserts all six states
+stay finite and bounded, reports the default period (→ pitch calibration), finds
+the DRIVE threshold, and verifies balanced cyclic gate events plus near-threshold
+hysteresis. It runs in `make check`.
 
 ## References
 

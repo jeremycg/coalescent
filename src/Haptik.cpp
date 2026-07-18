@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "tanh_approx.hpp"
 #include "dsp/display_snapshot.hpp"
+#include "dsp/haptik_core.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -8,7 +9,7 @@
 
 // Array ceiling for the mass-spring ring. N (playable) tops out at 128; the
 // arrays are sized larger so raising the N ceiling later needs no realloc.
-static const int MAX_N = 256;
+static const int MAX_N = coalescent::haptik::kMaxStorageMasses;
 
 struct Haptik : Module {
 
@@ -88,24 +89,23 @@ struct Haptik : Module {
     coalescent::DisplaySnapshot<SaveFrame> saveSnapshot;
 
     // ─── Tunable constants ──────────────────────────────────────────────────
-    static constexpr float DAMP_MAX_HZ = 250.f;   // retaper (with quadratic knob): keep the whole knob musical
-    static constexpr float OUT_GAIN    = 1.0f;
-    static constexpr float MOTION_GAIN = 4.f;
-    static constexpr float EXT_GAIN    = 0.005f;  // ±5V VCO at 0.2 saturated the ring; 0.005 lets it resonate
-    static constexpr float BUMP_FRAC   = 0.125f;  // bump half-width = N * frac
-    static constexpr float CV_DEPTH        = 0.1f;   // ±5V CV → ±0.5 at full attenuverter
-    static constexpr float DRIVE_KEEPALIVE = 0.05f;  // continuous-drive noise amount (EXCITE=3)
-    static constexpr float STATE_MAX       = 16.f;   // safety clamp on y[]/v[] (forced/lossless guard)
-    static constexpr int   SLOW_DIV        = 256;    // slow-mode: step the lattice every N samples
-    static constexpr float KCTR_MAX        = 0.35f;  // clamp centering so per-update ω_max < 2 (slow mode)
+    static constexpr float OUT_GAIN    = coalescent::haptik::kOutputGain;
+    static constexpr float MOTION_GAIN = coalescent::haptik::kMotionGain;
+    static constexpr float CV_DEPTH        = coalescent::haptik::kCvDepth;
+    static constexpr float DRIVE_KEEPALIVE = coalescent::haptik::kDriveKeepalive;
+    static constexpr float STATE_MAX       = coalescent::haptik::kStateMax;
+    static constexpr int   SLOW_DIV        = coalescent::haptik::kSlowDivider;
 
     Haptik() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
 
-        configParam(N_PARAM, 8.f, 128.f, 64.f, "Masses")->snapEnabled = true;
+        configParam(N_PARAM, coalescent::haptik::kMinPlayableMasses,
+                    coalescent::haptik::kMaxPlayableMasses,
+                    64.f, "Masses")->snapEnabled = true;
 
         configParam(PITCH_PARAM, -4.f, 4.f, 0.f, "Pitch", " Hz", 2.f, dsp::FREQ_C4);
-        configParam(RATE_PARAM, std::log2(0.05f), std::log2(30.f), std::log2(3.f),
+        configParam(RATE_PARAM, std::log2(coalescent::haptik::kEvolutionMinHz),
+                    std::log2(coalescent::haptik::kEvolutionMaxHz), std::log2(3.f),
                     "Evolution rate", " Hz", 2.f);
         configParam(COUPLE_PARAM, 0.f, 0.9f, 0.3f, "Coupling");
         configParam(DAMP_PARAM, 0.f, 1.f, 0.30f, "Damping");   // ~44 ms decay under the quadratic taper → boots lively
@@ -185,7 +185,7 @@ struct Haptik : Module {
         json_t *jy = json_object_get(root, "y"), *jv = json_object_get(root, "v");
         if (!(jn && jy && jv)) return;                       // pre-serialization patch → reseed
         int n = (int) json_integer_value(jn);
-        if (n < 8 || n > MAX_N) return;
+        if (n < coalescent::haptik::kMinPlayableMasses || n > MAX_N) return;
         if ((int) json_array_size(jy) != n || (int) json_array_size(jv) != n) return;
         float Y[MAX_N], V[MAX_N];
         for (int i = 0; i < n; i++) {
@@ -210,19 +210,11 @@ struct Haptik : Module {
         float added = 0.f;   // total displacement injected, to remove its DC below
         switch (shape) {
             case 0:  // impulse: kick a single mass
-                y[driverIdx] += amt;
-                added = amt;
+                added = coalescent::haptik::addImpulse(y, driverIdx, amt);
                 break;
-            case 1: {  // bump: Hann window, half-width BUMP_FRAC*N, wraps mod N
-                int hw = std::max(1, (int)(BUMP_FRAC * N));
-                for (int d = -hw; d <= hw; d++) {
-                    float w = 0.5f * (1.f + std::cos((float)M_PI * (float)d / (float)hw));
-                    int idx = ((driverIdx + d) % N + N) % N;
-                    y[idx] += amt * w;
-                    added += amt * w;
-                }
+            case 1:  // bump: Hann window, shared fractional half-width, wraps mod N
+                added = coalescent::haptik::addHannBump(y, N, driverIdx, amt);
                 break;
-            }
             case 2:  // noise: perturb every mass
                 for (int i = 0; i < N; i++) {
                     float d = amt * (2.f * random::uniform() - 1.f);
@@ -237,18 +229,14 @@ struct Haptik : Module {
         // Remove the DC the excitation injected, so a pluck adds shape but no net
         // offset — otherwise each pluck steps the scanned mean and thumps through the
         // output DC-blocker (audible as a click).
-        if (added != 0.f) {
-            float m = added / N;
-            for (int i = 0; i < N; i++)
-                y[i] -= m;
-        }
+        coalescent::haptik::removeInjectedMean(y, N, added);
     }
 
     void process(const ProcessArgs& args) override {
         const float fs = args.sampleRate;
 
         int N = (int) std::round(params[N_PARAM].getValue());
-        N = clamp(N, 8, MAX_N);
+        N = clamp(N, coalescent::haptik::kMinPlayableMasses, MAX_N);
 
         // Driver position is a live param (fraction of the ring), so recompute every
         // sample; set before reinit so the seed bump lands at the chosen mass.
@@ -280,25 +268,26 @@ struct Haptik : Module {
         bool  slow = params[MODE_PARAM].getValue() > 0.5f;
         int   D    = slow ? SLOW_DIV : 1;   // lattice steps every D samples
 
-        float fEvo = clamp(dsp::approxExp2_taylor5(rateLog), 0.05f, 30.f);
+        float fEvo = clamp(dsp::approxExp2_taylor5(rateLog),
+                           coalescent::haptik::kEvolutionMinHz,
+                           coalescent::haptik::kEvolutionMaxHz);
         // Effective timestep is D samples. In Fast mode (D=1) this is the original
         // behaviour: kCtr stays tiny so RATE is subtle. In Slow mode the D factor
         // makes RATE/centering meaningful; the clamp keeps per-update ω_max < 2.
-        float wc   = 2.f * (float)M_PI * fEvo * D / fs;
-        float kCtr = std::min(wc * wc, KCTR_MAX);
+        float kCtr = coalescent::haptik::centeringCoefficient(fEvo, D, fs);
 
         // Coupling clamped hard at 0.9 keeps the *homogeneous* system stable
         // (ω_max = sqrt(kCtr + 4·kSpr) < 2 for symplectic Euler) — do not raise.
         // Forced/lossless boundedness is handled separately by the STATE_MAX clamp.
         float kSpr = clamp(params[COUPLE_PARAM].getValue()
                          + inputs[COUPLE_INPUT].getVoltage() * params[COUPLE_ATT_PARAM].getValue() * CV_DEPTH,
-                         0.f, 0.9f);
+                         0.f, coalescent::haptik::kCouplingMax);
 
         float damp = clamp(params[DAMP_PARAM].getValue()
                          + inputs[DAMP_INPUT].getVoltage() * params[DAMP_ATT_PARAM].getValue() * CV_DEPTH,
                          0.f, 1.f);
-        float dampEff = damp * damp;   // quadratic taper: spreads the lively range under most of the knob
-        float gamma = dsp::approxExp2_taylor5(-dampEff * DAMP_MAX_HZ * D / fs * 1.44269504f);   // velocity multiplier ≤ 1; D-scaled so
+        float gamma = dsp::approxExp2_taylor5(
+            coalescent::haptik::dampingExp2Argument(damp, D, fs));   // velocity multiplier ≤ 1; D-scaled so
                                                                 // wall-clock decay is divider-independent
 
         float amt = clamp(params[INJECT_PARAM].getValue()
@@ -315,7 +304,7 @@ struct Haptik : Module {
         if (slow != wasSlow) {
             if (wasSlow) {
                 float fr = clamp((float) divCounter / (float) SLOW_DIV, 0.f, 1.f);
-                for (int i = 0; i < N; i++) y[i] = yPrev[i] + fr * (y[i] - yPrev[i]);
+                coalescent::haptik::collapseInterpolatedFrame(yPrev, y, N, fr);
             }
             std::copy(y, y + N, yPrev);
             divCounter = 0;
@@ -329,10 +318,7 @@ struct Haptik : Module {
         // Collapsing yPrev to the same frame lets an un-freeze restart cleanly too.
         if (slow && freeze && !wasFrozen) {
             float fr = (float) divCounter / (float) D;
-            for (int i = 0; i < N; i++) {
-                y[i]     = yPrev[i] + fr * (y[i] - yPrev[i]);
-                yPrev[i] = y[i];
-            }
+            coalescent::haptik::captureInterpolatedFrame(yPrev, y, N, fr);
             divCounter = 0;
         }
         wasFrozen = freeze;
@@ -345,7 +331,9 @@ struct Haptik : Module {
             applyExcite(shape, amt, N);
 
         float drive = inputs[EXT_INPUT].isConnected()
-                    ? inputs[EXT_INPUT].getVoltageSum() * EXT_GAIN * amt : 0.f;   // sum poly channels → mono force
+                    ? coalescent::haptik::externalDrive(
+                        inputs[EXT_INPUT].getVoltageSum(), amt)
+                    : 0.f;   // sum poly channels → mono force; hostile sums are neutral
         if (shape == 3 && !freeze)
             drive += amt * DRIVE_KEEPALIVE * (2.f * random::uniform() - 1.f);   // low-level continuous noise drive
 
@@ -354,24 +342,18 @@ struct Haptik : Module {
         // pass 2 reads only v[]. The ordering is required for correctness.
         // Fast mode steps every sample; Slow mode steps every D samples (divCounter==0)
         // and keeps yPrev so the readout can interpolate between frames (no stepping).
-        bool stepNow = !freeze && (!slow || divCounter == 0);
+        bool stepNow = coalescent::haptik::shouldStep(freeze, slow, divCounter);
         if (stepNow) {
             if (slow) std::copy(y, y + N, yPrev);   // snapshot pre-step for inter-frame lerp
 
             // Velocity pass. Interior masses need no index wrap; the two ring-seam
             // masses are handled out of the hot loop to keep it modulo-free.
             // +1e-20f flushes denormals on long DAMP=0 tails (inaudible, DC-blocked).
-            float a0 = kSpr * (y[N - 1] - 2.f * y[0] + y[1]) - kCtr * y[0];
-            v[0] = (v[0] + a0) * gamma + 1e-20f;
-            for (int i = 1; i < N - 1; i++) {
-                float a = kSpr * (y[i - 1] - 2.f * y[i] + y[i + 1]) - kCtr * y[i];
-                v[i] = (v[i] + a) * gamma + 1e-20f;
-            }
-            float aN = kSpr * (y[N - 2] - 2.f * y[N - 1] + y[0]) - kCtr * y[N - 1];
-            v[N - 1] = (v[N - 1] + aN) * gamma + 1e-20f;
+            coalescent::haptik::advanceVelocities(
+                y, v, N, kSpr, kCtr, gamma);
 
             // Driver force folded in here: (v+a)·gamma + drive·gamma == (v+a+drive)·gamma.
-            v[driverIdx] += drive * gamma;
+            coalescent::haptik::applyDriverForce(v[driverIdx], drive, gamma);
 
             // Bound the state itself. The ω_max<2 stability bound only covers the homogeneous
             // system; external forcing (TRIG, EXT IN) with DAMP=0 (lossless) can pump
@@ -389,26 +371,28 @@ struct Haptik : Module {
             for (; i + 4 <= N; i += 4) {
                 simd::float_4 yv = simd::float_4::load(&y[i]);
                 simd::float_4 vv = simd::float_4::load(&v[i]);
-                yv = simd::fmax(simd::fmin(yv + vv, hi), lo);
-                vv = simd::fmax(simd::fmin(vv, hi), lo);
+                coalescent::haptik::advanceStateValue(
+                    yv, vv, lo, hi,
+                    [](const simd::float_4& a, const simd::float_4& b) {
+                        return simd::fmin(a, b);
+                    },
+                    [](const simd::float_4& a, const simd::float_4& b) {
+                        return simd::fmax(a, b);
+                    });
                 yv.store(&y[i]);
                 vv.store(&v[i]);
             }
-            for (; i < N; i++) {
-                y[i] = clamp(y[i] + v[i], -STATE_MAX, STATE_MAX);
-                v[i] = clamp(v[i], -STATE_MAX, STATE_MAX);
-            }
+            for (; i < N; i++)
+                coalescent::haptik::advanceStateValue(y[i], v[i]);
         }
 
         // ── scan readout (always) ──
         float pexp = params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage();
         pexp = std::isfinite(pexp) ? clamp(pexp, -30.f, 30.f) : 0.f;   // guard approxExp2's int-convert
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pexp);
-        scanPhase += pitchHz / fs;
-        // A NaN on V/OCT (from a misbehaving upstream module) would otherwise
-        // stick scanPhase at NaN forever and make (int)p an out-of-bounds index.
-        if (!std::isfinite(scanPhase)) scanPhase = 0.f;
-        scanPhase -= std::floor(scanPhase);
+        // A NaN on V/OCT (from a misbehaving upstream module) is reset by the
+        // shared phase advance instead of sticking the read head at NaN forever.
+        coalescent::haptik::advanceScanPhase(scanPhase, pitchHz, fs);
         float p   = scanPhase * N;
         int   i0  = clamp((int) p, 0, N - 1);    // guard p==N (phase rounding) and any stray value
         int   i1  = (i0 + 1) % N;
@@ -420,15 +404,15 @@ struct Haptik : Module {
             // lattice frame (fr = samples since last step / D) so the held shape
             // ramps smoothly instead of stepping every D samples.
             float fr = (float) divCounter / (float) D;
-            float a0 = yPrev[i0] + fr * (y[i0] - yPrev[i0]);
-            float a1 = yPrev[i1] + fr * (y[i1] - yPrev[i1]);
-            s = a0 + f * (a1 - a0);
-            motion = yPrev[0] + fr * (y[0] - yPrev[0]);
+            float a0 = coalescent::haptik::interpolate(yPrev[i0], y[i0], fr);
+            float a1 = coalescent::haptik::interpolate(yPrev[i1], y[i1], fr);
+            s = coalescent::haptik::interpolate(a0, a1, f);
+            motion = coalescent::haptik::interpolate(yPrev[0], y[0], fr);
         } else {
-            s = y[i0] + f * (y[i1] - y[i0]);
+            s = coalescent::haptik::interpolate(y[i0], y[i1], f);
         }
         if (slow && !freeze)                     // advance AFTER the readout (frame continuity)
-            divCounter = (divCounter + 1) % D;
+            divCounter = coalescent::haptik::advanceDivider(divCounter, D);
 
         // ── outputs ──
         if (fs != lastFs) {                      // recompute only on SR change (still

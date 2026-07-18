@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### New module
+### New modules
 
 - **Lineages** — a 16 HP generative genealogy sequencer built on a finite Kingman
   coalescent tree with 2–16 sampled leaves and signed neutral mutations. Play from
@@ -50,12 +50,13 @@
   mutation, environmental selection, and frequency-dependent competition. Two
   cluster positions drive paired pitch CVs, their basin masses drive paired
   abundance CVs, SPREAD follows trait variance, and SPLIT/MERGE mark accepted
-  transitions with persistence and hysteresis. The complete musical state is
-  saved with the patch: density, accepted split latch, and pending split/merge
-  timers. Four Core/Fundamental demo patches and a standalone stability suite
-  cover the one-to-two-to-one gesture, parameter extremes, symmetry, no-flux
-  boundaries, exact detector-state continuation, numerical-extinction handling,
-  performance, deterministic restore, and timestep convergence.
+  transitions with persistence and hysteresis. The complete ecological and
+  event-detector state is saved with the patch: density, accepted split latch,
+  and pending split/merge timers. Four Core/Fundamental demo patches and a
+  standalone stability suite cover the one-to-two-to-one gesture, parameter
+  extremes, symmetry, no-flux boundaries, exact detector-state continuation,
+  numerical-extinction handling, performance, deterministic restore, and
+  timestep convergence.
 - **Foxes** — a three-species food chain (grass → bunnies → foxes) on the
   nondimensional **Hastings–Powell** model, the chaotic sibling of Bunnies. WILD
   moves it from a resting coexistence, through a regular three-population chase and
@@ -64,13 +65,40 @@
   windows. Three equilibrium-centered population outputs (GRASS/BUNNY/FOX) and three
   peak-event gates, a continuous KICK force into grass, and a projected phase-trail
   display that draws the actual attractor. Monophonic, 12 HP. Deterministic chaos —
-  no random source; the same knobs and seed always sound the same. `make check`
-  gains a standalone kernel replica asserting the analytic equilibrium, Hopf
-  location, default-period calibration (within 5 cents), a positive Lyapunov
-  estimate at canonical chaos, and finite/bounded behavior across the control box.
+  no random source; the same controls and initial state sound the same on the
+  same build and platform. `make check` includes a shared-production-core
+  contract asserting the analytic
+  equilibrium, Hopf location, default-period calibration (within 5 cents), a
+  positive Lyapunov estimate at canonical chaos, and finite/bounded behavior
+  across the control box.
 
 ### Fixes and polish
 
+- **Single-source DSP tests**: GENDYN, Haptik, Axon, Soma, Operon, Bunnies,
+  and Foxes now expose SDK-free production cores used directly by their Rack
+  wrappers, stability suites, SIMD checks, profilers, and offline renderers.
+  The old copied kernels and handwritten RK4 comparator are gone; `make check`
+  enforces the mapped core entry points and uses independent analytic oracles
+  or explicitly labelled regression mutants for comparison.
+- **Rack wrapper coverage**: `make check-rack` now compiles and executes all
+  eleven production wrappers. The harnesses cover construction, ordinary and
+  hostile-CV finiteness, context-menu Initialize, persistence, event routing,
+  polyphony, transport, and deterministic reset contracts as applicable to each
+  module.
+- **Soma SPIKE events** now observe every accepted RK4 substep, so a narrow
+  high-rate spike cannot rise and fall between oversampled output observations
+  without reaching the trigger detector.
+- **Finches SPLIT/MERGE persistence** now advances at the field's bounded
+  internal substep cadence and latches events across each public advance. This
+  removes the former coarse-call overcount, which credited the final morphology
+  with the whole requested interval.
+- **Field RESET cadence** is consistent between Finches and Archipelago: the
+  scheduled reset tick installs the deterministic initial field without also
+  advancing it, and evolution resumes on the following 500 Hz tick.
+- **Islands LOSS/SWEEP persistence** now treats the 1 ms output pulses as
+  transient presentation signals. Schema-2 saves write zero-valued compatibility
+  placeholders, loads clear any in-flight pulse, and obsolete pulse values are
+  accepted but ignored.
 - **Operon gates** now use armed hysteresis, so gradual center crossings produce
   one balanced event per phase instead of being missed unless a single RK4 step
   crossed the entire deadband. Modulation and PERTURB inputs are sanitized before
@@ -150,9 +178,17 @@ audible effect.
 
 ### Tests, manifest & docs
 
-- New **GENDYN** stability test (barriers + walk catches the DUR WID regression; LOCK servo near/below floor; target-change / LOCK-toggle / restore) and **Haptik FREEZE**-continuity test; `check` (SDK-free) and `check-simd` (Rack headers) are separate targets; offline WAV renderers use production constants and mirror the `subTau` cap.
+- New **GENDYN** stability test (barriers + walk catches the DUR WID regression;
+  LOCK servo near/below floor; target-change / LOCK-toggle / restore) and
+  **Haptik FREEZE**-continuity test; `check` (SDK-free) and `check-simd` (Rack
+  headers) are separate targets; offline WAV renderers call the shared
+  production neuron core.
 - **Manifest**: `keywords` are spec-compliant space-separated strings; Operon/Bunnies tagged `Low-frequency oscillator` + `Clock generator`. Patch generators derive their Coalescent version from `plugin.json`.
-- **Docs**: corrected CPU budgets (i5-9600K lower bounds; +6 oct via CV can saturate a core) incl. Operon's moving-HILL corner; manual install path (`plugins-<os>-<cpu>/`); GENDYN scope-sampling, `fs/N` ceiling, and state-recall wording; `Help → Open user folder`; poly-CV normalling; genetic/ecological taxonomy.
+- **Docs**: corrected CPU budgets (i5-9600K lower bounds; the bounded Axon/Soma
+  speed ceiling can approach a full core at high polyphony) incl. Operon's
+  moving-HILL corner; manual install path (`plugins-<os>-<cpu>/`); GENDYN
+  scope-sampling, `fs/N` ceiling, and state-recall wording; `Help → Open user
+  folder`; poly-CV normalling; genetic/ecological taxonomy.
 
 ## 2.2.0
 

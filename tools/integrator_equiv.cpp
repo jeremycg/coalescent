@@ -1,111 +1,106 @@
-// Numeric proof that the shared coalescent::rk4 template (src/dsp/rk4.hpp)
-// produces the same results as the original hand-written RK4 steppers it
-// replaced, for both Axon (FitzHugh–Nagumo, N=2) and Soma (Hindmarsh–Rose,
-// N=3).
+// SDK-free numerical contract for the production coalescent::rk4 template.
 //
-// The per-element expressions are byte-for-byte the same, so under the plugin's
-// own flags (-O3 -funsafe-math-optimizations -march=nehalem) and under strict
-// IEEE math the two are *bit-identical*. Under some other fast-math flag combos
-// the optimiser is free to reassociate the loop form differently from the scalar
-// form (FMA/grouping), producing last-ULP differences (~1e-8 on state that
-// swings ±2 — dynamically irrelevant and inaudible). So this checks a tight
-// absolute tolerance rather than bit-exactness, which stays valid regardless of
-// the flags CI happens to use while still catching any real algorithmic change
-// (those differ by orders of magnitude more).
-//
-//   g++ -O2 -std=c++17 -o /tmp/eq tools/integrator_equiv.cpp && /tmp/eq
-//   exit 0 = within tolerance across the sweep; 1 = a real divergence.
+// This deliberately uses ODEs with closed-form solutions instead of retaining
+// copies of any module's former handwritten stepper. It checks fourth-order
+// convergence, multi-state operation, and long-run oscillator energy.
 #include "../src/dsp/rk4.hpp"
-#include <cstdio>
+
+#include <algorithm>
 #include <cmath>
-#include <cstdint>
+#include <cstdio>
 
-// ── FHN derivative + ORIGINAL Axon rk4 (verbatim copy, pre-extraction) ──
-static constexpr float B_FIXED = 0.8f;
-static inline void fA(float v, float w, float Itot, float eps, float a, float& dv, float& dw) {
-    dv = v - v * v * v / 3.f - w + Itot;
-    dw = eps * (v + a - B_FIXED * w);
-}
-static inline void rk4A_old(float& v, float& w, float h, float Itot, float eps, float a) {
-    float k1v, k1w, k2v, k2w, k3v, k3w, k4v, k4w;
-    fA(v,                  w,                  Itot, eps, a, k1v, k1w);
-    fA(v + 0.5f * h * k1v, w + 0.5f * h * k1w, Itot, eps, a, k2v, k2w);
-    fA(v + 0.5f * h * k2v, w + 0.5f * h * k2w, Itot, eps, a, k3v, k3w);
-    fA(v + h * k3v,        w + h * k3w,        Itot, eps, a, k4v, k4w);
-    v += h / 6.f * (k1v + 2.f * k2v + 2.f * k3v + k4v);
-    w += h / 6.f * (k1w + 2.f * k2w + 2.f * k3w + k4w);
-}
-static inline void rk4A_new(float& v, float& w, float h, float Itot, float eps, float a) {
-    float s[2] = {v, w};
-    coalescent::rk4<2>(s, h, [&](const float* y, float* d) { fA(y[0], y[1], Itot, eps, a, d[0], d[1]); });
-    v = s[0]; w = s[1];
+
+template <typename T>
+static T decayError(T step) {
+    const T rate = T(0.7);
+    const T endTime = T(8);
+    const int count = static_cast<int>(std::round(endTime / step));
+    step = endTime / T(count);
+    T state[1] = {T(1.25)};
+    for (int i = 0; i < count; ++i) {
+        coalescent::rk4<1>(state, step, [&](const T* value, T* out) {
+            out[0] = -rate * value[0];
+        });
+    }
+    const T exact = T(1.25) * std::exp(-rate * endTime);
+    return std::fabs(state[0] - exact);
 }
 
-// ── HR derivative + ORIGINAL Soma rk4 (verbatim copy, pre-extraction) ──
-static constexpr float A = 1.f, B = 3.f, C = 1.f, D = 5.f, XR = -1.6f;
-static inline void fS(float x, float y, float z, float Itot, float r, float s,
-                      float& dx, float& dy, float& dz) {
-    dx = y - A*x*x*x + B*x*x - z + Itot;
-    dy = C - D*x*x - y;
-    dz = r * (s * (x - XR) - z);
+
+static bool checkDecayConvergence() {
+    const double coarse = decayError<double>(0.4);
+    const double medium = decayError<double>(0.2);
+    const double fine = decayError<double>(0.1);
+    const double ratio1 = coarse / medium;
+    const double ratio2 = medium / fine;
+    const bool ok = fine < 1e-8 && ratio1 > 12.0 && ratio2 > 12.0;
+    std::printf(
+        "RK4 decay convergence: errors %.3e -> %.3e -> %.3e, ratios %.2f/%.2f: %s\n",
+        coarse, medium, fine, ratio1, ratio2, ok ? "PASS" : "FAIL");
+    return ok;
 }
-static inline void rk4S_old(float& x, float& y, float& z, float h, float Itot, float r, float s) {
-    float ax,ay,az, bx,by,bz, cx,cy,cz, dx,dy,dz;
-    fS(x,           y,           z,           Itot, r, s, ax,ay,az);
-    fS(x+.5f*h*ax,  y+.5f*h*ay,  z+.5f*h*az,  Itot, r, s, bx,by,bz);
-    fS(x+.5f*h*bx,  y+.5f*h*by,  z+.5f*h*bz,  Itot, r, s, cx,cy,cz);
-    fS(x+h*cx,      y+h*cy,      z+h*cz,      Itot, r, s, dx,dy,dz);
-    x += h/6.f*(ax + 2*bx + 2*cx + dx);
-    y += h/6.f*(ay + 2*by + 2*cy + dy);
-    z += h/6.f*(az + 2*bz + 2*cz + dz);
+
+
+static bool checkIndependentStates() {
+    const float rates[6] = {0.1f, 0.25f, 0.5f, 0.75f, 1.f, 1.5f};
+    float state[6] = {1.f, 0.5f, 1.5f, 0.75f, 2.f, 1.25f};
+    float initial[6];
+    std::copy(state, state + 6, initial);
+    const float step = 0.005f;
+    const int count = 400;
+    for (int i = 0; i < count; ++i) {
+        coalescent::rk4<6>(state, step, [&](const float* value, float* out) {
+            for (int lane = 0; lane < 6; ++lane)
+                out[lane] = -rates[lane] * value[lane];
+        });
+    }
+
+    float worst = 0.f;
+    for (int lane = 0; lane < 6; ++lane) {
+        const float exact = initial[lane] * std::exp(-rates[lane] * step * count);
+        worst = std::max(worst, std::fabs(state[lane] - exact));
+    }
+    const bool ok = std::isfinite(worst) && worst < 2e-6f;
+    std::printf("RK4 six-state analytic error %.3e: %s\n",
+                worst, ok ? "PASS" : "FAIL");
+    return ok;
 }
-static inline void rk4S_new(float& x, float& y, float& z, float h, float Itot, float r, float s) {
-    float st[3] = {x, y, z};
-    coalescent::rk4<3>(st, h, [&](const float* Y, float* d) { fS(Y[0], Y[1], Y[2], Itot, r, s, d[0], d[1], d[2]); });
-    x = st[0]; y = st[1]; z = st[2];
+
+
+static bool checkOscillatorEnergy() {
+    const double omega = 1.7;
+    const double step = 0.01;
+    const int count = 200000;
+    double state[2] = {1.2, -0.3};
+    const double initialEnergy =
+        0.5 * (state[1] * state[1] + omega * omega * state[0] * state[0]);
+    double worstRelativeDrift = 0.0;
+
+    for (int i = 0; i < count; ++i) {
+        coalescent::rk4<2>(state, step, [&](const double* value, double* out) {
+            out[0] = value[1];
+            out[1] = -omega * omega * value[0];
+        });
+        const double energy =
+            0.5 * (state[1] * state[1] + omega * omega * state[0] * state[0]);
+        worstRelativeDrift = std::max(
+            worstRelativeDrift, std::fabs(energy / initialEnergy - 1.0));
+    }
+
+    const bool ok = std::isfinite(state[0]) && std::isfinite(state[1])
+                 && worstRelativeDrift < 2e-6;
+    std::printf("RK4 oscillator max relative energy drift %.3e: %s\n",
+                worstRelativeDrift, ok ? "PASS" : "FAIL");
+    return ok;
 }
+
 
 int main() {
-    // A real algorithmic change perturbs the RK4 result by O(state); pure
-    // fast-math reassociation stays at the last ULP (~1e-8). 1e-5 sits two-plus
-    // orders below a real change and three above the reassociation noise.
-    const double TOL = 1e-5;
-
-    // Deterministic LCG sweep across realistic state + parameter ranges.
-    uint32_t st = 12345u;
-    auto rnd = [&](float lo, float hi) {
-        st = st * 1664525u + 1013904223u;
-        return lo + (hi - lo) * ((st >> 8) / float(1 << 24));
-    };
-    double maxA = 0.0, maxS = 0.0;
-    for (long i = 0; i < 2000000; ++i) {
-        float h = rnd(1e-4f, 0.05f);
-        // Axon
-        {
-            float v = rnd(-3.f, 3.f), w = rnd(-2.f, 2.f);
-            float I = rnd(-0.2f, 1.6f), eps = rnd(0.01f, 0.30f), a = rnd(0.4f, 1.0f);
-            float v1 = v, w1 = w, v2 = v, w2 = w;
-            rk4A_old(v1, w1, h, I, eps, a);
-            rk4A_new(v2, w2, h, I, eps, a);
-            maxA = std::fmax(maxA, std::fmax(std::fabs(v1 - v2), std::fabs(w1 - w2)));
-        }
-        // Soma
-        {
-            float x = rnd(-2.f, 2.f), y = rnd(-12.f, 4.f), z = rnd(-2.f, 6.f);
-            float I = rnd(0.4f, 4.0f), r = rnd(0.001f, 0.05f), s = rnd(1.0f, 5.0f);
-            float x1=x,y1=y,z1=z, x2=x,y2=y,z2=z;
-            rk4S_old(x1, y1, z1, h, I, r, s);
-            rk4S_new(x2, y2, z2, h, I, r, s);
-            maxS = std::fmax(maxS, std::fmax(std::fabs(x1 - x2),
-                                   std::fmax(std::fabs(y1 - y2), std::fabs(z1 - z2))));
-        }
-    }
-    printf("max abs diff over 2,000,000 samples — Axon=%.3e  Soma=%.3e  (tol %.0e)\n",
-           maxA, maxS, TOL);
-    if (maxA > TOL || maxS > TOL) {
-        printf("FAIL: stepper extraction changed results beyond reassociation noise\n");
+    const bool decay = checkDecayConvergence();
+    const bool states = checkIndependentStates();
+    const bool oscillator = checkOscillatorEnergy();
+    if (!(decay && states && oscillator))
         return 1;
-    }
-    printf("PASS: shared coalescent::rk4 matches the original steppers within tolerance\n");
+    std::printf("PASS: shared RK4 satisfies independent analytic contracts\n");
     return 0;
 }

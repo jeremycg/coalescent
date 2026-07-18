@@ -40,11 +40,14 @@ The **MODE** switch picks how fast the ring itself evolves:
   and a Karplus–Strong resonator. Here **COUPLE is the dominant timbral control**
   and **RATE** is subtle.
 - **Slow** steps the lattice only every 256 samples, with the coefficients
-  rescaled to that longer timestep. The modes drop into the 0–15 Hz "haptic"
-  band — the original conception — so you scan a *slowly-morphing* wavetable,
-  **RATE becomes a real evolution-rate control**, and FREEZE captures a clean
-  table. Inter-frame interpolation keeps the morph smooth (no stepping), and the
-  centering term is clamped so the divided step stays stable.
+  rescaled to that longer timestep. Its dominant energy drops into the roughly
+  0–15 Hz "haptic" band — the original conception — so you scan a
+  *slowly-morphing* wavetable. At 48 kHz, higher spatial modes can still reach
+  roughly 35 Hz at default COUPLE and up to roughly 87 Hz at maximum COUPLE and
+  RATE; these figures move with sample rate. **RATE becomes a real evolution-rate
+  control**, and FREEZE captures a clean table. Inter-frame interpolation keeps
+  the morph smooth (no stepping), and the centering term is clamped so the
+  divided step stays stable.
 
 ## Controls
 

@@ -151,6 +151,52 @@ void testExactRoundTripAndNextGeneration() {
         static_cast<unsigned long long>(nextModel.rngState));
 }
 
+void testTransientPulsesDoNotRoundTrip() {
+    Islands module;
+    stopClockAndArm(module);
+    const coalescent::IslandsModel::State savedModel = module.model.state();
+
+    module.lossPulse.trigger(Islands::PULSE_TIME);
+    module.sweepPulse.trigger(Islands::PULSE_TIME);
+    module.publishSaveFrame();
+    json_t* saved = module.dataToJson();
+    if (!saved)
+        fail("pulse persistence fixture did not serialize");
+    json_t* savedLossPulse = json_object_get(saved, "lossPulseRemaining");
+    json_t* savedSweepPulse = json_object_get(saved, "sweepPulseRemaining");
+    if (!json_is_number(savedLossPulse) || !json_is_number(savedSweepPulse)
+        || json_number_value(savedLossPulse) != 0.0
+        || json_number_value(savedSweepPulse) != 0.0)
+        fail("schema-2 compatibility placeholders were absent or nonzero");
+
+    // Loading the just-saved state while both source pulses are still live must
+    // clear them rather than replaying either edge.
+    module.dataFromJson(saved);
+    if (!sameState(module.model.state(), savedModel)
+        || module.lossPulse.remaining != 0.f
+        || module.sweepPulse.remaining != 0.f)
+        fail("live event pulse survived a save/load round trip");
+    module.process(zeroTimeArgs());
+    if (module.outputs[Islands::LOSS_OUTPUT].getVoltage() != 0.f
+        || module.outputs[Islands::SWEEP_OUTPUT].getVoltage() != 0.f)
+        fail("save/load replayed an event pulse at the outputs");
+
+    // Older schema-2 JSON carried these fields. They remain accepted but have no
+    // authority over the new module's transient pulse generators.
+    json_object_set_new(saved, "lossPulseRemaining", json_real(Islands::PULSE_TIME));
+    json_object_set_new(saved, "sweepPulseRemaining", json_real(Islands::PULSE_TIME));
+    module.lossPulse.trigger(Islands::PULSE_TIME);
+    module.sweepPulse.trigger(Islands::PULSE_TIME);
+    module.dataFromJson(saved);
+    if (!sameState(module.model.state(), savedModel)
+        || module.lossPulse.remaining != 0.f
+        || module.sweepPulse.remaining != 0.f)
+        fail("legacy pulse fields were replayed or rejected the saved state");
+
+    json_decref(saved);
+    std::printf("Islands transient pulse persistence + legacy fields PASS\n");
+}
+
 void testSeedsResetInitializeAndFiniteOutputs() {
     Islands module;
     stopClockAndArm(module);
@@ -222,6 +268,7 @@ void testSeedsResetInitializeAndFiniteOutputs() {
 int main() {
     rack::random::init();
     testExactRoundTripAndNextGeneration();
+    testTransientPulsesDoNotRoundTrip();
     testSeedsResetInitializeAndFiniteOutputs();
     std::printf("Islands Rack integration: PASS\n");
     return 0;

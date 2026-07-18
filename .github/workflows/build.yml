@@ -16,8 +16,8 @@ env:
   RACK_SDK_VERSION: "2.6.6"
 
 jobs:
-  # Fast, SDK-free guardrail: validate the manifest and run the standalone DSP
-  # stability replicas + the RK4 equivalence proof (`make check`). Gates the
+  # Fast, SDK-free guardrail: validate the manifest and run shared production-core
+  # stability contracts + the independent RK4 proof (`make check`). Gates the
   # release so a DSP regression can't ship even if it still compiles.
   tests:
     name: tests

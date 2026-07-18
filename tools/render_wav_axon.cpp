@@ -1,10 +1,10 @@
-// Offline auditioning for Axon: replicates the src/Axon.cpp FHN kernel (same
-// constants, RK4, substep schedule) with a SIMPLIFIED output stage — plain tanh
+// Offline auditioning for Axon: uses the exact shared production FHN core and
+// substep/safety policy with a SIMPLIFIED output stage — plain tanh
 // soft-clip + 20 Hz DC blocker, no oversampling/FIR decimation — so voicings can
 // be heard roughly without launching Rack. Not a bit-exact render of the plugin's
-// output. Keep the kernel constants in sync with src/neuron/Axon.cpp.
+// output.
 //
-//   g++ -O2 -o /tmp/axon_wav render_wav.cpp && /tmp/axon_wav
+//   g++ -std=c++17 -O2 tools/render_wav_axon.cpp -o /tmp/axon_wav && /tmp/axon_wav
 //
 // Writes (in cwd):
 //   axon_freerun.wav   free-run tone, CURRENT=0.6, plays a little V/OCT melody
@@ -16,28 +16,12 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include "../src/dsp/neuron_models.hpp"
 
-static constexpr float B_FIXED = 0.8f, HSUB_MAX = 0.05f, STATE_MAX = 10.f;
-static constexpr int MIN_SUB = 2, MAX_SUB = 64;   // match src/neuron/Axon.cpp (was a stale 4)
-static constexpr float RATE_CAL = 37.899004f, FREQ_C4 = 261.6256f;
+using Core = coalescent::neuron::AxonCore;
 static constexpr float TRIG_AMP = 0.6f, TRIG_TAU_MS = 3.f, OUT_GAIN = 1.0f;
 
 static inline float clampf(float x, float lo, float hi) { return x < lo ? lo : (x > hi ? hi : x); }
-static inline int clampi(int x, int lo, int hi) { return x < lo ? lo : (x > hi ? hi : x); }
-
-static inline void fhn(float v, float w, float I, float eps, float a, float& dv, float& dw) {
-    dv = v - v * v * v / 3.f - w + I;
-    dw = eps * (v + a - B_FIXED * w);
-}
-static inline void rk4(float& v, float& w, float h, float I, float eps, float a) {
-    float k1v, k1w, k2v, k2w, k3v, k3w, k4v, k4w;
-    fhn(v, w, I, eps, a, k1v, k1w);
-    fhn(v + .5f*h*k1v, w + .5f*h*k1w, I, eps, a, k2v, k2w);
-    fhn(v + .5f*h*k2v, w + .5f*h*k2w, I, eps, a, k3v, k3w);
-    fhn(v + h*k3v, w + h*k3w, I, eps, a, k4v, k4w);
-    v += h/6.f*(k1v + 2*k2v + 2*k3v + k4v);
-    w += h/6.f*(k1w + 2*k2w + 2*k3w + k4w);
-}
 
 // Minimal one-pole high-pass (DC blocker), matching dsp::TRCFilter highpass at 20 Hz.
 struct DCBlock {
@@ -62,7 +46,8 @@ static void writeWav(const std::string& path, const std::vector<float>& s, int f
 // Render one voice. trigPeriodS<=0 means no triggers (free-run).
 static std::vector<float> render(float fs, double dur, float I, float eps, float a,
                                  float octStart, float octEnd, float trigPeriodS) {
-    float v = -1.2f, w = -0.6f, trigPulse = 0.f;
+    float state[Core::STATE_COUNT] = {Core::REST_V, Core::REST_W};
+    float trigPulse = 0.f;
     DCBlock dc; dc.setFreq(20.f, fs);
     long N = (long)(dur*fs);
     std::vector<float> out; out.reserve(N);
@@ -72,15 +57,13 @@ static std::vector<float> render(float fs, double dur, float I, float eps, float
         float Itot = I + trigPulse;
         trigPulse *= std::exp(-1.f/(TRIG_TAU_MS*1e-3f*fs));
         float oct = octStart + (octEnd-octStart)*(float)i/N;
-        float pitchHz = FREQ_C4*std::exp2(oct);
-        float dtau = RATE_CAL*pitchHz/fs;
-        dtau = std::min(dtau, HSUB_MAX*MAX_SUB);   // mirror the production subTau cap: keeps h<=HSUB_MAX at extreme pitch
-        int K = clampi((int)std::ceil(dtau/HSUB_MAX), MIN_SUB, MAX_SUB);
-        float h = dtau/K;
-        for (int k = 0; k < K; k++) rk4(v, w, h, Itot, eps, a);
-        if (!std::isfinite(v)||!std::isfinite(w)) { v=-1.2f; w=-0.6f; }
-        v = clampf(v, -STATE_MAX, STATE_MAX); w = clampf(w, -STATE_MAX, STATE_MAX);
-        out.push_back(5.f*std::tanh(dc.process(v)*OUT_GAIN));
+        float pitchHz = coalescent::neuron::PITCH_REFERENCE_HZ * std::exp2(oct);
+        const coalescent::neuron::ScalarSchedule schedule =
+            coalescent::neuron::scalarSchedule<Core>(pitchHz, fs);
+        Core::advanceObservation(
+            state, schedule.h, schedule.substeps, Itot, eps, a);
+        Core::repair(state);
+        out.push_back(5.f*std::tanh(dc.process(state[0])*OUT_GAIN));
     }
     return out;
 }

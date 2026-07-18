@@ -248,6 +248,142 @@ int main() {
         std::printf("FAIL: timestep convergence\n"); failures++;
     }
 
+    // Event persistence is measured at the field's internal integration
+    // cadence. One bounded outer call and the equivalent sequence of 0.02-tau
+    // calls must therefore agree even when a qualifying morphology appears
+    // partway through the interval. These fixtures begin eight internal steps
+    // before the strong/weak detector boundary, leaving only 0.16 tau of the
+    // 0.32-tau interval eligible for either event.
+    FinchesField splitApproach;
+    p = FinchesField::Parameters(); p.mutation = 0.00002f; p.branching = 2.8f;
+    std::array<FinchesField::State, 9> splitHistory;
+    int splitHistoryCount = 0;
+    FinchesField::State beforeSplitCandidate;
+    bool foundSplitCandidate = false;
+    for (int step = 0; step < 20000 && !foundSplitCandidate; ++step) {
+        const FinchesField::State before = splitApproach.state();
+        if (splitHistoryCount < static_cast<int>(splitHistory.size()))
+            splitHistory[splitHistoryCount++] = before;
+        else {
+            for (std::size_t i = 1; i < splitHistory.size(); ++i)
+                splitHistory[i - 1] = splitHistory[i];
+            splitHistory.back() = before;
+        }
+        splitApproach.advance(0.02f, p);
+        if (splitApproach.state().splitTimer > 0.f
+            && splitHistoryCount == static_cast<int>(splitHistory.size())) {
+            beforeSplitCandidate = splitHistory.front();
+            foundSplitCandidate = true;
+        }
+    }
+
+    FinchesField coarseSplitCandidate, fineSplitCandidate;
+    bool fineSplitEvent = false;
+    bool splitGranularityOk = foundSplitCandidate
+        && coarseSplitCandidate.restore(beforeSplitCandidate)
+        && fineSplitCandidate.restore(beforeSplitCandidate);
+    if (splitGranularityOk) {
+        coarseSplitCandidate.advance(0.32f, p);
+        for (int step = 0; step < 16; ++step) {
+            fineSplitCandidate.advance(0.02f, p);
+            fineSplitEvent = fineSplitEvent || fineSplitCandidate.metrics().splitEvent;
+        }
+        splitGranularityOk = !coarseSplitCandidate.metrics().splitEvent
+            && !fineSplitEvent
+            && sameState(coarseSplitCandidate.state(), fineSplitCandidate.state());
+    }
+    if (!splitGranularityOk) {
+        std::printf("FAIL: coarse advance spuriously qualified SPLIT\n"); failures++;
+    }
+    else {
+        // Continue from the identical pending state until the event occurs.
+        // The coarse call must retain an event raised before its final substep.
+        FinchesField coarseSplitEvent, fineSplitEventField;
+        const FinchesField::State pending = coarseSplitCandidate.state();
+        bool positiveFineSplitEvent = false;
+        bool splitLatchOk = coarseSplitEvent.restore(pending)
+            && fineSplitEventField.restore(pending);
+        if (splitLatchOk) {
+            coarseSplitEvent.advance(0.32f, p);
+            for (int step = 0; step < 16; ++step) {
+                fineSplitEventField.advance(0.02f, p);
+                positiveFineSplitEvent = positiveFineSplitEvent
+                    || fineSplitEventField.metrics().splitEvent;
+            }
+            splitLatchOk = coarseSplitEvent.metrics().splitEvent
+                && positiveFineSplitEvent
+                && sameState(coarseSplitEvent.state(), fineSplitEventField.state());
+        }
+        if (!splitLatchOk) {
+            std::printf("FAIL: coarse advance did not latch SPLIT\n"); failures++;
+        }
+    }
+
+    FinchesField mergeApproach;
+    p = FinchesField::Parameters(); p.mutation = 0.00002f; p.branching = 2.8f;
+    evolve(mergeApproach, p, 90.f, 0.13f);
+    p.branching = 0.65f;
+    std::array<FinchesField::State, 9> mergeHistory;
+    int mergeHistoryCount = 0;
+    FinchesField::State beforeMergeCandidate;
+    bool foundMergeCandidate = false;
+    for (int step = 0; step < 20000 && !foundMergeCandidate; ++step) {
+        const FinchesField::State before = mergeApproach.state();
+        if (mergeHistoryCount < static_cast<int>(mergeHistory.size()))
+            mergeHistory[mergeHistoryCount++] = before;
+        else {
+            for (std::size_t i = 1; i < mergeHistory.size(); ++i)
+                mergeHistory[i - 1] = mergeHistory[i];
+            mergeHistory.back() = before;
+        }
+        mergeApproach.advance(0.02f, p);
+        if (mergeApproach.state().mergeTimer > 0.f
+            && mergeHistoryCount == static_cast<int>(mergeHistory.size())) {
+            beforeMergeCandidate = mergeHistory.front();
+            foundMergeCandidate = true;
+        }
+    }
+
+    FinchesField coarseMergeCandidate, fineMergeCandidate;
+    bool fineMergeEvent = false;
+    bool mergeGranularityOk = foundMergeCandidate
+        && coarseMergeCandidate.restore(beforeMergeCandidate)
+        && fineMergeCandidate.restore(beforeMergeCandidate);
+    if (mergeGranularityOk) {
+        coarseMergeCandidate.advance(0.32f, p);
+        for (int step = 0; step < 16; ++step) {
+            fineMergeCandidate.advance(0.02f, p);
+            fineMergeEvent = fineMergeEvent || fineMergeCandidate.metrics().mergeEvent;
+        }
+        mergeGranularityOk = !coarseMergeCandidate.metrics().mergeEvent
+            && !fineMergeEvent
+            && sameState(coarseMergeCandidate.state(), fineMergeCandidate.state());
+    }
+    if (!mergeGranularityOk) {
+        std::printf("FAIL: coarse advance spuriously qualified MERGE\n"); failures++;
+    }
+    else {
+        FinchesField coarseMergeEvent, fineMergeEventField;
+        const FinchesField::State pending = coarseMergeCandidate.state();
+        bool positiveFineMergeEvent = false;
+        bool mergeLatchOk = coarseMergeEvent.restore(pending)
+            && fineMergeEventField.restore(pending);
+        if (mergeLatchOk) {
+            coarseMergeEvent.advance(0.32f, p);
+            for (int step = 0; step < 16; ++step) {
+                fineMergeEventField.advance(0.02f, p);
+                positiveFineMergeEvent = positiveFineMergeEvent
+                    || fineMergeEventField.metrics().mergeEvent;
+            }
+            mergeLatchOk = coarseMergeEvent.metrics().mergeEvent
+                && positiveFineMergeEvent
+                && sameState(coarseMergeEvent.state(), fineMergeEventField.state());
+        }
+        if (!mergeLatchOk) {
+            std::printf("FAIL: coarse advance did not latch MERGE\n"); failures++;
+        }
+    }
+
     // Reset and identical commands are deterministic bin-for-bin.
     FinchesField deterministicA, deterministicB;
     p = FinchesField::Parameters(); p.environment = 0.17f; p.branching = 2.3f;

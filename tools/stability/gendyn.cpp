@@ -1,6 +1,6 @@
-// Stability + calibration replica for GENDYN's pitch/playback path (mirrors the
-// relevant pieces of src/GENDYN.cpp). Asserts the invariants the module relies on
-// but that can't be seen from the audio alone:
+// SDK-free stability and calibration tests for GENDYN's production pitch/playback
+// core. The Rack wrapper and this binary both call dsp/gendyn_core.hpp; historical
+// mutant paths below are retained only to prove the regressions discriminate.
 //   [1] reflect() bounds the amplitude/duration walks (finiteness + range),
 //   [2] DUR WID=0 (zero-width frequency barrier) plays the exact centre pitch
 //       — the regression that shipped ~41 cents flat,
@@ -15,44 +15,29 @@
 #include <algorithm>
 #include <vector>
 #include <utility>
+#include "../../src/dsp/gendyn_core.hpp"
 
-// ── ports of the exact kernel pieces under test ──────────────────────────────
-
-// src/GENDYN.cpp reflect(): folds x into [lo,hi]; returns lo for a degenerate span.
-static float reflect(float x, float lo, float hi) {
-    if (hi <= lo) return lo;
-    const float range = hi - lo;
-    float y = std::fmod(x - lo, 2.f * range);
-    if (y < 0.f) y += 2.f * range;
-    return lo + (y > range ? 2.f * range - y : y);
-}
-
-// src/GENDYN.cpp:376-378 error-diffused duration rounding. Plays `cycles` cycles of
-// N segments whose (pre-norm) durations are dur[i], scaled by norm_k, and returns
-// the played frequency (fs * cycles / totalSamples).
+// Plays `cycles` cycles of N pre-normalized segments through the production
+// duration quantizer and returns fs * cycles / totalSamples.
 static double playHz(const float* dur, int N, float norm_k, float fs, int cycles) {
     float dur_err = 0.f; long total = 0;
     for (int c = 0; c < cycles; c++)
-        for (int i = 0; i < N; i++) {
-            float fd = dur[i] * norm_k + dur_err;
-            int cd = std::max(1, (int) (fd + 0.5f));
-            dur_err = std::clamp(fd - (float) cd, -4.f, 4.f);
-            total += cd;
-        }
+        for (int i = 0; i < N; i++)
+            total += coalescent::gendyn::quantizeDuration(dur[i], norm_k, dur_err);
     return fs * cycles / (double) total;
 }
 
-// src/GENDYN.cpp updateNormAndFreq() feed-forward scale: LOCK scales the cycle to
+// The shared feed-forward scale: LOCK scales the cycle to
 // fs/centreFreq (lockCorr = 1). Production no longer clamps norm_k to the floor —
 // the per-cycle servo bounds the loop instead (exercised in test [5]); well above
 // the floor (test [4]'s cases) the scale is simply fs/centreFreq/sum_dur.
 static float lockNorm(float sum_dur, int N, float fs, float centerFreq) {
     (void) N;
-    return (fs / centerFreq) / sum_dur;
+    return coalescent::gendyn::lockNormalization(sum_dur, fs, centerFreq, 1.f);
 }
 
-// Mode selector for the servo mirror below: the shipped fix, and the two historical
-// regressions the tests must still discriminate against.
+// Shared production transition plus historical mutants the tests must still
+// discriminate against.
 enum ServoMode {
     SERVO_FIXED,        // cycleTarget feedback + anti-windup (>N) + reset lockCorr AND dur_err
     BUG_FEEDBACK,       // pre-fix #1: feed the completed cycle back against the *next* target
@@ -61,93 +46,98 @@ enum ServoMode {
                         // error-diffusion-remainder reset from the (larger) stale-correction fix
 };
 
-// Faithful mirror of the src/GENDYN.cpp LOCK servo (updateNormAndFreq + the cycle-
-// boundary feedback). `sched` is the per-cycle (centerFreq, lockOn) the module sees;
-// the shape `dur[]` is held fixed (the walk is exercised elsewhere). Returns the
-// realized period of every cycle so transitions can be inspected; *finalCorr, if
-// given, receives the converged lockCorr for restore tests.
-//
-// SERVO_FIXED mirrors the module exactly: feedback for a completed cycle uses the
-// target THAT cycle was rendered against; the servo only integrates for reachable
-// targets (period > the N-sample floor); and a material target change / unreachable
-// target / LOCK toggle resets lockCorr to unity so a stale correction can't detune
-// the next cycle. The two BUG_ modes drop one guard each so the tests can prove the
-// fix discriminates.
+// `sched` is the per-cycle (centerFreq, lockOn) the module sees; the shape `dur[]`
+// is held fixed (the walk is exercised elsewhere). SERVO_FIXED calls the same
+// completeCycleAndRetarget() transition as GENDYN.cpp. BUG_* paths deliberately
+// sequence primitives by hand to model the historical defects.
 static std::vector<long> servoRun(const float* dur, int N, float fs,
                                   const std::vector<std::pair<float,bool>>& sched,
                                   ServoMode mode = SERVO_FIXED, float lockCorr0 = 1.f,
                                   float* finalCorr = nullptr) {
     float sum = 0.f; for (int i = 0; i < N; i++) sum += dur[i];
-    float lockCorr = lockCorr0, dur_err = 0.f, cycleTarget = 0.f, norm_k = 1.f;
-    auto prime = [&](std::pair<float,bool> s) {             // reinit/restore branch primes cycle 0
-        if (s.second) norm_k = (fs / s.first) / sum * lockCorr;
-        else { norm_k = 1.f; lockCorr = 1.f; }
-        cycleTarget = s.second ? fs / s.first : 0.f;
-    };
-    prime(sched[0]);
+    coalescent::gendyn::LockControllerState state;
+    state.correction = lockCorr0;
+    coalescent::gendyn::initializeLockController(
+        state, sched[0].second, fs, sched[0].first, sum);
     std::vector<long> out; out.reserve(sched.size());
     for (size_t c = 0; c < sched.size(); c++) {
         long realized = 0;
-        for (int i = 0; i < N; i++) {
-            float fd = dur[i] * norm_k + dur_err;
-            int   cd = std::max(1, (int) (fd + 0.5f));       // module's error-diffused round
-            dur_err  = std::clamp(fd - (float) cd, -4.f, 4.f);
-            realized += cd;
-        }
+        for (int i = 0; i < N; i++)
+            realized += coalescent::gendyn::quantizeDuration(
+                dur[i], state.normalization, state.durationError);
         out.push_back(realized);
 
-        // ── servo feedback for the just-finished cycle ──
-        float fbT = cycleTarget;
-        if (mode == BUG_FEEDBACK && c + 1 < sched.size())    // #1: feed back against the NEXT target
-            fbT = sched[c+1].second ? fs / sched[c+1].first : 0.f;
-        const bool guarded = (mode == SERVO_FIXED || mode == BUG_NO_DURERR);   // anti-windup + reset
-        bool reachable = guarded ? (fbT > (float) N) : (fbT > 0.f);   // anti-windup only when guarded
-        if (fbT > 0.f && reachable && realized > 0)
-            lockCorr = std::clamp(lockCorr * std::clamp(fbT / (float) realized, 0.8f, 1.25f), 0.25f, 4.f);
-
-        // ── advance to the next cycle ──
         auto nx = (c + 1 < sched.size()) ? sched[c+1] : sched[c];
-        float newTarget = nx.second ? fs / nx.first : 0.f;
-        if (guarded && (newTarget != cycleTarget || newTarget <= (float) N)) {
-            lockCorr = 1.f;
-            if (mode == SERVO_FIXED) dur_err = 0.f;          // FIXED resets the remainder too; BUG_NO_DURERR carries it
+        if (mode == SERVO_FIXED) {
+            coalescent::gendyn::completeCycleAndRetarget(
+                state, static_cast<float>(realized), N, nx.second, fs,
+                nx.first, [&]() { return sum; });
+            continue;
         }
-        if (nx.second) norm_k = (fs / nx.first) / sum * lockCorr;
-        else { norm_k = 1.f; lockCorr = 1.f; }
-        cycleTarget = newTarget;
+
+        // Deliberate mutant sequencing begins here. These paths must remain
+        // independent of completeCycleAndRetarget() or they cannot discriminate it.
+        float feedbackTarget = state.target;
+        if (mode == BUG_FEEDBACK && c + 1 < sched.size())
+            feedbackTarget = coalescent::gendyn::targetPeriod(
+                sched[c + 1].second, fs, sched[c + 1].first);
+
+        if (mode == BUG_NO_DURERR) {
+            state.correction = coalescent::gendyn::applyLockFeedback(
+                state.correction, feedbackTarget, static_cast<float>(realized), N);
+        } else if (feedbackTarget > 0.f && realized > 0) {
+            // Historical no-anti-windup path: integrate even below the floor.
+            const float step = std::clamp(
+                feedbackTarget / static_cast<float>(realized), 0.8f, 1.25f);
+            state.correction = std::clamp(
+                state.correction * step, 0.25f, 4.f);
+        }
+
+        const float newTarget = coalescent::gendyn::targetPeriod(
+            nx.second, fs, nx.first);
+        if (mode == BUG_NO_DURERR
+            && coalescent::gendyn::lockControllerNeedsReset(
+                state.target, newTarget, N)) {
+            state.correction = 1.f; // mutant: intentionally retain durationError
+        }
+        coalescent::gendyn::initializeLockController(
+            state, nx.second, fs, nx.first, sum);
     }
-    if (finalCorr) *finalCorr = lockCorr;
+    if (finalCorr) *finalCorr = state.correction;
     return out;
 }
 
 static double cents(double got, double want) { return 1200.0 * std::log2(got / want); }
 
-// src/GENDYN.cpp:309-313 frequency-barrier derivation. `buggy` selects the shipped
-// regression (widen a zero-width window by +1 sample) vs the fix (clamp bDurMax>=bDurMin).
-struct Barriers { float durCenter, bDurMin, bDurMax; };
+// `buggy` selects the historical widened-zero-window mutant. The fixed path is
+// the exact production barrier implementation.
+using Barriers = coalescent::gendyn::DurationBarriers;
 static Barriers barriers(float bDurWidth, float fs, float centerFreq, int N, bool buggy) {
-    float durCenter = fs / (centerFreq * (float) N);
-    float halfWidth = bDurWidth * durCenter;
-    float bDurMin = std::max(1.f, durCenter - halfWidth);
-    float bDurMax;
-    if (buggy) { bDurMax = durCenter + halfWidth; if (bDurMax <= bDurMin) bDurMax = bDurMin + 1.f; }
-    else       { bDurMax = std::max(bDurMin, durCenter + halfWidth); }
-    return {durCenter, bDurMin, bDurMax};
+    if (!buggy)
+        return coalescent::gendyn::durationBarriers(
+            bDurWidth, fs, centerFreq, N);
+
+    // Independent historical mutant: the old code widened every collapsed
+    // barrier by one sample and therefore re-enabled the duration walk.
+    const float center = fs / (centerFreq * static_cast<float>(N));
+    const float halfWidth = bDurWidth * center;
+    const float minimum = std::max(1.f, center - halfWidth);
+    float maximum = center + halfWidth;
+    if (maximum <= minimum)
+        maximum = minimum + 1.f;
+    return {center, minimum, maximum};
 }
 
-// src/GENDYN.cpp runCycleUpdate() duration walk: pDurHW=(max-min)/2, gainDur=scaleDur*pDurHW,
-// then reflect the persistent step and the duration. A zero-width window makes gainDur=0, so
-// the duration must stay pinned. Deterministic driver (fixed nonzero draw) for reproducibility.
+// Exercise the production persistent-walk point transition with a deterministic
+// supplied draw. A zero-width window must make gainDur=0 and pin every duration.
 static void walkDurations(const Barriers& b, int N, float scaleDur, int cycles, float* dur) {
-    float pDurHW = (b.bDurMax - b.bDurMin) * 0.5f;
-    float gainDur = scaleDur * pDurHW;
-    float step[64];
-    for (int i = 0; i < N; i++) { dur[i] = std::max(1.f, b.durCenter); step[i] = 0.f; }
+    const float gainDur = coalescent::gendyn::durationWalkGain(scaleDur, b);
+    float step[coalescent::gendyn::kMaxBreakpoints];
+    for (int i = 0; i < N; i++) { dur[i] = std::max(1.f, b.center); step[i] = 0.f; }
     for (int c = 0; c < cycles; c++)
-        for (int i = 0; i < N; i++) {
-            step[i] = reflect(step[i] + 0.3f, -1.f, 1.f);          // any nonzero draw exposes a nonzero gainDur
-            dur[i]  = reflect(dur[i] + gainDur * step[i], b.bDurMin, b.bDurMax);
-        }
+        for (int i = 0; i < N; i++)
+            coalescent::gendyn::advanceWalkPoint(
+                dur[i], step[i], 0.3f, gainDur, b.minimum, b.maximum);
 }
 
 int main() {
@@ -164,7 +154,7 @@ int main() {
         struct { float lo, hi; } spans[] = {{-1.f, 1.f}, {1.f, 13.f}, {12.97f, 12.97f}, {3.f, 3.f}};
         for (auto s : spans)
             for (float x : xs) {
-                float r = reflect(x, s.lo, s.hi);
+                float r = coalescent::gendyn::reflect(x, s.lo, s.hi);
                 bool inb = (s.hi <= s.lo) ? (r == s.lo)
                                           : (std::isfinite(r) && r >= s.lo - 1e-3f && r <= s.hi + 1e-3f);
                 if (!inb) { ok = false; printf("  [1] FAIL reflect(%.3g,%.3g,%.3g)=%.4g out of bounds\n", x, s.lo, s.hi, r); }
@@ -185,10 +175,10 @@ int main() {
             for (int N : {8, 13, 32, 64})
                 for (float f : {130.81f, 261.6256f, 440.f}) {
                     Barriers b = barriers(0.f, fs, f, N, /*buggy=*/false);
-                    if (b.durCenter < 1.f) continue;            // above fs/N floor → tested in [3]
+                    if (b.center < 1.f) continue;            // above fs/N floor → tested in [3]
                     float dur[64]; walkDurations(b, N, 1.0f, 4000, dur);   // WID=0, strong SCALE DUR
                     float maxdev = 0.f;
-                    for (int i = 0; i < N; i++) maxdev = std::max(maxdev, std::fabs(dur[i] - b.durCenter));
+                    for (int i = 0; i < N; i++) maxdev = std::max(maxdev, std::fabs(dur[i] - b.center));
                     double hz = playHz(dur, N, 1.f, fs, 40000);
                     double dc = cents(hz, f);
                     if (maxdev > 1e-3f || std::fabs(dc) > 2.0) { ok = false;

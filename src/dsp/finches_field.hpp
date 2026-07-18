@@ -233,12 +233,20 @@ public:
 
         int steps = std::max(1, static_cast<int>(std::ceil(deltaTau / maxSubstep())));
         float h = deltaTau / static_cast<float>(steps);
+        // Detector persistence follows the same bounded cadence as the field;
+        // latch any crossing so later substeps cannot hide it from the caller.
+        bool splitEvent = false;
+        bool mergeEvent = false;
         for (int step = 0; step < steps; ++step) {
             reaction(h, p);
             diffuse(h * p.mutation / (binWidth() * binWidth()));
             normalize();
+            refreshMetrics(h, false);
+            splitEvent = splitEvent || metrics_.splitEvent;
+            mergeEvent = mergeEvent || metrics_.mergeEvent;
         }
-        refreshMetrics(deltaTau, false);
+        metrics_.splitEvent = splitEvent;
+        metrics_.mergeEvent = mergeEvent;
     }
 
 private:

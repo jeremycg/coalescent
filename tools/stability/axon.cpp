@@ -1,166 +1,287 @@
-// Regression test + calibration for Axon's FitzHugh-Nagumo kernel.
+// Regression and calibration checks for Axon's FitzHugh-Nagumo model.
 //
-// Replicates the src/Axon.cpp integrator (factored f() + RK4 substepping in
-// dimensionless time) in plain C++ so the safety invariant, pitch calibration,
-// and stiffness behaviour can be checked without launching Rack. Keep this in
-// sync with the kernel if the math changes.
-//
-//   Build & run:  g++ -O2 -o /tmp/axon_test stability_test.cpp && /tmp/axon_test
-//   Exit 0 = all checks pass, 1 = a check failed.
-//
-// What it does:
-//   1. CALIBRATION: measure the dimensionless limit-cycle period T_dim at the
-//      default params. RATE_CAL must equal T_dim so that, with
-//      dtau = RATE_CAL * pitchHz / fs, the emergent audio fundamental comes out
-//      at pitchHz (i.e. C4 at 0 V). Prints the value to bake into Axon.cpp.
-//   2. STABILITY: sweep CURRENT × EPS × SHAPE, long run at several pitches,
-//      assert v,w stay finite and bounded throughout.
-//   3. PITCH: with the measured RATE_CAL, drive the full per-sample loop and
-//      confirm the output fundamental tracks V/OCT within tolerance.
-#include <cstdio>
-#include <cmath>
+// The transition, constants, scheduling, and safety repair below are the exact
+// SDK-free production core used by src/neuron/Axon.cpp. This test deliberately
+// keeps its measurements independent: threshold crossing, period estimation,
+// pitch error, and finite/bounds assertions are external oracles around that
+// shared state transition.
+#include "../../src/dsp/neuron_models.hpp"
+
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <limits>
 
-// ── kernel constants (mirror src/Axon.cpp) ──
-static constexpr float B_FIXED   = 0.8f;
-static constexpr float HSUB_MAX  = 0.05f;
-static constexpr int   MIN_SUB   = 2;
-static constexpr int   MAX_SUB   = 64;
-static constexpr float STATE_MAX = 10.f;
-static constexpr float FREQ_C4   = 261.6256f;   // rack dsp::FREQ_C4
+using Core = coalescent::neuron::AxonCore;
 
-static inline int clampi(int x, int lo, int hi) { return x < lo ? lo : (x > hi ? hi : x); }
-static inline float clampf(float x, float lo, float hi) { return x < lo ? lo : (x > hi ? hi : x); }
-
-// FHN derivatives in dimensionless time (the factored f(); HR will add a 3rd line).
-static inline void fhn(float v, float w, float Itot, float eps, float a,
-                       float& dv, float& dw) {
-    dv = v - v * v * v / 3.f - w + Itot;
-    dw = eps * (v + a - B_FIXED * w);
+static inline bool upwardSpikeCrossing(float previous, float current) {
+    return previous < Core::SPIKE_THRESH && current >= Core::SPIKE_THRESH;
 }
 
-// One RK4 substep of size h. Updates v,w in place.
-static inline void rk4(float& v, float& w, float h, float Itot, float eps, float a) {
-    float k1v, k1w, k2v, k2w, k3v, k3w, k4v, k4w;
-    fhn(v,                 w,                 Itot, eps, a, k1v, k1w);
-    fhn(v + 0.5f * h * k1v, w + 0.5f * h * k1w, Itot, eps, a, k2v, k2w);
-    fhn(v + 0.5f * h * k2v, w + 0.5f * h * k2w, Itot, eps, a, k3v, k3w);
-    fhn(v + h * k3v,        w + h * k3w,        Itot, eps, a, k4v, k4w);
-    v += h / 6.f * (k1v + 2.f * k2v + 2.f * k3v + k4v);
-    w += h / 6.f * (k1w + 2.f * k2w + 2.f * k3w + k4w);
-}
-
-// Advance dimensionless time by dtau using adaptive substepping; returns max|state|.
-// Mirrors the per-sample integrate block in src/Axon.cpp.
-static inline void advance(float& v, float& w, float dtau, float Itot, float eps, float a) {
-    int K = clampi((int)std::ceil(dtau / HSUB_MAX), MIN_SUB, MAX_SUB);
-    float h = dtau / K;
-    for (int k = 0; k < K; k++) rk4(v, w, h, Itot, eps, a);
-    if (!std::isfinite(v) || !std::isfinite(w)) { v = -1.2f; w = -0.6f; }
-    v = clampf(v, -STATE_MAX, STATE_MAX);
-    w = clampf(w, -STATE_MAX, STATE_MAX);
-}
-
-// Measure the dimensionless limit-cycle period by advancing tau in small fixed
-// steps and timing upward zero(threshold)-crossings of v. Returns period in tau
-// units, or -1 if it never oscillates (quiescent).
-static double measurePeriodTau(float I, float eps, float a) {
-    float v = -1.2f, w = -0.6f;
-    const float thr = 1.0f;              // SPIKE_THRESH
-    const float dstep = 1e-4f;           // fine tau step for accurate period
-    // settle onto the limit cycle first
-    double tau = 0.0;
-    for (long i = 0; i < (long)(400.0 / dstep); i++) { advance(v, w, dstep, I, eps, a); tau += dstep; }
-    // now time crossings
-    float vprev = v;
-    double firstCross = -1.0, lastCross = -1.0;
-    int crossings = 0;
-    long maxIter = (long)(2000.0 / dstep);
-    for (long i = 0; i < maxIter && crossings < 21; i++) {
-        advance(v, w, dstep, I, eps, a);
-        tau += dstep;
-        if (vprev < thr && v >= thr) {   // upward crossing
-            if (firstCross < 0) firstCross = tau;
-            lastCross = tau;
-            crossings++;
-        }
-        vprev = v;
+static inline bool rawStateIsSafe(const float (&state)[Core::STATE_COUNT]) {
+    for (int i = 0; i < Core::STATE_COUNT; ++i) {
+        if (!std::isfinite(state[i]) || std::fabs(state[i]) >= Core::RUNAWAY_MAX)
+            return false;
     }
-    if (crossings < 2) return -1.0;
-    return (lastCross - firstCross) / (crossings - 1);
+    return true;
+}
+
+static inline bool rawStateIsWithinClamp(const float (&state)[Core::STATE_COUNT]) {
+    for (int i = 0; i < Core::STATE_COUNT; ++i) {
+        if (std::fabs(state[i]) > Core::STATE_MAX + 1e-3f)
+            return false;
+    }
+    return true;
+}
+
+static inline void resetState(float (&state)[Core::STATE_COUNT]) {
+    state[0] = Core::REST_V;
+    state[1] = Core::REST_W;
+}
+
+static inline bool advanceScheduled(float (&state)[Core::STATE_COUNT],
+                                    const coalescent::neuron::ScalarSchedule& schedule,
+                                    float current, float eps, float shape) {
+    Core::advanceObservation(state, schedule.h, schedule.substeps, current, eps, shape);
+    const bool rawSafe = rawStateIsSafe(state);
+    const bool retained = Core::repair(state);
+    return rawSafe && retained;
+}
+
+// Fine model-time reference. The independent crossing/timing oracle sees state
+// only at the same accepted observation boundary as the Rack wrapper.
+static double measurePeriodTau(float current, float eps, float shape) {
+    float state[Core::STATE_COUNT];
+    resetState(state);
+    const float dstep = 1e-4f;
+    const coalescent::neuron::ScalarSchedule schedule =
+        coalescent::neuron::scalarScheduleFromSubTau<Core>(dstep);
+
+    double tau = 0.0;
+    for (long i = 0; i < (long) (400.0 / dstep); ++i) {
+        advanceScheduled(state, schedule, current, eps, shape);
+        tau += dstep;
+    }
+
+    float previous = state[0];
+    double firstCross = -1.0;
+    double lastCross = -1.0;
+    int crossings = 0;
+    const long maxIterations = (long) (2000.0 / dstep);
+    for (long i = 0; i < maxIterations && crossings < 21; ++i) {
+        advanceScheduled(state, schedule, current, eps, shape);
+        tau += dstep;
+        if (upwardSpikeCrossing(previous, state[0])) {
+            if (firstCross < 0.0)
+                firstCross = tau;
+            lastCross = tau;
+            ++crossings;
+        }
+        previous = state[0];
+    }
+    return crossings >= 2 ? (lastCross - firstCross) / (crossings - 1) : -1.0;
 }
 
 int main() {
     int failures = 0;
 
-    // ── 1. CALIBRATION at default params (I=0.6, eps=0.08, a=0.7) ──
-    double Tdim = measurePeriodTau(0.6f, 0.08f, 0.7f);
-    if (Tdim <= 0.0) {
-        printf("FAIL: default params do not oscillate (T_dim=%.4f)\n", Tdim);
-        failures++;
-    } else {
-        printf("CALIBRATION: dimensionless limit-cycle period T_dim = %.6f\n", Tdim);
-        printf("             => set RATE_CAL = %.6ff   (gives C4 at 0 V)\n", Tdim);
+    // Production constants must still agree with an independently measured
+    // default limit-cycle period; the model is open-loop, but calibration itself
+    // should not silently drift when the shared core changes.
+    const double periodTau = measurePeriodTau(0.6f, 0.08f, 0.7f);
+    if (periodTau <= 0.0) {
+        std::printf("FAIL: default parameters do not oscillate (T_dim=%.4f)\n", periodTau);
+        ++failures;
     }
-    float RATE_CAL = (Tdim > 0) ? (float)Tdim : 6.0f;
+    else {
+        const double calibrationCents = 1200.0 * std::log2(Core::RATE_CAL / periodTau);
+        std::printf("CALIBRATION: measured T_dim=%.6f, production RATE_CAL=%.6f (%+.3f cents)\n",
+                    periodTau, Core::RATE_CAL, calibrationCents);
+        if (std::fabs(calibrationCents) > 1.0) {
+            std::printf("  FAIL: production calibration differs from the fine reference by >1 cent\n");
+            ++failures;
+        }
+    }
 
-    // ── 2. STABILITY sweep ──
-    const float fs = 48000.f;
+    // Contract checks around the shared schedule and sanitizers use literal
+    // expected results rather than recomputing the production formula locally.
+    {
+        const coalescent::neuron::ScalarSchedule capped =
+            coalescent::neuron::scalarSchedule<Core>(1e30f, 1.f);
+        const float cap = Core::HSUB_MAX * Core::MAX_SUB;
+        const bool scheduleOk = capped.subTau == cap
+            && capped.substeps == Core::MAX_SUB
+            && std::fabs(capped.h - Core::HSUB_MAX) < 1e-7f;
+        const bool pitchGuardOk = coalescent::neuron::sanitizePitchExponent(
+                std::numeric_limits<float>::quiet_NaN()) == 0.f
+            && coalescent::neuron::sanitizePitchExponent(
+                std::numeric_limits<float>::infinity()) == 30.f
+            && coalescent::neuron::sanitizePitchExponent(
+                -std::numeric_limits<float>::infinity()) == -30.f;
+        std::printf("SCHEDULE cap/substeps and hostile pitch guard: %s\n",
+                    scheduleOk && pitchGuardOk ? "PASS" : "FAIL");
+        if (!scheduleOk || !pitchGuardOk)
+            ++failures;
+    }
+
+    // The bounded-CPU policy is user-visible: at 44.1 kHz the simulation-speed
+    // ceiling moves up by one octave for each doubling of oversampling. Keep
+    // literal brackets around the documented limits so a scheduler change
+    // cannot silently move the playable range.
+    {
+        struct CeilingBracket {
+            int oversample;
+            float belowOctaves;
+            float aboveOctaves;
+        };
+        const CeilingBracket brackets[] = {
+            {1, 3.82f, 3.84f},
+            {2, 4.82f, 4.84f},
+            {4, 5.82f, 5.84f},
+            {8, 6.82f, 6.84f},
+        };
+        bool ceilingsOk = true;
+        const float cap = Core::HSUB_MAX * Core::MAX_SUB;
+        for (const CeilingBracket& bracket : brackets) {
+            const coalescent::neuron::ScalarSchedule below =
+                coalescent::neuron::scalarSchedule<Core>(
+                    coalescent::neuron::PITCH_REFERENCE_HZ
+                        * std::exp2(bracket.belowOctaves),
+                    44100.f, bracket.oversample);
+            const coalescent::neuron::ScalarSchedule above =
+                coalescent::neuron::scalarSchedule<Core>(
+                    coalescent::neuron::PITCH_REFERENCE_HZ
+                        * std::exp2(bracket.aboveOctaves),
+                    44100.f, bracket.oversample);
+            ceilingsOk = ceilingsOk && below.subTau < cap && above.subTau == cap;
+        }
+        std::printf("SCHEDULE documented 44.1 kHz ceilings: %s\n",
+                    ceilingsOk ? "PASS" : "FAIL");
+        if (!ceilingsOk)
+            ++failures;
+    }
+
+    // Exercise the exact shared repair contract separately from the normal-run
+    // invariant below: huge/NaN states reset atomically, finite overshoot clamps.
+    {
+        float runaway[Core::STATE_COUNT] = {
+            std::numeric_limits<float>::quiet_NaN(), 0.f
+        };
+        const bool runawayRetained = Core::repair(runaway);
+        float finite[Core::STATE_COUNT] = {15.f, -15.f};
+        const bool finiteRetained = Core::repair(finite);
+        const bool repairOk = !runawayRetained
+            && runaway[0] == Core::REST_V && runaway[1] == Core::REST_W
+            && finiteRetained && finite[0] == Core::STATE_MAX
+            && finite[1] == -Core::STATE_MAX;
+        std::printf("SAFETY reset/clamp contract: %s\n", repairOk ? "PASS" : "FAIL");
+        if (!repairOk)
+            ++failures;
+    }
+
+    // CURRENT CV is neutral lane-by-lane when a cable supplies NaN/Inf. The
+    // generic shared policy is instantiated here with scalar predicates; Rack
+    // supplies SIMD predicates/selectors around the same entry point.
+    {
+        const auto finite = [](float value) { return std::isfinite(value); };
+        const auto select = [](bool condition, float yes, float no) {
+            return condition ? yes : no;
+        };
+        const bool currentGuardOk = coalescent::finiteOr(2.5f, 0.f, finite, select) == 2.5f
+            && coalescent::finiteOr(
+                std::numeric_limits<float>::quiet_NaN(), 0.f, finite, select) == 0.f
+            && coalescent::finiteOr(
+                std::numeric_limits<float>::infinity(), 0.f, finite, select) == 0.f
+            && coalescent::finiteOr(
+                -std::numeric_limits<float>::infinity(), 0.f, finite, select) == 0.f;
+        std::printf("CURRENT CV non-finite neutralization: %s\n",
+                    currentGuardOk ? "PASS" : "FAIL");
+        if (!currentGuardOk)
+            ++failures;
+    }
+
+    const float sampleRate = 48000.f;
     int sweepCount = 0;
-    for (float I = -0.2f; I <= 1.6001f; I += 0.2f)
-        for (float eps = 0.01f; eps <= 0.3001f; eps += 0.04f)
-            for (float a = 0.4f; a <= 1.0001f; a += 0.15f)
+    bool rawClampUsed = false;
+    for (float current = -0.2f; current <= 1.6001f; current += 0.2f) {
+        for (float eps = 0.01f; eps <= 0.3001f; eps += 0.04f) {
+            for (float shape = 0.4f; shape <= 1.0001f; shape += 0.15f) {
                 for (float oct = -4.f; oct <= 4.001f; oct += 4.f) {
-                    float v = -1.2f, w = -0.6f;
-                    float pitchHz = FREQ_C4 * std::exp2(oct);
-                    float dtau = RATE_CAL * pitchHz / fs;
-                    long n = (long)(fs * 0.5f);   // 0.5 s
-                    for (long i = 0; i < n; i++) {
-                        advance(v, w, dtau, I, eps, a);
-                        if (!std::isfinite(v) || !std::isfinite(w) ||
-                            std::fabs(v) > STATE_MAX + 1e-3f || std::fabs(w) > STATE_MAX + 1e-3f) {
-                            printf("FAIL: state escaped at I=%.2f eps=%.3f a=%.2f oct=%.0f: v=%g w=%g\n",
-                                   I, eps, a, oct, v, w);
-                            failures++;
+                    float state[Core::STATE_COUNT];
+                    resetState(state);
+                    const float pitchHz = coalescent::neuron::PITCH_REFERENCE_HZ * std::exp2(oct);
+                    const coalescent::neuron::ScalarSchedule schedule =
+                        coalescent::neuron::scalarSchedule<Core>(pitchHz, sampleRate);
+                    const long samples = (long) (sampleRate * 0.5f);
+                    for (long i = 0; i < samples; ++i) {
+                        Core::advanceObservation(
+                            state, schedule.h, schedule.substeps, current, eps, shape);
+                        const bool rawSafe = rawStateIsSafe(state);
+                        const bool withinClamp = rawStateIsWithinClamp(state);
+                        rawClampUsed = rawClampUsed || !withinClamp;
+                        const bool retained = Core::repair(state);
+                        if (!rawSafe || !retained || !rawStateIsWithinClamp(state)) {
+                            std::printf("FAIL: state escaped at I=%.2f eps=%.3f a=%.2f oct=%.0f: v=%g w=%g\n",
+                                        current, eps, shape, oct, state[0], state[1]);
+                            ++failures;
                             break;
                         }
                     }
-                    sweepCount++;
+                    ++sweepCount;
                 }
-    printf("STABILITY: %d parameter/pitch combinations stayed finite & bounded\n", sweepCount);
-
-    // ── 3. PITCH tracking: measure output period in samples at several octaves ──
-    auto measureAudioHz = [&](float oct, float I, float eps, float a) -> double {
-        float v = -1.2f, w = -0.6f;
-        float pitchHz = FREQ_C4 * std::exp2(oct);
-        float dtau = RATE_CAL * pitchHz / fs;
-        const float thr = 1.0f;
-        // settle
-        for (long i = 0; i < (long)(fs * 0.3f); i++) advance(v, w, dtau, I, eps, a);
-        float vprev = v;
-        double firstCross = -1, lastCross = -1; int crossings = 0; long s = 0;
-        long maxS = (long)(fs * 2.0f);
-        for (; s < maxS && crossings < 21; s++) {
-            advance(v, w, dtau, I, eps, a);
-            if (vprev < thr && v >= thr) { if (firstCross < 0) firstCross = s; lastCross = s; crossings++; }
-            vprev = v;
+            }
         }
-        if (crossings < 2) return -1;
-        double periodSamples = (lastCross - firstCross) / (crossings - 1);
-        return fs / periodSamples;
+    }
+    std::printf("STABILITY: %d parameter/pitch combinations finite and bounded; raw clamp %s\n",
+                sweepCount, rawClampUsed ? "was needed" : "was not needed");
+
+    // Independent event timing over the production schedule. This intentionally
+    // measures the emergent oscillator, not an algebraic restatement of RATE_CAL.
+    auto measureAudioHz = [&](float oct, float current, float eps, float shape) -> double {
+        float state[Core::STATE_COUNT];
+        resetState(state);
+        const float pitchHz = coalescent::neuron::PITCH_REFERENCE_HZ * std::exp2(oct);
+        const coalescent::neuron::ScalarSchedule schedule =
+            coalescent::neuron::scalarSchedule<Core>(pitchHz, sampleRate);
+        for (long i = 0; i < (long) (sampleRate * 0.3f); ++i)
+            advanceScheduled(state, schedule, current, eps, shape);
+
+        float previous = state[0];
+        double firstCross = -1.0;
+        double lastCross = -1.0;
+        int crossings = 0;
+        const long maxSamples = (long) (sampleRate * 2.f);
+        for (long sample = 0; sample < maxSamples && crossings < 21; ++sample) {
+            advanceScheduled(state, schedule, current, eps, shape);
+            if (upwardSpikeCrossing(previous, state[0])) {
+                if (firstCross < 0.0)
+                    firstCross = sample;
+                lastCross = sample;
+                ++crossings;
+            }
+            previous = state[0];
+        }
+        if (crossings < 2)
+            return -1.0;
+        return sampleRate / ((lastCross - firstCross) / (crossings - 1));
     };
+
     for (float oct = -2.f; oct <= 2.001f; oct += 1.f) {
-        double want = FREQ_C4 * std::exp2(oct);
-        double got = measureAudioHz(oct, 0.6f, 0.08f, 0.7f);
-        double cents = (got > 0) ? 1200.0 * std::log2(got / want) : 0;
-        printf("PITCH: oct=%+.0f  want=%7.2f Hz  got=%7.2f Hz  (%+6.1f cents)\n", oct, want, got, cents);
-        if (got < 0 || std::fabs(cents) > 50.0) {   // ½ semitone tolerance (open-loop)
-            printf("  FAIL: pitch off by more than 50 cents\n");
-            failures++;
+        const double wanted = coalescent::neuron::PITCH_REFERENCE_HZ * std::exp2(oct);
+        const double measured = measureAudioHz(oct, 0.6f, 0.08f, 0.7f);
+        const double cents = measured > 0.0 ? 1200.0 * std::log2(measured / wanted) : 0.0;
+        std::printf("PITCH: oct=%+.0f want=%7.2f Hz got=%7.2f Hz (%+6.1f cents)\n",
+                    oct, wanted, measured, cents);
+        if (measured < 0.0 || std::fabs(cents) > 50.0) {
+            std::printf("  FAIL: pitch off by more than 50 cents\n");
+            ++failures;
         }
     }
 
-    if (failures) { printf("\n%d CHECK(S) FAILED\n", failures); return 1; }
-    printf("\nAll checks passed.\n");
+    if (failures) {
+        std::printf("\n%d CHECK(S) FAILED\n", failures);
+        return 1;
+    }
+    std::printf("\nAll checks passed.\n");
     return 0;
 }

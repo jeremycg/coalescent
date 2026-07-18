@@ -1,7 +1,6 @@
 #include "plugin.hpp"
-#include "dsp/rk4.hpp"
 #include "dsp/display_snapshot.hpp"
-#include "tanh_approx.hpp"
+#include "dsp/operon_core.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -73,32 +72,9 @@ struct Operon : Module {
     bool  pStarValid = false;
     dsp::PulseGenerator gateGen[3];
 
-    // Hill-response LUT: 1/(1+repⁿ) precomputed over rep, keyed on n — replaces the
-    // per-sample pow with a lookup (~1.5× on the RK4 derivative), sub-cent even at
-    // n=8 (8192 pts). Rebuilds are rate-limited (see process()) and fall back to
-    // direct pow while n moves, so dialling HILL or CV'ing it can't thrash the
-    // 8192-pow rebuild.
-    static constexpr int   HILL_LUT_N     = 8192;
-    static constexpr float HILL_LUT_XMAX  = 64.f;
-    static constexpr int   HILL_LUT_SLICE = 256;   // entries filled per sample during a rebuild
-    float hillLut[HILL_LUT_N + 1];
-    float lutN = -1.f;      // n the active LUT was built for
-    float nSettleRef = -1e9f; // anchor for the settle detector (see process())
-    int   rebuildClock = 0; // consecutive samples n has stayed within N_MOVE_EPS of nSettleRef
-    bool  lutValid = false;
-    int   buildPos = -1;    // incremental rebuild cursor: -1 idle, else next entry to fill
-    float buildN = -1.f;    // n the in-progress rebuild is filling for
-    static constexpr float N_MOVE_EPS = 1e-4f;   // per-sample |Δn| above this = "actively modulated"
-
-    static float hillEntry(int i, float n) {
-        return 1.f / (1.f + std::pow(HILL_LUT_XMAX * i / HILL_LUT_N, n));
-    }
-    inline float hillLookup(float rep) const {   // rep already >= 0
-        if (rep >= HILL_LUT_XMAX) return hillLut[HILL_LUT_N];
-        float f = rep * (HILL_LUT_N / HILL_LUT_XMAX);
-        int   i = (int) f;
-        return hillLut[i] + (f - i) * (hillLut[i + 1] - hillLut[i]);
-    }
+    // SDK-free production core owns the incremental Hill-response LUT so the
+    // standalone stability suite exercises this exact rebuild state machine.
+    coalescent::operon::HillLut hillLut;
 
     // ─── Display scope: the 3 protein levels over time (lock-free triple buffer) ──
     static const int HIST_N = 256;
@@ -113,19 +89,9 @@ struct Operon : Module {
     float lastDisplayFs = 0.f;
 
     // ─── Tunable constants ──────────────────────────────────────────────────
-    static constexpr float RATE_CAL     = 12.46f;  // measured default period (tools/stability/operon.cpp) → C4 at 0 V
-    static constexpr float HSUB_MAX     = 0.05f;
-    static constexpr int   MIN_SUB      = 2;   // substep floor: K=2 holds 0-cent and stays bounded at default
-    static constexpr int   MAX_SUB      = 64;
     static constexpr float PITCH_TOTAL_MIN = -8.f, PITCH_TOTAL_MAX = 8.f;
-    static constexpr float OUT_GAIN     = 0.3f;   // set offline: default RMS ~3.2V, peaks lightly saturate, high drive grits
-    static constexpr float STATE_MAX    = 1e3f;
     static constexpr float PERTURB_GAIN = 0.5f;
-    static constexpr float BIAS_EPS     = 1e-6f;   // zero-sum self-start symmetry breaker
     static constexpr float GATE_LEVEL   = 10.f, GATE_TIME = 1e-3f;
-    static constexpr float GATE_LOW     = -0.05f, GATE_HIGH = 0.05f;  // centered units
-    static constexpr int   CENTER_ITERS = 16;   // bisection fallback iterations
-    static constexpr int   NEWTON_ITERS = 4;     // warm-started Newton (1 pow/iter)
     // Separate CV depths — the parameter scales differ a lot.
     static constexpr float ALPHA_CV_DEPTH = 6.f;
     static constexpr float HILL_CV_DEPTH  = 0.6f;
@@ -158,12 +124,17 @@ struct Operon : Module {
     }
 
     void reseedAsymmetric() {
-        m[0] = 0.2f; m[1] = 0.1f; m[2] = 0.3f;
-        p[0] = 0.1f; p[1] = 0.4f; p[2] = 0.15f;
+        float state[6];
+        coalescent::operon::seed(state);
+        for (int i = 0; i < 3; ++i) {
+            m[i] = state[i];
+            p[i] = state[3 + i];
+        }
     }
 
     void resetGateMemory() {
-        for (int k = 0; k < 3; ++k) gateArmed[k] = p[k] - pStar <= GATE_LOW;
+        for (int k = 0; k < 3; ++k)
+            gateArmed[k] = p[k] - pStar <= coalescent::operon::GATE_LOW;
     }
 
     void onReset(const ResetEvent& event) override {
@@ -171,7 +142,7 @@ struct Operon : Module {
         reseedAsymmetric();
         pStarValid = false;
         pStar = 0.f; pStarA = pStarN = pStarL = -1.f;
-        lutValid = false; lutN = -1.f; nSettleRef = -1e9f; rebuildClock = 0; buildPos = -1;
+        hillLut.reset();
         for (int k = 0; k < 3; ++k) { gateArmed[k] = false; gateGen[k].reset(); }
         liveScope = OperonScope{};
         displaySnapshot.writable() = liveScope;
@@ -179,48 +150,13 @@ struct Operon : Module {
         lastDisplayFs = 0.f;
     }
 
-    static float finiteOr(float value, float fallback) {
-        return std::isfinite(value) ? value : fallback;
-    }
-
     float modulatedParam(ParamId param, InputId input, ParamId attenuverter,
                          float depth, float fallback) {
-        const float base = finiteOr(params[param].getValue(), fallback);
-        const float cv = finiteOr(inputs[input].getVoltage(), 0.f);
-        const float att = finiteOr(params[attenuverter].getValue(), 0.f);
-        return finiteOr(base + finiteOr(cv * att * depth, 0.f), base);
-    }
-
-    // Symmetric fixed point pStar (= mStar): the monotonic g(x) = x - alpha/(1+x^n)
-    // - alpha0 has one root in (0, hi). g is strictly increasing (g' > 1), so Newton
-    // warm-started from the previous root converges in 1–2 steps under per-sample
-    // modulation — one pow() per step vs bisection's 16. Fall back to bisection on a
-    // cold start (guess<0) or if a step leaves the bracket. max(x,eps) before pow —
-    // n is non-integer, and x^(n-1) is reused from x^n as xn/x.
-    static float solvePStar(float alpha, float n, float alpha0, float guess) {
-        const float hi = std::max(1.f, alpha + alpha0 + 1.f);
-        if (guess > 0.f && guess < hi) {
-            float x = guess;
-            for (int i = 0; i < NEWTON_ITERS; ++i) {
-                float xn = std::pow(std::max(x, 1e-6f), n);
-                float d  = 1.f + xn;
-                float g  = x - alpha / d - alpha0;
-                float gp = 1.f + alpha * n * (xn / std::max(x, 1e-6f)) / (d * d);   // g'(x) > 1
-                float step = g / gp;
-                x -= step;
-                if (!(x > 0.f && x < hi)) break;                   // left the bracket → bisection
-                if (std::fabs(step) < 1e-5f) return x;             // converged
-            }
-            // Did not converge within NEWTON_ITERS (a big jump) → fall through to bisection.
-        }
-        // Cold start / fallback: robust bisection.
-        float lo = 0.f, h = hi;
-        for (int i = 0; i < CENTER_ITERS; ++i) {
-            float mid = 0.5f * (lo + h);
-            float g = mid - alpha / (1.f + std::pow(std::max(mid, 0.f), n)) - alpha0;
-            if (g > 0.f) h = mid; else lo = mid;
-        }
-        return 0.5f * (lo + h);
+        const float base = coalescent::finiteOr(params[param].getValue(), fallback);
+        const float cv = coalescent::finiteOr(inputs[input].getVoltage(), 0.f);
+        const float att = coalescent::finiteOr(params[attenuverter].getValue(), 0.f);
+        return coalescent::finiteOr(
+            base + coalescent::finiteOr(cv * att * depth, 0.f), base);
     }
 
     void process(const ProcessArgs& args) override {
@@ -233,7 +169,8 @@ struct Operon : Module {
                                             HILL_CV_DEPTH, 2.5f), 1.01f, 10.f);
         float beta   = clamp(modulatedParam(BETA_PARAM, BETA_INPUT, BETA_ATT_PARAM,
                                             BETA_CV_DEPTH, 1.f), 0.05f, 8.f);
-        float alpha0 = clamp(finiteOr(params[LEAK_PARAM].getValue(), 0.05f), 0.f, 2.f);
+        float alpha0 = coalescent::finiteClamp(
+            params[LEAK_PARAM].getValue(), 0.05f, 0.f, 2.f);
         // Sanitize PERTURB before it enters the ODE: a non-finite CV would propagate
         // through rk4 into rep and hit hillLookup's array index (UB) *before* the
         // post-step finiteness guard below can catch it. Flush NaN/inf to 0, clamp range.
@@ -245,7 +182,8 @@ struct Operon : Module {
 
         // ── symmetric fixed point for centering (cached on alpha/n/alpha0) ──
         if (!pStarValid || alpha != pStarA || n != pStarN || alpha0 != pStarL) {
-            pStar = solvePStar(alpha, n, alpha0, pStarValid ? pStar : -1.f);   // warm-start Newton from the cached root
+            pStar = coalescent::operon::solvePStar(
+                alpha, n, alpha0, pStarValid ? pStar : -1.f);
             pStarA = alpha; pStarN = n; pStarL = alpha0; pStarValid = true;
         }
 
@@ -259,12 +197,6 @@ struct Operon : Module {
         // A rebuild starts only after n has genuinely been still for ~2048 samples, so a
         // slow HILL LFO (whose per-sample delta is tiny but which never settles) stays on
         // direct pow instead of aborting-and-restarting a 256-entry fill every sample.
-        if (std::fabs(n - nSettleRef) > N_MOVE_EPS) {
-            nSettleRef = n; rebuildClock = 0; buildPos = -1;   // moved → reset window + drop partial build
-        } else if (rebuildClock < 2048) {
-            ++rebuildClock;                                    // saturates; only the >=2048 threshold matters
-        }
-
         // Rebuild the LUT incrementally rather than in one sample: the full 8192-pow
         // table build measured ~60 µs (a real spike at high SR / many instances). Fill it
         // HILL_LUT_SLICE entries per sample and publish only when complete — the whole
@@ -278,48 +210,26 @@ struct Operon : Module {
         // the 1e-4 rebuild threshold relative to a build-time n and thrash — it builds once
         // for the anchor and then the LUT covers the whole wobble. rebuildClock is also
         // cleared on completion so a fresh settle window is required before any next build.
-        if (buildPos < 0 && rebuildClock >= 2048 && std::fabs(nSettleRef - lutN) > 1e-4f) {
-            buildPos = 0; buildN = nSettleRef; lutValid = false;   // start; old LUT is now stale/unreadable
-        }
-        if (buildPos >= 0) {
-            int end = std::min(buildPos + HILL_LUT_SLICE, HILL_LUT_N + 1);
-            for (; buildPos < end; ++buildPos) hillLut[buildPos] = hillEntry(buildPos, buildN);
-            if (buildPos > HILL_LUT_N) { lutN = buildN; lutValid = true; buildPos = -1; rebuildClock = 0; }  // go live
-        }
-        const bool hillDirect = !lutValid || std::fabs(n - lutN) > 1e-4f;
+        hillLut.process(n);
+        const bool hillDirect = hillLut.direct(n);
 
         // ── pitch = simulation speed; adaptive substepping ──
-        const float pitchBase = finiteOr(params[PITCH_PARAM].getValue(), 0.f);
-        const float pitchCv = finiteOr(inputs[VOCT_INPUT].getVoltage(), 0.f);
-        float pitchTotal = clamp(finiteOr(pitchBase + pitchCv, pitchBase),
+        const float pitchBase = coalescent::finiteOr(params[PITCH_PARAM].getValue(), 0.f);
+        const float pitchCv = coalescent::finiteOr(inputs[VOCT_INPUT].getVoltage(), 0.f);
+        float pitchTotal = clamp(coalescent::finiteOr(pitchBase + pitchCv, pitchBase),
                                  PITCH_TOTAL_MIN, PITCH_TOTAL_MAX);
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pitchTotal);
-        float dtau = RATE_CAL * pitchHz / fs;
-        dtau = std::min(dtau, HSUB_MAX * MAX_SUB);          // hard guard: keep h <= HSUB_MAX
-        int   K = clamp((int) std::ceil(dtau / HSUB_MAX), MIN_SUB, MAX_SUB);
-        float h = dtau / K;
-
-        // ── derivative over y = [m0,m1,m2,p0,p1,p2]; rep_i = protein of prev gene ──
-        auto deriv = [&](const float* Y, float* D) {
-            for (int i = 0; i < 3; ++i) {
-                float r0  = Y[3 + ((i + 2) % 3)];
-                float rep = r0 > 0.f ? r0 : 0.f;   // required: n non-integer; also flushes NaN→0 (hillLookup index safety)
-                float hr  = hillDirect ? 1.f / (1.f + std::pow(rep, n)) : hillLookup(rep);
-                D[i]     = -Y[i] + alpha * hr + alpha0;
-                D[3 + i] = -beta * (Y[3 + i] - Y[i]);
-            }
-            D[0] += perturb;                    // PERTURB into gene-0 transcription
-            D[0] +=  BIAS_EPS;                  // zero-sum self-start symmetry breaker
-            D[1] += -0.5f * BIAS_EPS;
-            D[2] += -0.5f * BIAS_EPS;
+        const float dtau = coalescent::operon::RATE_CAL * pitchHz / fs;
+        const coalescent::OdeStepPlan plan = coalescent::operon::stepPlan(dtau);
+        const coalescent::operon::Parameters model = {alpha, n, beta, alpha0};
+        const auto hillResponse = [&](float rep) {
+            return hillLut.response(rep, n, hillDirect);
         };
 
         float y[6] = {m[0], m[1], m[2], p[0], p[1], p[2]};
-        for (int s = 0; s < K; ++s) {
-            coalescent::rk4<6>(y, h, deriv);
-            bool bad = false;
-            for (int j = 0; j < 6; ++j) { if (!std::isfinite(y[j])) bad = true; y[j] = clamp(y[j], 0.f, STATE_MAX); }
-            if (bad) {
+        for (int s = 0; s < plan.count; ++s) {
+            if (!coalescent::operon::advanceAcceptedSubstep(
+                    y, plan.h, model, perturb, hillResponse)) {
                 reseedAsymmetric();
                 for (int j = 0; j < 3; ++j) { y[j] = m[j]; y[3 + j] = p[j]; }
                 resetGateMemory();
@@ -327,11 +237,7 @@ struct Operon : Module {
             }
             for (int k = 0; k < 3; ++k) {                  // armed Schmitt gates on centered value
                 float c = y[3 + k] - pStar;
-                if (c <= GATE_LOW) {
-                    gateArmed[k] = true;
-                }
-                else if (gateArmed[k] && c >= GATE_HIGH) {
-                    gateArmed[k] = false;
+                if (coalescent::operon::gateStep(c, gateArmed[k])) {
                     gateGen[k].trigger(GATE_TIME);
                 }
             }
@@ -340,7 +246,8 @@ struct Operon : Module {
 
         // ── outputs: centered, soft-clipped proteins + per-sample phase gates ──
         for (int k = 0; k < 3; ++k)
-            outputs[OUT1_OUTPUT + k].setVoltage(5.f * coalescent::fastTanh((p[k] - pStar) * OUT_GAIN));
+            outputs[OUT1_OUTPUT + k].setVoltage(
+                coalescent::operon::outputVoltage(p[k] - pStar));
         for (int k = 0; k < 3; ++k)
             outputs[GATE1_OUTPUT + k].setVoltage(gateGen[k].process(args.sampleTime) ? GATE_LEVEL : 0.f);
 

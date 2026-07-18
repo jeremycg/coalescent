@@ -1,7 +1,6 @@
 #include "plugin.hpp"
-#include "dsp/rk4.hpp"
+#include "dsp/bunnies_core.hpp"
 #include "dsp/display_snapshot.hpp"
-#include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -79,26 +78,11 @@ struct Bunnies : Module {
     int   vSince = 0;                                 // samples since last phase-0
 
     // ─── Tunable constants ──────────────────────────────────────────────────
-    static constexpr float RATE_CAL  = 7.33f;  // measured LV default period × √gamma (tools/stability/bunnies.cpp) → C4 (261.6 Hz)
-    static constexpr float HSUB_MAX  = 0.05f;
-    static constexpr int   MIN_SUB   = 2;   // substep floor: 2 keeps 0-cent with margin above the positivity floor
-    static constexpr int   MAX_SUB   = 64;
     static constexpr float PITCH_TOTAL_MIN = -8.f, PITCH_TOTAL_MAX = 8.f;
-    static constexpr float OUT_GAIN  = 0.9f;
-    static constexpr float STATE_MAX = 1e3f;
-    static constexpr float POS_FLOOR = 1e-4f;
-    static constexpr float STAB_K       = 0.5f;   // servo gain (sim-time units)
-    static constexpr float STAB_FLOOR   = 0.2f;   // reciprocal floor in the V-gradient
-    static constexpr float MAX_STAB_STEP = 0.25f;
-    static constexpr float LV_V0_RANGE  = 3.5f;   // WILD → V0 = Vmin + [0, 3.5]; keeps max WILD off the positivity floor
-    static constexpr float KICK_GAIN = 0.5f;
     static constexpr float BALANCE_CV_DEPTH = 0.1f, WILD_CV_DEPTH = 0.1f;
-    static constexpr float POP_MIN = 0.05f;
     static constexpr float GATE_LEVEL = 10.f, GATE_TIME = 1e-3f;
-    static constexpr float RM_B = 0.5f, RM_S = 1.0f;
-    static constexpr bool  LV_COMPENSATE_PITCH = true;
 
-    enum { LV = 0, RM = 1 };
+    enum { LV = coalescent::bunnies::LV, RM = coalescent::bunnies::RM };
 
     Bunnies() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -121,7 +105,12 @@ struct Bunnies : Module {
         configOutput(PRED_POP_OUTPUT, "Predator peak");
     }
 
-    void reseed() { x = cx * 1.1f + 0.05f; y = cy * 0.9f + 0.02f; }
+    void reseed() {
+        float state[2];
+        coalescent::bunnies::seed(cx, cy, state);
+        x = state[0];
+        y = state[1];
+    }
     // Clears peak-detector edge state. Deliberately does NOT reset popGen: an
     // in-flight ~1 ms pulse is allowed to finish across a mode change / reseed
     // (harmless, and avoids chopping a gate). onReset() clears popGen fully.
@@ -142,24 +131,17 @@ struct Bunnies : Module {
 
     // rising→falling local max above POP_MIN on the centered signal.
     void firePeak(float c, float& prev, bool& rising, dsp::PulseGenerator& gen) {
-        if (c > prev + 1e-7f) rising = true;
-        else if (c < prev - 1e-7f) {
-            if (rising && prev > POP_MIN) gen.trigger(GATE_TIME);
-            rising = false;
-        }
-        prev = c;
-    }
-
-    static float finiteOr(float value, float fallback) {
-        return std::isfinite(value) ? value : fallback;
+        if (coalescent::bunnies::peakStep(c, prev, rising))
+            gen.trigger(GATE_TIME);
     }
 
     float modulatedParam(ParamId param, InputId input, ParamId attenuverter,
                          float depth, float fallback) {
-        const float base = finiteOr(params[param].getValue(), fallback);
-        const float cv = finiteOr(inputs[input].getVoltage(), 0.f);
-        const float att = finiteOr(params[attenuverter].getValue(), 0.f);
-        return finiteOr(base + finiteOr(cv * att * depth, 0.f), base);
+        const float base = coalescent::finiteOr(params[param].getValue(), fallback);
+        const float cv = coalescent::finiteOr(inputs[input].getVoltage(), 0.f);
+        const float att = coalescent::finiteOr(params[attenuverter].getValue(), 0.f);
+        return coalescent::finiteOr(
+            base + coalescent::finiteOr(cv * att * depth, 0.f), base);
     }
 
     void process(const ProcessArgs& args) override {
@@ -171,26 +153,26 @@ struct Bunnies : Module {
         float wild = clamp(modulatedParam(WILD_PARAM, WILD_INPUT, WILD_ATT_PARAM,
                                            WILD_CV_DEPTH, 0.4f), 0.f, 1.f);
         float kickV = inputs[KICK_INPUT].isConnected()
-                    ? clamp(finiteOr(inputs[KICK_INPUT].getVoltage(), 0.f), -15.f, 15.f) : 0.f;
-        float kick = kickV * KICK_GAIN;
-        int   mode = finiteOr(params[MODE_PARAM].getValue(), 0.f) > 0.5f ? RM : LV;
+                    ? coalescent::finiteClamp(
+                        inputs[KICK_INPUT].getVoltage(), 0.f, -15.f, 15.f) : 0.f;
+        float kick = kickV * coalescent::bunnies::KICK_GAIN;
+        int   mode = coalescent::finiteOr(params[MODE_PARAM].getValue(), 0.f) > 0.5f ? RM : LV;
 
         float gamma = 0.f, V0 = 0.f, K = 0.f, c = 0.f;
         if (mode == LV) {
-            gamma = rack::math::rescale(balance, 0.f, 1.f, 0.2f, 5.f);
-            V0 = (gamma + 1.f) + rack::math::rescale(wild, 0.f, 1.f, 0.f, LV_V0_RANGE);
+            gamma = coalescent::bunnies::gammaFromBalance(balance);
+            V0 = coalescent::bunnies::targetInvariant(gamma, wild);
         } else {
-            c = clamp(rack::math::rescale(balance, 0.f, 1.f, 0.15f, 0.6f), 0.f, 0.95f / RM_B);  // keep b·c<1
-            K = rack::math::rescale(wild, 0.f, 1.f, 1.2f, 12.f);
+            c = coalescent::bunnies::mortalityFromBalance(balance);
+            K = coalescent::bunnies::capacityFromWild(wild);
         }
 
         // ── center (analytic) ──
         if (mode == LV) { cx = 1.f; cy = 1.f; }
         else {
-            if (!rmValid || K != rmA || RM_B != rmB || c != rmC) {
-                rmCx = c / (1.f - RM_B * c);
-                rmCy = rmCx * (1.f - rmCx / K) / c;
-                rmA = K; rmB = RM_B; rmC = c; rmValid = true;
+            if (!rmValid || K != rmA || coalescent::bunnies::RM_B != rmB || c != rmC) {
+                rmValid = coalescent::bunnies::rmCenter(K, c, rmCx, rmCy);
+                rmA = K; rmB = coalescent::bunnies::RM_B; rmC = c;
             }
             cx = rmCx; cy = rmCy;
             if (!(cx > 0.f && cy > 0.f) || !std::isfinite(cx) || !std::isfinite(cy)) {
@@ -202,33 +184,24 @@ struct Bunnies : Module {
         if (mode != lastMode) { reseed(); resetPeakMemory(); lastMode = mode; }
 
         // ── pitch (+ LV √gamma compensation), adaptive substepping ──
-        const float pitchBase = finiteOr(params[RATE_PARAM].getValue(), 0.f);
-        const float pitchCv = finiteOr(inputs[VOCT_INPUT].getVoltage(), 0.f);
-        float pitchTotal = clamp(finiteOr(pitchBase + pitchCv, pitchBase),
+        const float pitchBase = coalescent::finiteOr(params[RATE_PARAM].getValue(), 0.f);
+        const float pitchCv = coalescent::finiteOr(inputs[VOCT_INPUT].getVoltage(), 0.f);
+        float pitchTotal = clamp(coalescent::finiteOr(pitchBase + pitchCv, pitchBase),
                                  PITCH_TOTAL_MIN, PITCH_TOTAL_MAX);
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pitchTotal);
-        float dtau = RATE_CAL * pitchHz / fs;
-        if (mode == LV && LV_COMPENSATE_PITCH) dtau /= std::sqrt(gamma);  // BALANCE = timbre, not pitch
-        dtau = std::min(dtau, HSUB_MAX * MAX_SUB);
-        int   Ksub = clamp((int) std::ceil(dtau / HSUB_MAX), MIN_SUB, MAX_SUB);
-        float h = dtau / Ksub;
-
-        auto deriv = [&](const float* v, float* dv) {
-            float X = std::max(v[0], POS_FLOOR), Y = std::max(v[1], POS_FLOOR);
-            if (mode == LV) { dv[0] = X * (1.f - Y);              dv[1] = gamma * Y * (X - 1.f); }
-            else            { float g = X / (1.f + RM_B * X);
-                              dv[0] = X * (1.f - X / K) - Y * g;  dv[1] = RM_S * Y * (g - c); }
-            dv[0] += kick;                                        // continuous prey-force
-        };
+        const float requestedDelta = coalescent::bunnies::RATE_CAL * pitchHz / fs;
+        const coalescent::OdeStepPlan plan =
+            coalescent::bunnies::stepPlan(requestedDelta, mode, gamma);
+        const coalescent::bunnies::Parameters model = {mode, gamma, K, c, kick};
 
         float st[2] = {x, y};
-        for (int s = 0; s < Ksub; ++s) {
-            coalescent::rk4<2>(st, h, deriv);
+        for (int s = 0; s < plan.count; ++s) {
+            coalescent::bunnies::step(st, plan.h, model);
             // isfinite BEFORE clamp: clamp() is fmin/fmax-based and maps NaN to a
             // bound, which would hide it from this backstop.
-            if (!std::isfinite(st[0]) || !std::isfinite(st[1])) { reseed(); st[0] = x; st[1] = y; resetPeakMemory(); break; }
-            st[0] = clamp(st[0], POS_FLOOR, STATE_MAX);
-            st[1] = clamp(st[1], POS_FLOOR, STATE_MAX);
+            if (!coalescent::bunnies::repairState(st)) {
+                reseed(); st[0] = x; st[1] = y; resetPeakMemory(); break;
+            }
             // Observe accepted RK4 states so a fast orbit cannot hide a local
             // maximum between audio samples.
             firePeak(st[0] - cx, prevPrey, risingPrey, popGen[0]);
@@ -237,23 +210,18 @@ struct Bunnies : Module {
 
         // ── LV conserved-quantity servo — kills drift AND sets amplitude ──
         if (mode == LV) {
-            float X = st[0], Y = st[1];
-            float V   = gamma * (X - std::log(X)) + (Y - std::log(Y));
-            float dVx = gamma * (1.f - 1.f / std::max(X, STAB_FLOOR));
-            float dVy =         (1.f - 1.f / std::max(Y, STAB_FLOOR));
-            float stab = STAB_K * dtau;
-            float sx = clamp(-stab * (V - V0) * dVx, -MAX_STAB_STEP, MAX_STAB_STEP);
-            float sy = clamp(-stab * (V - V0) * dVy, -MAX_STAB_STEP, MAX_STAB_STEP);
-            st[0] = std::max(st[0] + sx, POS_FLOOR);
-            st[1] = std::max(st[1] + sy, POS_FLOOR);
+            coalescent::bunnies::applyLvServo(st, gamma, V0, plan.delta);
         }
         x = st[0]; y = st[1];
 
         // ── outputs + peak gates ──
         float cX = x - cx, cY = y - cy;
-        outputs[PREY_OUTPUT].setVoltage(5.f * coalescent::fastTanh(cX * OUT_GAIN));
-        outputs[PRED_OUTPUT].setVoltage(5.f * coalescent::fastTanh(cY * OUT_GAIN));
-        if (std::fabs(cX) < POP_MIN && std::fabs(cY) < POP_MIN) { risingPrey = risingPred = false; }
+        outputs[PREY_OUTPUT].setVoltage(coalescent::bunnies::outputVoltage(cX));
+        outputs[PRED_OUTPUT].setVoltage(coalescent::bunnies::outputVoltage(cY));
+        if (std::fabs(cX) < coalescent::bunnies::POP_MIN
+            && std::fabs(cY) < coalescent::bunnies::POP_MIN) {
+            risingPrey = risingPred = false;
+        }
         // The LV amplitude servo is a numerical drift correction, not a second
         // ecological step. Synchronize to its corrected endpoint without
         // manufacturing an extra peak at the next sample boundary.

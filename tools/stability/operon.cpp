@@ -1,5 +1,5 @@
-// Standalone stability + calibration replica of Operon's repressilator kernel.
-// Mirrors src/Operon.cpp process() math (dimensionless Elowitz–Leibler, RK4 with
+// Standalone stability + calibration suite for Operon's repressilator kernel.
+// Calls the SDK-free production core (dimensionless Elowitz–Leibler, RK4 with
 // pitch-adaptive substepping). Sweeps ALPHA × HILL × BETA × LEAK at several
 // pitches over long runs and asserts all six states stay finite and bounded;
 // also reports the default-voicing dimensionless period (→ RATE_CAL) and where
@@ -10,91 +10,50 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include "../../src/dsp/operon_core.hpp"
 
-static constexpr float HSUB_MAX = 0.05f, STATE_MAX = 1e3f, BIAS_EPS = 1e-6f;
-static constexpr int   MIN_SUB = 2, MAX_SUB = 64;
-static constexpr int   CENTER_ITERS = 16, NEWTON_ITERS = 4;   // mirror src/Operon.cpp
+namespace model = coalescent::operon;
 
-// pStar solvers. `bisect(iters)` is the reference; the module uses CENTER_ITERS as
-// its fallback but a 40-iter bisection here gives a near-exact root to compare against.
+// Independent pStar reference. A 40-iteration bisection gives a near-exact root
+// to compare with the production core's bounded warm-Newton solver.
 static float pStarBisect(float alpha, float n, float a0, int iters) {
     float lo = 0.f, hi = std::max(1.f, alpha + a0 + 1.f);
     for (int i = 0; i < iters; ++i) { float mid = 0.5f * (lo + hi);
         float g = mid - alpha / (1.f + std::pow(std::max(mid, 0.f), n)) - a0; if (g > 0.f) hi = mid; else lo = mid; }
     return 0.5f * (lo + hi);
 }
-// Warm-started Newton — mirrors src/Operon.cpp exactly (falls back to bisection on a
-// bracket exit or non-convergence within NEWTON_ITERS).
-static float pStarNewton(float alpha, float n, float a0, float guess) {
-    const float hi = std::max(1.f, alpha + a0 + 1.f);
-    if (guess > 0.f && guess < hi) { float x = guess;
-        for (int i = 0; i < NEWTON_ITERS; ++i) { float xn = std::pow(std::max(x, 1e-6f), n); float d = 1.f + xn;
-            float g = x - alpha / d - a0; float gp = 1.f + alpha * n * (xn / std::max(x, 1e-6f)) / (d * d);
-            float step = g / gp; x -= step; if (!(x > 0.f && x < hi)) break; if (std::fabs(step) < 1e-5f) return x; }
-    }
-    return pStarBisect(alpha, n, a0, CENTER_ITERS);
-}
+using Par = model::Parameters;
 
-struct Par { float alpha, n, beta, a0; };
-
-static inline void deriv(const float Y[6], float D[6], const Par& p, float perturb) {
-    for (int i = 0; i < 3; ++i) {
-        float rep = std::max(Y[3 + ((i + 2) % 3)], 0.f);
-        D[i]     = -Y[i] + p.alpha / (1.f + std::pow(rep, p.n)) + p.a0;
-        D[3 + i] = -p.beta * (Y[3 + i] - Y[i]);
-    }
-    D[0] += perturb;
-    D[0] +=  BIAS_EPS; D[1] += -0.5f * BIAS_EPS; D[2] += -0.5f * BIAS_EPS;
-}
-static inline void rk4(float y[6], float h, const Par& p, float perturb) {
-    float k1[6], k2[6], k3[6], k4[6], t[6];
-    deriv(y, k1, p, perturb); for (int i = 0; i < 6; ++i) t[i] = y[i] + 0.5f * h * k1[i];
-    deriv(t, k2, p, perturb); for (int i = 0; i < 6; ++i) t[i] = y[i] + 0.5f * h * k2[i];
-    deriv(t, k3, p, perturb); for (int i = 0; i < 6; ++i) t[i] = y[i] + h * k3[i];
-    deriv(t, k4, p, perturb);
-    for (int i = 0; i < 6; ++i) y[i] += h / 6.f * (k1[i] + 2.f * k2[i] + 2.f * k3[i] + k4[i]);
-}
-
-static inline int subK(float dtau) {
-    return std::min(MAX_SUB, std::max(MIN_SUB, (int) std::ceil(std::min(dtau, HSUB_MAX * MAX_SUB) / HSUB_MAX)));
-}
-
-// Armed Schmitt detector used by the module's three gate lanes. A lane must first
-// visit the low side, then fires exactly once on reaching the high side. This is
-// deliberately not a one-step low->high jump: a smooth RK4 trajectory normally
-// visits the deadband on its way through it.
-static bool gateStep(float centered, bool& armed) {
-    constexpr float LOW = -0.05f, HIGH = 0.05f;
-    if (centered <= LOW) {
-        armed = true;
-    }
-    else if (armed && centered >= HIGH) {
-        armed = false;
-        return true;
-    }
-    return false;
+static model::StateRepair advanceDirect(float (&state)[6], float h,
+                                        const Par& parameters, float perturb = 0.f) {
+    return model::advanceAcceptedSubstep(
+        state, h, parameters, perturb, [&](float repressor) {
+            return model::directHillResponse(repressor, parameters.n);
+        });
 }
 
 // Gate contract from the production seed. Also counts the former one-step
 // detector so this regression proves that it distinguishes the silent-gate bug.
 static void gateContract(const Par& p, float dtau, int NS, int counts[3],
                          int legacyCounts[3], std::vector<int>& order) {
-    float y[6] = {0.2f, 0.1f, 0.3f, 0.1f, 0.4f, 0.15f};
+    float y[6];
+    model::seed(y);
     const float center = pStarBisect(p.alpha, p.n, p.a0, 40);
-    const int K = subK(dtau);
-    const float h = std::min(dtau, HSUB_MAX * MAX_SUB) / K;
+    const coalescent::OdeStepPlan plan = model::stepPlan(dtau);
     bool armed[3] = {};
     float legacyPrev[3] = {y[3] - center, y[4] - center, y[5] - center};
     std::fill(counts, counts + 3, 0);
     std::fill(legacyCounts, legacyCounts + 3, 0);
     order.clear();
     for (int s = 0; s < NS; ++s) {
-        for (int k = 0; k < K; ++k) {
-            rk4(y, h, p, 0.f);
+        for (int k = 0; k < plan.count; ++k) {
+            if (!advanceDirect(y, plan.h, p))
+                return;
             for (int lane = 0; lane < 3; ++lane) {
                 const float c = y[3 + lane] - center;
-                const bool fired = gateStep(c, armed[lane]);
-                const bool legacyFired = legacyPrev[lane] <= -0.05f && c >= 0.05f;
+                const bool fired = model::gateStep(c, armed[lane]);
+                const bool legacyFired = legacyPrev[lane] <= model::GATE_LOW
+                                      && c >= model::GATE_HIGH;
                 legacyPrev[lane] = c;
                 if (s > NS / 2 && fired) {
                     ++counts[lane];
@@ -107,29 +66,40 @@ static void gateContract(const Par& p, float dtau, int NS, int counts[3],
 }
 // Fast finite/bounded check — single pass, no measurement.
 static bool bounded(const Par& p, float dtau, int NS) {
-    float y[6] = {0.2f, 0.1f, 0.3f, 0.1f, 0.4f, 0.15f};
-    int K = subK(dtau); float h = std::min(dtau, HSUB_MAX * MAX_SUB) / K;
+    float y[6];
+    model::seed(y);
+    const coalescent::OdeStepPlan plan = model::stepPlan(dtau);
     for (int s = 0; s < NS; ++s) {
-        for (int k = 0; k < K; ++k) rk4(y, h, p, 0.f);
+        for (int k = 0; k < plan.count; ++k) {
+            const model::StateRepair repair = advanceDirect(y, plan.h, p);
+            if (!repair || repair.exceededRange) return false;
+        }
         for (int j = 0; j < 6; ++j)
-            if (!std::isfinite(y[j]) || std::fabs(y[j]) > STATE_MAX) return false;
+            if (!std::isfinite(y[j]) || std::fabs(y[j]) > model::STATE_MAX) return false;
     }
     return true;
 }
 // Centered-p0 amplitude + dimensionless period (for the two calibration voicings).
 static void measure(const Par& p, float dtau, float& amp, float& periodTau) {
-    float y[6] = {0.2f, 0.1f, 0.3f, 0.1f, 0.4f, 0.15f};
-    int K = subK(dtau); float h = std::min(dtau, HSUB_MAX * MAX_SUB) / K;
+    float y[6];
+    model::seed(y);
+    const coalescent::OdeStepPlan plan = model::stepPlan(dtau);
     const int NS = 60000; double mean = 0; int cnt = 0;
-    for (int s = 0; s < NS; ++s) { for (int k = 0; k < K; ++k) rk4(y, h, p, 0.f); if (s > NS / 2) { mean += y[3]; cnt++; } }
+    for (int s = 0; s < NS; ++s) {
+        for (int k = 0; k < plan.count; ++k)
+            if (!advanceDirect(y, plan.h, p)) return;
+        if (s > NS / 2) { mean += y[3]; cnt++; }
+    }
     mean /= std::max(cnt, 1);
     float mn = 1e9f, mx = -1e9f, prev = 0.f, lastCross = -1.f; double sumP = 0; int nP = 0;
-    float y2[6] = {0.2f, 0.1f, 0.3f, 0.1f, 0.4f, 0.15f};
+    float y2[6];
+    model::seed(y2);
     for (int s = 0; s < NS; ++s) {
-        for (int k = 0; k < K; ++k) rk4(y2, h, p, 0.f);
+        for (int k = 0; k < plan.count; ++k)
+            if (!advanceDirect(y2, plan.h, p)) return;
         if (s > NS / 2) {
             float v = y2[3]; mn = std::min(mn, v); mx = std::max(mx, v);
-            float c = v - (float) mean; float tcur = s * K * h;
+            float c = v - (float) mean; float tcur = s * plan.count * plan.h;
             if (prev <= 0.f && c > 0.f) { if (lastCross > 0) { sumP += tcur - lastCross; nP++; } lastCross = tcur; }
             prev = c;
         }
@@ -159,14 +129,19 @@ int main() {
     for (float a = 1.f; a <= 60.f; a += 1.f) { Par p{a, 2.5f, 1.f, 0.05f}; measure(p, 0.02f, amp, per); if (amp > 0.05f) { printf("oscillates from alpha~%.0f\n", a); break; } }
 
     // Hill LUT vs direct pow: max abs error of 1/(1+rep^n) over rep×n (guards the
-    // module's 8192-point lookup, incl. the sharp n=8 knee).
-    const int M = 8192; const float X = 64.f; static float lut[M + 1];
+    // production core's lookup, including the sharp n=8 knee).
     double lutMax = 0;
     for (float nn : {1.2f, 2.5f, 5.f, 8.f}) {
-        for (int i = 0; i <= M; ++i) lut[i] = 1.f / (1.f + std::pow(X * i / M, nn));
-        for (float rep = 0.f; rep < X; rep += 0.013f) {
-            float f = rep * (M / X); int i = (int) f;
-            float lu = lut[i] + (f - i) * (lut[i + 1] - lut[i]);
+        model::HillLut lut;
+        for (int sample = 0; sample < model::HillLut::settleSamples() + 64; ++sample)
+            lut.process(nn);
+        if (lut.direct(nn)) {
+            printf("  Hill LUT failed to become active for n=%.1f\n", nn);
+            ++fails;
+            continue;
+        }
+        for (float rep = 0.f; rep < model::HillLut::xMax(); rep += 0.013f) {
+            float lu = lut.lookup(rep);
             float ex = 1.f / (1.f + std::pow(rep, nn));
             lutMax = std::max(lutMax, (double) std::fabs(lu - ex));
         }
@@ -182,12 +157,12 @@ int main() {
             for (float nn = 1.01f; nn <= 10.f; nn += 0.13f) {
                 float ref    = pStarBisect(alpha, nn, a0, 40);
                 float warm   = pStarBisect(alpha * 0.99f, nn, a0, 40);   // "previous sample" root
-                float got    = pStarNewton(alpha, nn, a0, warm);
+                float got    = model::solvePStar(alpha, nn, a0, warm);
                 pStarMax = std::max(pStarMax, (double) std::fabs(got - ref));
             }
     printf("pStar warm Newton vs accurate root: max |Δ| = %.2e\n", pStarMax);
 
-    // Hill-LUT gate state machine (mirror of src/Operon.cpp): a build starts only
+    // Hill-LUT production state machine: a build starts only
     // after n has been within N_MOVE_EPS of an anchor for 2048 consecutive samples;
     // any move — fast OR slow cumulative drift — resets the window and drops the
     // partial build. Assert (a) a slow sub-threshold HILL LFO does NOT thrash the
@@ -195,27 +170,15 @@ int main() {
     // aborting+restarting every sample), and (b) a genuinely static n still completes
     // a build so the LUT goes live.
     {
-        const int   LN = 8192, SLICE = 256;
-        const float EPS = 1e-4f;   // N_MOVE_EPS
         auto gate = [&](float fs, float lfoHz, float amp, double secs, long& slices, long& completions) {
-            float lutN = -1.f, nSettleRef = -1e9f, buildN = -1.f;
-            int rebuildClock = 0, buildPos = -1; bool lutValid = false;
+            model::HillLut lut;
             slices = 0; completions = 0;
             long ns = (long) (secs * fs);
             for (long s = 0; s < ns; s++) {
                 float n = 4.5f + amp * std::sin(2.0 * M_PI * lfoHz * s / fs);   // centred in the HILL range
-                if (std::fabs(n - nSettleRef) > EPS) { nSettleRef = n; rebuildClock = 0; buildPos = -1; }
-                else if (rebuildClock < 2048) ++rebuildClock;
-                // build for the settle anchor and gate on |nSettleRef - lutN| (consistent band)
-                if (buildPos < 0 && rebuildClock >= 2048 && std::fabs(nSettleRef - lutN) > 1e-4f) {
-                    buildPos = 0; buildN = nSettleRef; lutValid = false;
-                }
-                if (buildPos >= 0) {
-                    int end = std::min(buildPos + SLICE, LN + 1);
-                    if (end > buildPos) ++slices;
-                    buildPos = end;
-                    if (buildPos > LN) { lutN = buildN; lutValid = true; buildPos = -1; rebuildClock = 0; ++completions; }
-                }
+                const model::HillLut::BuildWork work = lut.process(n);
+                if (work.entries > 0) ++slices;
+                if (work.completed) ++completions;
             }
         };
         long slices, comps;
@@ -240,6 +203,39 @@ int main() {
         if (comps < 1) { gateOk = false; printf("  LUT gate: static n never completed a build\n"); }
         printf("Hill LUT gate: slow-LFO + micro-oscillation no-thrash, static completes: %s\n", gateOk ? "PASS" : "FAIL");
         if (!gateOk) ++fails;
+    }
+
+    // Exercise the exact LUT-backed callback and accepted-substep path used by
+    // the Rack wrapper, not only the direct-pow reference path above.
+    {
+        model::HillLut lut;
+        for (int sample = 0; sample < model::HillLut::settleSamples() + 64; ++sample)
+            lut.process(def.n);
+        float state[6];
+        model::seed(state);
+        const coalescent::OdeStepPlan plan = model::stepPlan(0.4f);
+        bool lutRunOk = !lut.direct(def.n);
+        for (int sample = 0; sample < 20000 && lutRunOk; ++sample) {
+            lut.process(def.n);
+            const bool direct = lut.direct(def.n);
+            const auto response = [&](float repressor) {
+                return lut.response(repressor, def.n, direct);
+            };
+            for (int substep = 0; substep < plan.count; ++substep) {
+                const model::StateRepair repair = model::advanceAcceptedSubstep(
+                    state, plan.h, def, 0.f, response);
+                if (!repair || repair.exceededRange) {
+                    lutRunOk = false;
+                    break;
+                }
+            }
+        }
+        for (float value : state)
+            lutRunOk = lutRunOk && std::isfinite(value)
+                    && value >= 0.f && value <= model::STATE_MAX;
+        printf("LUT-backed accepted-substep trajectory: %s\n",
+               lutRunOk ? "PASS" : "FAIL");
+        if (!lutRunOk) ++fails;
     }
 
     // Gate regression: default oscillation must produce three balanced lanes in
@@ -278,7 +274,7 @@ int main() {
         int nearFires = 0;
         for (float c : {0.051f, 0.049f, 0.052f, -0.049f, 0.051f,
                         -0.051f, -0.02f, 0.051f, 0.049f, 0.052f})
-            if (gateStep(c, armed)) ++nearFires;
+            if (model::gateStep(c, armed)) ++nearFires;
         printf("gate near-threshold hysteresis: fires=%d (want 1): %s\n",
                nearFires, nearFires == 1 ? "PASS" : "FAIL");
         if (nearFires != 1) ++fails;
@@ -287,11 +283,31 @@ int main() {
     // Hostile-CV policy used by the Rack wrapper: non-finite modulation is
     // neutral, while a finite value is bounded before entering the ODE/pitch map.
     {
-        auto finiteOr = [](float v, float fallback) { return std::isfinite(v) ? v : fallback; };
-        bool cvOk = finiteOr(NAN, 0.f) == 0.f && finiteOr(INFINITY, 0.f) == 0.f
-                 && finiteOr(-INFINITY, 2.5f) == 2.5f && finiteOr(3.f, 0.f) == 3.f;
+        bool cvOk = coalescent::finiteOr(NAN, 0.f) == 0.f
+                 && coalescent::finiteOr(INFINITY, 0.f) == 0.f
+                 && coalescent::finiteOr(-INFINITY, 2.5f) == 2.5f
+                 && coalescent::finiteOr(3.f, 0.f) == 3.f;
         printf("hostile-CV neutralization: %s\n", cvOk ? "PASS" : "FAIL");
         if (!cvOk) ++fails;
+
+        float finite[6] = {-1.f, model::STATE_MAX + 1.f, 0.1f,
+                           0.2f, 0.3f, 0.4f};
+        const model::StateRepair finiteRepair = model::repairStateDetailed(finite);
+        float corrupt[6];
+        model::seed(corrupt);
+        corrupt[2] = NAN;
+        const model::StateRepair corruptRepair = model::repairStateDetailed(corrupt);
+        if (!corruptRepair)
+            model::seed(corrupt);  // Rack wrapper's atomic recovery action
+        bool repairOk = finiteRepair && finiteRepair.clamped
+                     && finiteRepair.exceededRange && finite[0] == 0.f
+                     && finite[1] == model::STATE_MAX && !corruptRepair;
+        for (float value : corrupt)
+            repairOk = repairOk && std::isfinite(value)
+                     && value >= 0.f && value <= model::STATE_MAX;
+        printf("accepted-substep repair/reseed contract: %s\n",
+               repairOk ? "PASS" : "FAIL");
+        if (!repairOk) ++fails;
     }
 
     if (fails) { printf("FAIL: %d unbounded runs\n", fails); return 1; }

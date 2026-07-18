@@ -348,9 +348,12 @@ struct Finches : Module {
 
         if (fieldDiv.process()) {
             currentParameters = readParameters();
+            bool resetThisTick = false;
             if (pendingReset) {
                 field.reset(currentParameters.environment);
                 pendingReset = false;
+                pendingSeed = false;
+                resetThisTick = true;
                 clearEventState();
             }
             if (pendingSeed) {
@@ -358,13 +361,16 @@ struct Finches : Module {
                 pendingSeed = false;
             }
 
-            float rateOct = clampf(safe(params[RATE_PARAM].getValue()) + inputVoltage(RATE_INPUT),
-                                   RATE_TOTAL_MIN, RATE_TOTAL_MAX);
-            float deltaTau = RATE_BASE * std::exp2(rateOct) * fieldWallStep;
-            field.advance(deltaTau, currentParameters);
-            const coalescent::FinchesField::Metrics& metrics = field.metrics();
-            if (metrics.splitEvent) splitPulse.trigger(GATE_TIME);
-            if (metrics.mergeEvent) mergePulse.trigger(GATE_TIME);
+            if (!resetThisTick) {
+                float rateOct = clampf(
+                    safe(params[RATE_PARAM].getValue()) + inputVoltage(RATE_INPUT),
+                    RATE_TOTAL_MIN, RATE_TOTAL_MAX);
+                float deltaTau = RATE_BASE * std::exp2(rateOct) * fieldWallStep;
+                field.advance(deltaTau, currentParameters);
+                const coalescent::FinchesField::Metrics& metrics = field.metrics();
+                if (metrics.splitEvent) splitPulse.trigger(GATE_TIME);
+                if (metrics.mergeEvent) mergePulse.trigger(GATE_TIME);
+            }
             setOutputTargets();
             publishSaveFrame();
         }

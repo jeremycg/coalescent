@@ -1,13 +1,13 @@
 // Proof that the float_4 (poly-SIMD) RK4 path matches the scalar per-voice path
 // for Axon's FitzHugh–Nagumo kernel. Runs the same voicings through both the
-// scalar coalescent::rk4<2,float> and the vectorised coalescent::rk4<2,float_4> (four
-// identical lanes) and reports the max deviation, plus the same for fastTanh.
+// scalar and vectorised forms of the exact shared production core (four
+// identical lanes), and reports the max deviation, plus the same for fastTanh.
 //
-//   g++ -O3 -funsafe-math-optimizations -march=nehalem -std=c++17 -DARCH_X64 -DARCH_LIN \
-//       -I$RACK/include -I$RACK/dep/include tools/simd_equiv.cpp -o /tmp/se && /tmp/se
+// Build and run through `make check-simd` with RACK_DIR set to the Rack SDK.
 #include <simd/functions.hpp>
 using namespace rack;              // so `simd::` resolves as it does inside the plugin
-#include "../src/dsp/rk4.hpp"
+#include "../src/dsp/neuron_models.hpp"
+#include "../src/dsp/haptik_core.hpp"
 #include "../src/tanh_approx.hpp"
 #include <cstdio>
 #include <cmath>
@@ -18,77 +18,68 @@ using namespace rack;              // so `simd::` resolves as it does inside the
 #include <vector>
 
 using rack::simd::float_4;
-static constexpr float B_FIXED = 0.8f, RATE_CAL = 37.899004f, HSUB = 0.05f, SMAX = 10.f, FS = 44100.f, C4 = 261.6256f;
-static constexpr int   MIN_SUB = 2, MAX_SUB = 64;
+using AxonCore = coalescent::neuron::AxonCore;
+using SomaCore = coalescent::neuron::SomaCore;
+static constexpr float FS = 44100.f;
+static constexpr float C4 = coalescent::neuron::PITCH_REFERENCE_HZ;
 
-template <typename T>
-static inline void fFHN(T v, T w, T I, T e, T a, T& dv, T& dw) {
-    dv = v - v * v * v / 3.f - w + I;
-    dw = e * (v + a - B_FIXED * w);
-}
-
-// One output sample of raw v, scalar path (mirrors Axon at os=1 for the test).
+// One accepted output observation through the exact scalar production core.
 static float stepScalar(float& v, float& w, float pitchHz, float I, float eps, float a) {
-    float subTau = std::min(RATE_CAL * pitchHz / FS, HSUB * MAX_SUB);   // mirror production cap
-    int K = std::min(MAX_SUB, std::max(MIN_SUB, (int) std::ceil(subTau / HSUB)));
-    float h = subTau / K;
-    float s[2] = {v, w};
-    for (int k = 0; k < K; k++)
-        coalescent::rk4<2>(s, h, [&](const float* y, float* d) { fFHN(y[0], y[1], I, eps, a, d[0], d[1]); });
-    if (!std::isfinite(s[0]) || !std::isfinite(s[1])) { s[0] = -1.2f; s[1] = -0.6f; }
-    s[0] = std::clamp(s[0], -SMAX, SMAX); s[1] = std::clamp(s[1], -SMAX, SMAX);
+    const coalescent::neuron::ScalarSchedule schedule =
+        coalescent::neuron::scalarSchedule<AxonCore>(pitchHz, FS);
+    float s[AxonCore::STATE_COUNT] = {v, w};
+    AxonCore::advanceObservation(s, schedule.h, schedule.substeps, I, eps, a);
+    AxonCore::repair(s);
     v = s[0]; w = s[1];
     return v;
 }
-// Same, four identical lanes via float_4 (mirrors the module's group path).
+// Same, four lanes via the exact group-max-K production core.
 static float_4 stepSimd(float_4& v, float_4& w, float_4 pitchHz, float_4 I, float_4 eps, float_4 a) {
-    float_4 subTau = simd::fmin(RATE_CAL * pitchHz / FS, float_4(HSUB * MAX_SUB));   // mirror production cap
-    float_4 Kf = simd::ceil(subTau / HSUB);
-    int K = MIN_SUB; for (int l = 0; l < 4; l++) K = std::max(K, (int) Kf[l]); K = std::min(K, MAX_SUB);
+    const float_4 subTau = coalescent::neuron::boundedSubTau<AxonCore>(
+        pitchHz, FS, 1,
+        [](float_4 left, float_4 right) { return simd::fmin(left, right); });
+    const int K = coalescent::neuron::groupSubsteps<AxonCore>(
+        subTau, 4,
+        [](float_4 value) { return simd::ceil(value); },
+        [](float_4 value, int lane) { return value[lane]; });
     float_4 h = subTau / (float) K;
-    float_4 s[2] = {v, w};
-    for (int k = 0; k < K; k++)
-        coalescent::rk4<2>(s, h, [&](const float_4* y, float_4* d) { fFHN(y[0], y[1], I, eps, a, d[0], d[1]); });
-    float_4 fin = (s[0] == s[0]) & (s[1] == s[1]) & (simd::abs(s[0]) < 1e6f) & (simd::abs(s[1]) < 1e6f);
-    s[0] = simd::ifelse(fin, s[0], -1.2f); s[1] = simd::ifelse(fin, s[1], -0.6f);
-    s[0] = simd::clamp(s[0], -SMAX, SMAX); s[1] = simd::clamp(s[1], -SMAX, SMAX);
+    float_4 s[AxonCore::STATE_COUNT] = {v, w};
+    AxonCore::advanceObservation(s, h, K, I, eps, a);
+    AxonCore::repair(
+        s,
+        [](float_4 value) { return simd::abs(value); },
+        [](float_4 mask, float_4 yes, float_4 no) { return simd::ifelse(mask, yes, no); },
+        [](float_4 value, float low, float high) { return simd::clamp(value, low, high); });
     v = s[0]; w = s[1];
     return v;
 }
 
 // ── Soma / Hindmarsh–Rose: the 3-state path (grouping + shared-K + subTau cap) ──
-static constexpr float HR_A = 1.f, HR_B = 3.f, HR_C = 1.f, HR_D = 5.f, HR_XR = -1.6f;
-static constexpr float HR_RATE_CAL = 55.364003f, HR_SMAX = 25.f;
-template <typename T>
-static inline void fHR(T x, T y, T z, T I, T r, T s, T& dx, T& dy, T& dz) {
-    dx = y - HR_A*x*x*x + HR_B*x*x - z + I;
-    dy = HR_C - HR_D*x*x - y;
-    dz = r * (s * (x - HR_XR) - z);
-}
 static float stepScalarHR(float& x, float& y, float& z, float pitchHz, float I, float r, float s) {
-    float subTau = std::min(HR_RATE_CAL * pitchHz / FS, HSUB * MAX_SUB);
-    int K = std::min(MAX_SUB, std::max(MIN_SUB, (int) std::ceil(subTau / HSUB)));
-    float h = subTau / K;
-    float st[3] = {x, y, z};
-    for (int k = 0; k < K; k++)
-        coalescent::rk4<3>(st, h, [&](const float* Y, float* d) { fHR(Y[0], Y[1], Y[2], I, r, s, d[0], d[1], d[2]); });
-    for (int i = 0; i < 3; i++) { if (!std::isfinite(st[i])) { st[0]=-1.6f; st[1]=0.f; st[2]=0.f; break; } }
-    for (int i = 0; i < 3; i++) st[i] = std::clamp(st[i], -HR_SMAX, HR_SMAX);
+    const coalescent::neuron::ScalarSchedule schedule =
+        coalescent::neuron::scalarSchedule<SomaCore>(pitchHz, FS);
+    float st[SomaCore::STATE_COUNT] = {x, y, z};
+    SomaCore::advanceObservation(st, schedule.h, schedule.substeps, I, r, s);
+    SomaCore::repair(st);
     x = st[0]; y = st[1]; z = st[2];
     return x;
 }
 static float_4 stepSimdHR(float_4& x, float_4& y, float_4& z, float_4 pitchHz, float_4 I, float_4 r, float_4 s) {
-    float_4 subTau = simd::fmin(HR_RATE_CAL * pitchHz / FS, float_4(HSUB * MAX_SUB));
-    float_4 Kf = simd::ceil(subTau / HSUB);
-    int K = MIN_SUB; for (int l = 0; l < 4; l++) K = std::max(K, (int) Kf[l]); K = std::min(K, MAX_SUB);
+    const float_4 subTau = coalescent::neuron::boundedSubTau<SomaCore>(
+        pitchHz, FS, 1,
+        [](float_4 left, float_4 right) { return simd::fmin(left, right); });
+    const int K = coalescent::neuron::groupSubsteps<SomaCore>(
+        subTau, 4,
+        [](float_4 value) { return simd::ceil(value); },
+        [](float_4 value, int lane) { return value[lane]; });
     float_4 h = subTau / (float) K;
-    float_4 st[3] = {x, y, z};
-    for (int k = 0; k < K; k++)
-        coalescent::rk4<3>(st, h, [&](const float_4* Y, float_4* d) { fHR(Y[0], Y[1], Y[2], I, r, s, d[0], d[1], d[2]); });
-    float_4 fin = (st[0]==st[0]) & (st[1]==st[1]) & (st[2]==st[2])
-        & (simd::abs(st[0])<1e6f) & (simd::abs(st[1])<1e6f) & (simd::abs(st[2])<1e6f);
-    st[0] = simd::ifelse(fin, st[0], -1.6f); st[1] = simd::ifelse(fin, st[1], 0.f); st[2] = simd::ifelse(fin, st[2], 0.f);
-    for (int i = 0; i < 3; i++) st[i] = simd::clamp(st[i], -HR_SMAX, HR_SMAX);
+    float_4 st[SomaCore::STATE_COUNT] = {x, y, z};
+    SomaCore::advanceObservation(st, h, K, I, r, s);
+    SomaCore::repair(
+        st,
+        [](float_4 value) { return simd::abs(value); },
+        [](float_4 mask, float_4 yes, float_4 no) { return simd::ifelse(mask, yes, no); },
+        [](float_4 value, float low, float high) { return simd::clamp(value, low, high); });
     x = st[0]; y = st[1]; z = st[2];
     return x;
 }
@@ -108,8 +99,8 @@ int main() {
     printf("Scalar vs float_4 — same voicing, sonically-meaningful metric = pitch:\n");
     printf("  %-12s %10s %10s %8s %10s\n", "voicing", "f_scalar", "f_simd", "cents", "max|Δv|");
     for (auto& t : vs) {
-        float sv = -1.2f, sw = -0.6f;
-        float_4 vv(-1.2f), ww(-0.6f);
+        float sv = AxonCore::REST_V, sw = AxonCore::REST_W;
+        float_4 vv(AxonCore::REST_V), ww(AxonCore::REST_W);
         std::vector<float> a(FS), b(FS); double mx = 0;
         for (int n = 0; n < (int) FS; n++) {
             a[n] = stepScalar(sv, sw, t.hz, t.I, t.e, t.a);
@@ -138,7 +129,7 @@ int main() {
         float laneI[4]  = {0.45f, 0.6f, 0.9f, 1.3f};             // spread across the band
         float_4 hz(laneHz[0], laneHz[1], laneHz[2], laneHz[3]);
         float_4 Iv(laneI[0], laneI[1], laneI[2], laneI[3]);
-        float_4 vv(-1.2f), ww(-0.6f);
+        float_4 vv(AxonCore::REST_V), ww(AxonCore::REST_W);
         std::vector<std::vector<float>> lane(4, std::vector<float>(FS));
         for (int n = 0; n < (int) FS; n++) {
             float_4 out = stepSimd(vv, ww, hz, Iv, float_4(0.08f), float_4(0.7f));
@@ -146,7 +137,7 @@ int main() {
         }
         printf("Mixed-lane group (one shared K) vs per-voice scalar:\n");
         for (int l = 0; l < 4; l++) {
-            float sv = -1.2f, sw = -0.6f;
+            float sv = AxonCore::REST_V, sw = AxonCore::REST_W;
             std::vector<float> ref(FS);
             for (int n = 0; n < (int) FS; n++) ref[n] = stepScalar(sv, sw, laneHz[l], laneI[l], 0.08f, 0.7f);
             float fRef = freqOf(ref), fLane = freqOf(lane[l]);
@@ -168,7 +159,8 @@ int main() {
                     {"C2 low", C4/4, 2.0f, 0.03f, 4.f}, {"C6 high", C4*4, 2.0f, 0.03f, 4.f}};
         printf("Soma/HR (3-state) scalar vs float_4:\n");
         for (auto& t : vs) {
-            float sx=-1.6f, sy=0.f, sz=0.f; float_4 vx(-1.6f), vy(0.f), vz(0.f);
+            float sx = SomaCore::REST_X, sy = SomaCore::REST_Y, sz = SomaCore::REST_Z;
+            float_4 vx(SomaCore::REST_X), vy(SomaCore::REST_Y), vz(SomaCore::REST_Z);
             std::vector<float> a(FS), b(FS); double mx = 0;
             for (int n = 0; n < (int) FS; n++) {
                 a[n] = stepScalarHR(sx, sy, sz, t.hz, t.I, t.r, t.s);
@@ -182,7 +174,7 @@ int main() {
         }
         // Mixed-lane HR group: four different voicings share one K (the max).
         float lHz[4] = {C4/4, C4, C4*2, C4*4}; float lI[4] = {2.0f, 2.4f, 2.0f, 2.2f};
-        float_4 vx(-1.6f), vy(0.f), vz(0.f);
+        float_4 vx(SomaCore::REST_X), vy(SomaCore::REST_Y), vz(SomaCore::REST_Z);
         std::vector<std::vector<float>> lane(4, std::vector<float>(FS));
         for (int n = 0; n < (int) FS; n++) {
             float_4 out = stepSimdHR(vx, vy, vz, float_4(lHz[0],lHz[1],lHz[2],lHz[3]),
@@ -191,7 +183,8 @@ int main() {
         }
         printf("Mixed-lane HR group (one shared K) vs per-voice scalar:\n");
         for (int l = 0; l < 4; l++) {
-            float sx=-1.6f, sy=0.f, sz=0.f; std::vector<float> ref(FS);
+            float sx = SomaCore::REST_X, sy = SomaCore::REST_Y, sz = SomaCore::REST_Z;
+            std::vector<float> ref(FS);
             for (int n = 0; n < (int) FS; n++) ref[n] = stepScalarHR(sx, sy, sz, lHz[l], lI[l], 0.03f, 4.f);
             float fRef = freqOf(ref), fLane = freqOf(lane[l]);
             float cents = (fRef > 0 && fLane > 0) ? 1200.f * std::log2(fLane / fRef) : 0.f;
@@ -203,16 +196,64 @@ int main() {
         }
     }
 
+    // The production neuron wrappers use this exact SIMD policy for CURRENT
+    // cable lanes. It must preserve finite lanes and neutralize hostile lanes
+    // even under this tool's -funsafe-math-optimizations build.
+    {
+        const float floatMax = std::numeric_limits<float>::max();
+        const float inf = std::numeric_limits<float>::infinity();
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const float_4 raw(2.5f, nan, inf, -inf);
+        const float_4 guarded = coalescent::finiteOr(
+            raw, float_4(0.f),
+            [floatMax](float_4 value) {
+                return (value >= -floatMax) & (value <= floatMax);
+            },
+            [](float_4 mask, float_4 yes, float_4 no) {
+                return simd::ifelse(mask, yes, no);
+            });
+        const bool finiteGuardOk = guarded[0] == 2.5f && guarded[1] == 0.f
+            && guarded[2] == 0.f && guarded[3] == 0.f;
+        printf("Neuron CURRENT SIMD finite-lane guard: %s\n",
+               finiteGuardOk ? "PASS" : "FAIL");
+        if (!finiteGuardOk)
+            return 1;
+    }
+
+    {
+        const float amount = 0.6f;
+        const float finiteVoltage = -7.25f;
+        const float expected = finiteVoltage * coalescent::haptik::kExternalGain * amount;
+        const float finiteDrive =
+            coalescent::haptik::externalDrive(finiteVoltage, amount);
+        const float nanDrive = coalescent::haptik::externalDrive(
+            std::numeric_limits<float>::quiet_NaN(), amount);
+        const float positiveInfDrive = coalescent::haptik::externalDrive(
+            std::numeric_limits<float>::infinity(), amount);
+        const float negativeInfDrive = coalescent::haptik::externalDrive(
+            -std::numeric_limits<float>::infinity(), amount);
+        const bool externalGuardOk =
+            std::fabs(finiteDrive - expected) < 1e-8f
+            && nanDrive == 0.f && positiveInfDrive == 0.f && negativeInfDrive == 0.f;
+        printf("Haptik EXT scalar finite guard under unsafe-math "
+               "(finite=%.8f nan=%g +inf=%g -inf=%g): %s\n",
+               finiteDrive, nanDrive, positiveInfDrive, negativeInfDrive,
+               externalGuardOk ? "PASS" : "FAIL");
+        if (!externalGuardOk)
+            return 1;
+    }
+
     // ── Haptik lattice state/clamp pass: scalar vs float_4, must be BIT-identical.
     // Unlike the RK4 oscillators (where SIMD rounding causes benign phase drift), this
     // pass is a plain elementwise clamp with no accumulation, so the vectorized version
-    // must match the scalar loop exactly. The module writes the clamp as fmax(fmin(x,hi),lo)
-    // to mirror rack::clamp's op order (which also fixes _mm_min/max_ps's NaN and signed-
+    // must match the scalar loop exactly. Both paths call the shared production
+    // advanceStateValue(), whose injected min/max operations preserve fmax(fmin(x,hi),lo)
+    // ordering (which also fixes _mm_min/max_ps's NaN and signed-
     // zero behavior to match std::fmin/fmax here). Swept over every production N=8..128
     // (all four tail residues) with a value set that includes the ±16 boundary, values far
     // past it, ±inf, NaN, ±0, and subnormals, compared with memcmp for true bit-equality. ──
     {
-        const float SMAX_H = 16.f;          // Haptik STATE_MAX
+        const float SMAX_H = coalescent::haptik::kStateMax;
         const float INF = std::numeric_limits<float>::infinity();
         const float NAN_ = std::numeric_limits<float>::quiet_NaN();
         const float SUB = std::numeric_limits<float>::denorm_min();
@@ -220,7 +261,8 @@ int main() {
         const int   NE = (int) (sizeof(extras) / sizeof(extras[0]));
 
         long totalDiffs = 0;
-        for (int N = 8; N <= 128; N++) {                     // every N, so every tail residue 0..3
+        for (int N = coalescent::haptik::kMinPlayableMasses;
+             N <= coalescent::haptik::kMaxPlayableMasses; N++) {
             std::vector<float> y0(N), v0(N);
             for (int i = 0; i < N; i++) {
                 // seed the first entries with the pathological values, the rest with a
@@ -232,29 +274,34 @@ int main() {
                     v0[i] = -t * 25.f * (1.f + 0.2f * std::cos(i * 2.3f));
                 }
             }
-            std::vector<float> ys = y0, vs = v0;             // scalar reference (mirrors module)
-            for (int i = 0; i < N; i++) {
-                ys[i] = rack::math::clamp(ys[i] + vs[i], -SMAX_H, SMAX_H);
-                vs[i] = rack::math::clamp(vs[i], -SMAX_H, SMAX_H);
-            }
-            std::vector<float> yv = y0, vv = v0;             // vectorized (mirrors module)
+            std::vector<float> ys = y0, vs = v0;
+            for (int i = 0; i < N; i++)
+                coalescent::haptik::advanceStateValue(ys[i], vs[i]);
+            std::vector<float> yv = y0, vv = v0;
             const float_4 lo(-SMAX_H), hi(SMAX_H);
             int i = 0;
             for (; i + 4 <= N; i += 4) {
                 float_4 Y = float_4::load(&yv[i]);
                 float_4 V = float_4::load(&vv[i]);
-                Y = simd::fmax(simd::fmin(Y + V, hi), lo);
-                V = simd::fmax(simd::fmin(V, hi), lo);
+                coalescent::haptik::advanceStateValue(
+                    Y, V, lo, hi,
+                    [](const float_4& a, const float_4& b) {
+                        return simd::fmin(a, b);
+                    },
+                    [](const float_4& a, const float_4& b) {
+                        return simd::fmax(a, b);
+                    });
                 Y.store(&yv[i]); V.store(&vv[i]);
             }
-            for (; i < N; i++) {
-                yv[i] = rack::math::clamp(yv[i] + vv[i], -SMAX_H, SMAX_H);
-                vv[i] = rack::math::clamp(vv[i], -SMAX_H, SMAX_H);
-            }
+            for (; i < N; i++)
+                coalescent::haptik::advanceStateValue(yv[i], vv[i]);
             // memcmp: catches any bit difference (incl. signed zero), skipping NaN slots
             // where a raw bit-compare is not meaningful but both must still be NaN.
             for (int j = 0; j < N; j++) {
-                for (auto pr : { std::make_pair(&ys[j], &yv[j]), std::make_pair(&vs[j], &vv[j]) }) {
+                const std::pair<const float*, const float*> comparisons[] = {
+                    {&ys[j], &yv[j]}, {&vs[j], &vv[j]}
+                };
+                for (const auto& pr : comparisons) {
                     if (std::isnan(*pr.first) || std::isnan(*pr.second)) {
                         if (std::isnan(*pr.first) != std::isnan(*pr.second)) totalDiffs++;
                     } else if (std::memcmp(pr.first, pr.second, sizeof(float)) != 0) {

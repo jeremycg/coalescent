@@ -1,11 +1,12 @@
 #include "plugin.hpp"
 #include "dsp/display_snapshot.hpp"
+#include "dsp/gendyn_core.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 
-static const int MAX_N = 64;
+static const int MAX_N = coalescent::gendyn::kMaxBreakpoints;
 
 struct GENDYN : Module {
 
@@ -276,18 +277,6 @@ struct GENDYN : Module {
 
     // ── DSP helpers ───────────────────────────────────────────────────────────
 
-    // Reflect x into [lo, hi] by folding at each barrier (Serra eq. 3).
-    // O(1) triangle fold, equivalent to mirroring repeatedly at the barriers;
-    // constant-time even for far-out x (Cauchy draws have heavy tails).
-    // Guards against a degenerate zero-width range.
-    static float reflect(float x, float lo, float hi) {
-        if (hi <= lo) return lo;
-        const float range = hi - lo;
-        float y = std::fmod(x - lo, 2.f * range);
-        if (y < 0.f) y += 2.f * range;
-        return lo + (y > range ? 2.f * range - y : y);
-    }
-
     // Inverse-CDF samplers. `scale` is the distribution's spread parameter.
     static float cauchySample(float scale) {
         float u = clamp(rack::random::uniform(), 0.0001f, 0.9999f);
@@ -369,16 +358,20 @@ struct GENDYN : Module {
     void runCycleUpdate(int N, float scaleAmp, float scaleDur,
                         float bAmp, float bDurMin, float bDurMax,
                         int dist, float spread) {
-        const float pDurHW  = (bDurMax - bDurMin) * 0.5f;
         const float gainAmp = scaleAmp * bAmp;
-        const float gainDur = scaleDur * pDurHW;
+        const coalescent::gendyn::DurationBarriers durationBounds{
+            0.f, bDurMin, bDurMax};
+        const float gainDur = coalescent::gendyn::durationWalkGain(
+            scaleDur, durationBounds);
         sum_dur = 0.f;
         for (int i = 0; i < N; i++) {
-            step_amp[i] = reflect(step_amp[i] + drawSample(dist, spread), -1.f, 1.f);
-            amp[i]      = reflect(amp[i] + gainAmp * step_amp[i], -bAmp, bAmp);
+            const float ampDraw = drawSample(dist, spread);
+            coalescent::gendyn::advanceWalkPoint(
+                amp[i], step_amp[i], ampDraw, gainAmp, -bAmp, bAmp);
 
-            step_dur[i] = reflect(step_dur[i] + drawSample(dist, spread), -1.f, 1.f);
-            dur[i]      = reflect(dur[i] + gainDur * step_dur[i], bDurMin, bDurMax);
+            const float durationDraw = drawSample(dist, spread);
+            coalescent::gendyn::advanceWalkPoint(
+                dur[i], step_dur[i], durationDraw, gainDur, bDurMin, bDurMax);
             sum_dur += dur[i];
         }
     }
@@ -395,14 +388,23 @@ struct GENDYN : Module {
     // holds. A reachable target is tracked to within a sample; only below the physical
     // N-sample floor is it best-effort (see the servo at the cycle boundary).
     void updateNormAndFreq(bool lockPitch, float sampleRate, float centerFreq) {
-        norm_k = 1.f;
+        coalescent::gendyn::LockControllerState state;
+        state.correction = lockCorr;
+        state.durationError = dur_err;
+        state.target = cycleTarget;
+        state.normalization = norm_k;
+        coalescent::gendyn::initializeLockController(
+            state, lockPitch, sampleRate, centerFreq, sum_dur);
+        lockCorr = state.correction;
+        dur_err = state.durationError;
+        cycleTarget = state.target;
+        norm_k = state.normalization;
         if (lockPitch && sum_dur > 0.f) {
             // lockCorr is the per-cycle servo term (see the cycle boundary): the raw
             // sampleRate/centerFreq/sum_dur is only the *theoretical* scale — the
             // per-segment 1-sample floor plus error-diffused rounding inflate the
             // realized period when durations are unequal near the floor, so the servo
             // multiplies norm_k until the *measured* period tracks the target.
-            norm_k = (sampleRate / centerFreq) / sum_dur * lockCorr;
             // No floor clamp on norm_k here: playback still floors each segment at 1
             // sample (so a cycle can't be shorter than N samples and a below-floor
             // target is physically unreachable), but the servo — not a norm_k clamp —
@@ -410,8 +412,6 @@ struct GENDYN : Module {
             // the servo's anti-windup keeps it from integrating below the floor, and a
             // target change resets it to unity (see the cycle boundary), so it never
             // carries a stale/wound value into a new target.
-        } else {
-            lockCorr = 1.f;   // idle: re-enabling LOCK re-converges from unity
         }
         // Initial estimate; the per-cycle measurement overrides this once playing.
         freq_cv = computeFreqCV(sampleRate, sum_dur * norm_k);
@@ -456,10 +456,12 @@ struct GENDYN : Module {
         // returns durCenter, so the (error-diffused) playback holds the exact
         // centre pitch. Do NOT widen a zero-width window — that reintroduces a
         // duration walk and detunes (a +1-sample floor biased the pitch flat).
-        const float durCenter = args.sampleRate / (centerFreq * (float)N);
-        const float halfWidth = bDurWidth * durCenter;
-        float bDurMin = std::max(1.f, durCenter - halfWidth);
-        float bDurMax = std::max(bDurMin, durCenter + halfWidth);
+        const coalescent::gendyn::DurationBarriers durationBounds =
+            coalescent::gendyn::durationBarriers(
+                bDurWidth, args.sampleRate, centerFreq, N);
+        const float durCenter = durationBounds.center;
+        const float bDurMin = durationBounds.minimum;
+        const float bDurMax = durationBounds.maximum;
 
         int dist = clamp((int)params[DISTRIBUTION_PARAM].getValue(), 0, 3);
 
@@ -473,7 +475,6 @@ struct GENDYN : Module {
             initBreakpoints(N, bAmp, durCenter, bDurMin, bDurMax);
             updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
             current_dur = std::max(1, (int)(dur[0] * norm_k));
-            cycleTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
             last_N = N; lastInitShape = initShape;
             restoredPending = false;                 // reinit already recomputed the caches
             publishSaveFrame(N, args.sampleRate);    // seeded state is immediately saveable
@@ -496,10 +497,8 @@ struct GENDYN : Module {
             // Initialize the first segment with the same rounded, error-diffused path
             // ordinary segment boundaries use, so playback resumes exactly as it saves
             // (truncating here would cost up to a sample vs. uninterrupted playback).
-            const float fd0 = dur[0] * norm_k + dur_err;
-            current_dur = std::max(1, (int)(fd0 + 0.5f));
-            dur_err     = clamp(fd0 - (float) current_dur, -4.f, 4.f);
-            cycleTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
+            current_dur = coalescent::gendyn::quantizeDuration(
+                dur[0], norm_k, dur_err);
             restoredPending = false;
             publishSaveFrame(N, args.sampleRate);    // restored state is immediately re-saveable
         }
@@ -551,35 +550,32 @@ struct GENDYN : Module {
                 // norm_k, so the ratio is always <1 and the correction would wind down to its
                 // 0.25 bound — a stale value that then makes the first cycle after you raise
                 // the pitch again wildly sharp. So the servo simply doesn't integrate there.
-                if (cycleTarget > (float) N && realized > 0.f) {
-                    const float step = clamp(cycleTarget / realized, 0.8f, 1.25f);
-                    lockCorr         = clamp(lockCorr * step, 0.25f, 4.f);
-                }
-                // PERSIST knob -> step-walk draw spread, exponential: 0 -> 1.0
-                // (near-white steps, first-order feel), 0.3 -> 0.25 (default),
-                // 1 -> 0.01 (long steady glides). Needed once per cycle, so
-                // the pow() lives here, off the per-sample path.
-                const float persistSpread =
-                    std::pow(10.f, -2.f * params[PERSIST_PARAM].getValue());
-                runCycleUpdate(N, scaleAmp, scaleDur, bAmp, bDurMin, bDurMax,
-                               dist, persistSpread);
-                // A correction is only valid for the target/shape it converged on. If the
-                // target changed (B DUR CTR moved, LOCK toggled) or is now unreachable, drop
-                // to unity so a stale/wound value can't detune the new cycle — and clear the
-                // error-diffusion remainder too, since a leftover dur_err (anywhere in
-                // [-4,4]) from the old regime would otherwise cost the first cycle up to a
-                // few samples. With both reset, feed-forward lands the first cycle within
-                // ~1 sample of pitch for a reachable target away from the immediate floor;
-                // a *highly clustered* shape right at the floor can still be several samples
-                // off for a cycle, then the servo converges in a handful of cycles (the
-                // best-effort corner the manual describes).
-                const float newTarget = lockPitch ? args.sampleRate / centerFreq : 0.f;
-                if (newTarget != cycleTarget || newTarget <= (float) N) {
-                    lockCorr = 1.f;
-                    dur_err  = 0.f;
-                }
-                updateNormAndFreq(lockPitch, args.sampleRate, centerFreq);
-                cycleTarget = newTarget;                 // target the NEW cycle aims at
+                coalescent::gendyn::LockControllerState lockState;
+                lockState.correction = lockCorr;
+                lockState.durationError = dur_err;
+                lockState.target = cycleTarget;
+                lockState.normalization = norm_k;
+                coalescent::gendyn::completeCycleAndRetarget(
+                    lockState, realized, N, lockPitch, args.sampleRate,
+                    centerFreq, [&]() {
+                        // PERSIST knob -> step-walk draw spread, exponential: 0 -> 1.0
+                        // (near-white steps, first-order feel), 0.3 -> 0.25 (default),
+                        // 1 -> 0.01 (long steady glides). Needed once per cycle, so
+                        // the pow() lives here, off the per-sample path.
+                        const float persistSpread =
+                            std::pow(10.f, -2.f * params[PERSIST_PARAM].getValue());
+                        runCycleUpdate(N, scaleAmp, scaleDur, bAmp, bDurMin, bDurMax,
+                                       dist, persistSpread);
+                        return sum_dur;
+                    });
+                lockCorr = lockState.correction;
+                dur_err = lockState.durationError;
+                cycleTarget = lockState.target;
+                norm_k = lockState.normalization;
+                // A correction is only valid for the target/shape it converged on. The
+                // shared transition resets stale correction and rounding error when the
+                // target changes or is unreachable, then installs the next normalization.
+                freq_cv = computeFreqCV(args.sampleRate, sum_dur * norm_k);
                 if (realized > 0.f) freq_cv = computeFreqCV(args.sampleRate, realized);
                 publishSaveFrame(N, args.sampleRate);    // coherent copy for a race-free save
                 // Continuity at the cycle boundary is inherent: every segment
@@ -595,9 +591,8 @@ struct GENDYN : Module {
             // plain truncation runs ~0.5 sample short per segment, which adds
             // up to a few percent of sharpness; carrying the remainder keeps
             // the long-run period exact (which LOCK mode depends on).
-            const float fd = dur[current_breakpoint] * norm_k + dur_err;
-            current_dur    = std::max(1, (int)(fd + 0.5f));
-            dur_err        = clamp(fd - (float)current_dur, -4.f, 4.f);
+            current_dur = coalescent::gendyn::quantizeDuration(
+                dur[current_breakpoint], norm_k, dur_err);
         }
 
         // ── Refresh display snapshot (~45 Hz) ─────────────────────────────────
@@ -678,10 +673,9 @@ struct GENDYScope : Widget {
             if (module) {
                 float e = 0.f;
                 for (int i = 0; i < N; i++) {
-                    float fd = fr.dur[i] * fr.normK + e;
-                    float cd = std::max(1.f, std::round(fd));
-                    e = clamp(fd - cd, -4.f, 4.f);
-                    durSched[i] = cd;
+                    durSched[i] = static_cast<float>(
+                        coalescent::gendyn::quantizeDuration(
+                            fr.dur[i], fr.normK, e));
                 }
             } else {
                 for (int i = 0; i < N; i++) durSched[i] = 1.f;

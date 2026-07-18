@@ -144,12 +144,51 @@ void testContextInitializeAndFiniteOutputs() {
     std::printf("Finches Rack Initialize + finite outputs PASS\n");
 }
 
+void testResetTickConvention() {
+    Finches module;
+    Module::ProcessArgs args = zeroTimeArgs();
+    args.sampleRate = 500.f;
+    args.sampleTime = 1.f / args.sampleRate;
+
+    module.params[Finches::RATE_PARAM].setValue(4.f);
+    module.inputs[Finches::ENV_INPUT].channels = 1;
+    module.inputs[Finches::ENV_INPUT].setVoltage(2.f);
+    module.inputs[Finches::RESET_INPUT].channels = 1;
+    module.inputs[Finches::RESET_INPUT].setVoltage(0.f);
+    module.inputs[Finches::SEED_INPUT].channels = 1;
+    module.inputs[Finches::SEED_INPUT].setVoltage(0.f);
+    module.process(args); // Prime both Schmitt triggers at the 500 Hz field cadence.
+
+    module.field.seed(-0.7f, 0.2f);
+    module.splitPulse.trigger(Finches::GATE_TIME);
+    module.mergePulse.trigger(Finches::GATE_TIME);
+    coalescent::FinchesField expected;
+    expected.reset(module.environmentFromInput());
+
+    module.inputs[Finches::RESET_INPUT].setVoltage(10.f);
+    module.inputs[Finches::SEED_INPUT].setVoltage(10.f);
+    module.process(args);
+    if (!sameState(module.field.state(), expected.state()))
+        fail("RESET tick advanced the field or admitted a simultaneous SEED");
+    if (module.splitPulse.remaining != 0.f || module.mergePulse.remaining != 0.f)
+        fail("RESET tick did not clear live event pulses");
+
+    module.inputs[Finches::RESET_INPUT].setVoltage(0.f);
+    module.inputs[Finches::SEED_INPUT].setVoltage(0.f);
+    module.process(args);
+    if (sameState(module.field.state(), expected.state()))
+        fail("field did not resume evolution after the RESET tick");
+
+    std::printf("Finches RESET tick: install now, evolve next tick PASS\n");
+}
+
 } // namespace
 
 int main() {
     rack::random::init();
     testCompleteAndLegacyPersistence();
     testContextInitializeAndFiniteOutputs();
+    testResetTickConvention();
     std::printf("Finches Rack integration: PASS\n");
     return 0;
 }
