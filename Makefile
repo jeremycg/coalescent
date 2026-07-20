@@ -68,7 +68,9 @@ check-simd:
 # and use Engine::resetModule() for the same ResetEvent path as context-menu
 # Initialize.
 RACK_CHECK_CXX ?= $(CXX)
-RACK_CHECK_FLAGS ?= -std=c++17 -O2 -funsafe-math-optimizations -Isrc -I$(RACK_DIR)/include -I$(RACK_DIR)/dep/include
+# Rack 2.6.6's rack.hpp includes <plugin.hpp>; keep src quote-only so that angle
+# include cannot resolve to this plugin's own src/plugin.hpp.
+RACK_CHECK_FLAGS ?= -std=c++17 -O2 -funsafe-math-optimizations -I$(RACK_DIR)/include -I$(RACK_DIR)/dep/include -iquote src
 RACK_CHECK_LDFLAGS ?= -L$(RACK_DIR) -Wl,-rpath,$(abspath $(RACK_DIR)) -Wl,--allow-shlib-undefined -lRack
 RACK_CHECK_LIBRARY_PATH = $(abspath $(RACK_DIR))$(if $(RACK_RUNTIME_LIBRARY_PATH),:$(RACK_RUNTIME_LIBRARY_PATH))
 

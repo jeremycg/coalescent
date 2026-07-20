@@ -41,6 +41,7 @@ def pv(i, v):
     return {"id": i, "value": float(v)}
 
 def archipelago_state(gradient, climate):
+    # fsum keeps archived float state byte-identical across Python versions.
     bins, sigma = 32, 0.065
     density, reported_traits = [], []
     global_moment = 0.0
@@ -51,9 +52,9 @@ def archipelago_state(gradient, climate):
                   for trait_bin in range(bins)]
         population = [math.exp(-0.5 * ((trait - optimum) / sigma) ** 2)
                       for trait in traits]
-        scale = 0.75 / sum(population)
+        scale = 0.75 / math.fsum(population)
         population = [value * scale for value in population]
-        moment = sum(value * trait for value, trait in zip(population, traits))
+        moment = math.fsum(value * trait for value, trait in zip(population, traits))
         density.extend(population)
         reported_traits.append(moment / 0.75)
         global_moment += moment

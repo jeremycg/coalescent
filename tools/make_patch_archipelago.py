@@ -59,6 +59,7 @@ def param(param_id, value):
 
 def adapted_state(gradient, climate):
     """Return the same deterministic field that RESET builds for these controls."""
+    # fsum keeps archived float state byte-identical across Python versions.
     bins = 32
     sigma = 0.065
     density = []
@@ -72,9 +73,9 @@ def adapted_state(gradient, climate):
                   for trait_bin in range(bins)]
         population = [math.exp(-0.5 * ((trait - optimum) / sigma) ** 2)
                       for trait in traits]
-        scale = 0.75 / sum(population)
+        scale = 0.75 / math.fsum(population)
         population = [value * scale for value in population]
-        moment = sum(value * trait for value, trait in zip(population, traits))
+        moment = math.fsum(value * trait for value, trait in zip(population, traits))
         density.extend(population)
         reported_traits.append(moment / 0.75)
         global_moment += moment
