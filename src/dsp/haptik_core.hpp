@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ode_policy.hpp"
+#include "finite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -134,7 +135,7 @@ inline int advanceDivider(int dividerCounter, int divider) {
 
 inline void advanceScanPhase(float& phase, float pitchHz, float sampleRate) {
     phase += pitchHz / sampleRate;
-    if (!std::isfinite(phase))
+    if (!coalescent::isFinite(phase))
         phase = 0.f;
     phase -= std::floor(phase);
 }

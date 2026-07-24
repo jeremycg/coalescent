@@ -2,6 +2,7 @@
 #include "../dsp/neuron_models.hpp"
 #include "../dsp/display_snapshot.hpp"
 #include "../dsp/completed_path.hpp"
+#include "../dsp/finite.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
@@ -264,7 +265,7 @@ struct Soma : Module {
         const float Iatt      = params[CURRENT_ATT_PARAM].getValue();
         const float rLogBase = Core::sanitizeBurstBase(params[BURST_PARAM].getValue());
         const float rAttRaw = params[BURST_ATT_PARAM].getValue();
-        const float rAtt = std::isfinite(rAttRaw) ? rAttRaw : 0.f;
+        const float rAtt = coalescent::isFinite(rAttRaw) ? rAttRaw : 0.f;
         const float s         = params[ADAPT_PARAM].getValue();
         const float pitchKnob = params[PITCH_PARAM].getValue();
         const float floatMax  = std::numeric_limits<float>::max();

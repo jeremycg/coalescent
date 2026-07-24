@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "dsp/bunnies_core.hpp"
 #include "dsp/display_snapshot.hpp"
+#include "dsp/finite.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -175,7 +176,7 @@ struct Bunnies : Module {
                 rmA = K; rmB = coalescent::bunnies::RM_B; rmC = c;
             }
             cx = rmCx; cy = rmCy;
-            if (!(cx > 0.f && cy > 0.f) || !std::isfinite(cx) || !std::isfinite(cy)) {
+            if (!(cx > 0.f && cy > 0.f) || !coalescent::isFinite(cx) || !coalescent::isFinite(cy)) {
                 cx = 1.f; cy = 1.f; reseed(); resetPeakMemory(); rmValid = false;
             }
         }

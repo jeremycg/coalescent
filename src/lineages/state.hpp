@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../dsp/finite.hpp"
 #include "../dsp/hex64.hpp"
 #include "playback.hpp"
 
@@ -45,7 +46,7 @@ struct Snapshot {
         Snapshot candidate = *this;
         if (candidate.version != STATE_VERSION ||
             !candidate.generated.validateAndDerive() ||
-            !std::isfinite(candidate.cursor) ||
+            !coalescent::isFinite(candidate.cursor) ||
             candidate.cursor < 0.0 || candidate.cursor > 1.0 ||
             !validDirection(candidate.direction) ||
             !validTransport(candidate) ||
@@ -94,7 +95,7 @@ private:
     }
 
     static bool validPulse(float remaining) {
-        return std::isfinite(remaining) && remaining >= 0.f &&
+        return coalescent::isFinite(remaining) && remaining >= 0.f &&
                remaining <= maximumPulseRemaining();
     }
 };

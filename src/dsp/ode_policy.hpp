@@ -1,10 +1,9 @@
 #pragma once
 
+#include "finite.hpp"
+
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
-#include <cstring>
-#include <limits>
 
 namespace coalescent {
 
@@ -26,15 +25,11 @@ inline OdeStepPlan makeOdeStepPlan(float requested, float maxStep,
     return plan;
 }
 
-// Rack builds DSP with -funsafe-math-optimizations, under which compilers may
-// fold std::isfinite() to true. Inspecting the IEEE-754 exponent bits keeps the
-// hostile-input guard effective under the actual production flags.
+// Retained spelling for the float guard; coalescent::isFinite in finite.hpp is
+// the shared predicate and documents why the exponent bits are inspected
+// directly instead of calling the standard isfinite.
 inline bool finiteFloat(float value) {
-    static_assert(sizeof(float) == sizeof(std::uint32_t), "32-bit float required");
-    static_assert(std::numeric_limits<float>::is_iec559, "IEEE-754 float required");
-    std::uint32_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    return (bits & 0x7f800000u) != 0x7f800000u;
+    return isFinite(value);
 }
 
 inline float finiteOr(float value, float fallback) {

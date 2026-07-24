@@ -3,6 +3,7 @@
 #include "fast_tanh.hpp"
 #include "ode_policy.hpp"
 #include "rk4.hpp"
+#include "finite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -47,7 +48,7 @@ inline float capacityFromWild(float wild) {
 inline bool rmCenter(float capacity, float mortality, float& x, float& y) {
     x = mortality / (1.f - RM_B * mortality);
     y = x * (1.f - x / capacity) / mortality;
-    return x > 0.f && y > 0.f && std::isfinite(x) && std::isfinite(y);
+    return x > 0.f && y > 0.f && coalescent::isFinite(x) && coalescent::isFinite(y);
 }
 
 inline void seed(float centerX, float centerY, float state[2]) {
@@ -92,7 +93,7 @@ inline OdeStepPlan stepPlan(float requestedDelta, int mode, float gamma) {
 }
 
 inline bool repairState(float (&state)[2]) {
-    if (!std::isfinite(state[0]) || !std::isfinite(state[1])) return false;
+    if (!coalescent::isFinite(state[0]) || !coalescent::isFinite(state[1])) return false;
     state[0] = std::fmax(std::fmin(state[0], STATE_MAX), POS_FLOOR);
     state[1] = std::fmax(std::fmin(state[1], STATE_MAX), POS_FLOOR);
     return true;

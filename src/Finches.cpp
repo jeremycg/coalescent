@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "dsp/display_snapshot.hpp"
 #include "dsp/finches_field.hpp"
+#include "dsp/finite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -159,7 +160,7 @@ struct Finches : Module {
     }
 
     static float safe(float x, float fallback = 0.f) {
-        return std::isfinite(x) ? x : fallback;
+        return coalescent::isFinite(x) ? x : fallback;
     }
 
     static float clampf(float x, float lo, float hi) {

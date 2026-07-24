@@ -1,5 +1,7 @@
 #pragma once
 
+#include "finite.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -199,7 +201,7 @@ public:
         const Parameters p = sanitized(requested);
         clearEvents();
 
-        if (!std::isfinite(deltaTau) || !(deltaTau > 0.0)) {
+        if (!coalescent::isFinite(deltaTau) || !(deltaTau > 0.0)) {
             refreshMetrics(p, false);
             clearEvents();
             return;
@@ -261,7 +263,7 @@ private:
     }
 
     static double finiteOr(double value, double fallback) {
-        return std::isfinite(value) ? value : fallback;
+        return coalescent::isFinite(value) ? value : fallback;
     }
 
     static Parameters sanitized(const Parameters& requested) {
@@ -340,7 +342,7 @@ private:
     // Neumann boundary rows. The matrix is positive and has unit row sums.
     static bool prepareDiffusion(double r, double* cPrime,
                                  double* inverseDenominator) {
-        if (!(r > 0.0) || !std::isfinite(r))
+        if (!(r > 0.0) || !coalescent::isFinite(r))
             return false;
 
         double denominator = 1.0 + r;
@@ -418,7 +420,7 @@ private:
         for (int i = 0; i < kValues; ++i) {
             // This is far below seeded standing variation and observable mass,
             // but leaves ample headroom above slow double-subnormal arithmetic.
-            if (!std::isfinite(density_[i]) ||
+            if (!coalescent::isFinite(density_[i]) ||
                 density_[i] < numericalExtinctionFloor())
                 density_[i] = 0.0;
             else if (density_[i] > stateBinMax())
@@ -529,25 +531,25 @@ private:
     }
 
     static bool validState(const State& saved) {
-        if (!std::isfinite(saved.reportedGlobalMean) ||
+        if (!coalescent::isFinite(saved.reportedGlobalMean) ||
             saved.reportedGlobalMean < traitMin() ||
             saved.reportedGlobalMean > traitMax() ||
             (saved.occupiedMask & ~allHabitatsMask()) != 0u)
             return false;
 
         for (int habitat = 0; habitat < kHabitats; ++habitat) {
-            if (!std::isfinite(saved.reportedTrait[habitat]) ||
+            if (!coalescent::isFinite(saved.reportedTrait[habitat]) ||
                 saved.reportedTrait[habitat] < traitMin() ||
                 saved.reportedTrait[habitat] > traitMax())
                 return false;
             double abundance = 0.0;
             for (int bin = 0; bin < kBins; ++bin) {
                 const double value = saved.density[index(habitat, bin)];
-                if (!std::isfinite(value) || value < 0.0 || value > stateBinMax())
+                if (!coalescent::isFinite(value) || value < 0.0 || value > stateBinMax())
                     return false;
                 abundance += value;
             }
-            if (!std::isfinite(abundance) || abundance > stateHabitatMax())
+            if (!coalescent::isFinite(abundance) || abundance > stateHabitatMax())
                 return false;
             const bool occupied =
                 (saved.occupiedMask & (UINT32_C(1) << habitat)) != 0u;

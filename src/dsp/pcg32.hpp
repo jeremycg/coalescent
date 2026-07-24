@@ -1,5 +1,7 @@
 #pragma once
 
+#include "finite.hpp"
+
 #include <cmath>
 #include <cstdint>
 
@@ -88,7 +90,7 @@ public:
     }
 
     double exponential(double rate) {
-        if (!(rate > 0.0) || !std::isfinite(rate))
+        if (!(rate > 0.0) || !coalescent::isFinite(rate))
             return 0.0;
         return -std::log(uniformOpen()) / rate;
     }
@@ -96,7 +98,7 @@ public:
     // Knuth's exact product sampler is practical for Lineages (lambda <= 64).
     // Folding the tail into cap keeps work and storage strictly bounded.
     PoissonResult poissonCapped(double lambda, std::uint32_t cap) {
-        if (!(lambda > 0.0) || !std::isfinite(lambda) || cap == 0u)
+        if (!(lambda > 0.0) || !coalescent::isFinite(lambda) || cap == 0u)
             return PoissonResult();
 
         const double limit = std::exp(-lambda);

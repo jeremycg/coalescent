@@ -2,6 +2,7 @@
 #include "tanh_approx.hpp"
 #include "dsp/display_snapshot.hpp"
 #include "dsp/haptik_core.hpp"
+#include "dsp/finite.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -193,13 +194,13 @@ struct Haptik : Module {
             V[i] = (float) json_number_value(json_array_get(jv, i));
             // Bound to the model's state clamp (the DSP holds |y|,|v| ≤ STATE_MAX);
             // a finite-but-out-of-model corrupt patch falls back to a reseed.
-            if (!std::isfinite(Y[i]) || std::fabs(Y[i]) > STATE_MAX
-                || !std::isfinite(V[i]) || std::fabs(V[i]) > STATE_MAX) return;   // malformed → reseed
+            if (!coalescent::isFinite(Y[i]) || std::fabs(Y[i]) > STATE_MAX
+                || !coalescent::isFinite(V[i]) || std::fabs(V[i]) > STATE_MAX) return;   // malformed → reseed
         }
         for (int i = 0; i < n; i++) { y[i] = Y[i]; v[i] = V[i]; yPrev[i] = Y[i]; }
         if (json_t* jp = json_object_get(root, "scanPhase")) {
             float sp = (float) json_number_value(jp);
-            scanPhase = std::isfinite(sp) ? (sp - std::floor(sp)) : 0.f;
+            scanPhase = coalescent::isFinite(sp) ? (sp - std::floor(sp)) : 0.f;
         }
         divCounter = 0; wasFrozen = false;                   // clean slow-mode frame; FREEZE edge no-ops (yPrev==y)
         last_N = n;                                          // suppress the reinit re-pluck
@@ -264,7 +265,7 @@ struct Haptik : Module {
         float rateLog = params[RATE_PARAM].getValue()
                       + inputs[RATE_INPUT].getVoltage() * params[RATE_ATT_PARAM].getValue() * CV_DEPTH;
         // Guard approxExp2's internal float->int shift against a non-finite/absurd CV.
-        rateLog = std::isfinite(rateLog) ? clamp(rateLog, -30.f, 30.f) : 0.f;
+        rateLog = coalescent::isFinite(rateLog) ? clamp(rateLog, -30.f, 30.f) : 0.f;
         bool  slow = params[MODE_PARAM].getValue() > 0.5f;
         int   D    = slow ? SLOW_DIV : 1;   // lattice steps every D samples
 
@@ -388,7 +389,7 @@ struct Haptik : Module {
 
         // ── scan readout (always) ──
         float pexp = params[PITCH_PARAM].getValue() + inputs[VOCT_INPUT].getVoltage();
-        pexp = std::isfinite(pexp) ? clamp(pexp, -30.f, 30.f) : 0.f;   // guard approxExp2's int-convert
+        pexp = coalescent::isFinite(pexp) ? clamp(pexp, -30.f, 30.f) : 0.f;   // guard approxExp2's int-convert
         float pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pexp);
         // A NaN on V/OCT (from a misbehaving upstream module) is reset by the
         // shared phase advance instead of sticking the read head at NaN forever.

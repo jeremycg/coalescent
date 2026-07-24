@@ -3,6 +3,7 @@
 #include "fast_tanh.hpp"
 #include "ode_policy.hpp"
 #include "rk4.hpp"
+#include "finite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -80,7 +81,7 @@ inline bool equilibrium(T b1, T b2, T& x, T& y, T& z) {
     const T response = f1(x, b1);
     z = y * (response - T(D1)) / T(D2);
     return x > T(0) && y > T(0) && response > T(D1) && z > T(0)
-        && std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
+        && coalescent::isFinite(x) && coalescent::isFinite(y) && coalescent::isFinite(z);
 }
 
 inline void seed(float state[3]) {
@@ -94,8 +95,8 @@ inline OdeStepPlan stepPlan(float requestedDelta) {
 }
 
 inline bool repairState(float (&state)[3]) {
-    if (!std::isfinite(state[0]) || !std::isfinite(state[1])
-        || !std::isfinite(state[2])) return false;
+    if (!coalescent::isFinite(state[0]) || !coalescent::isFinite(state[1])
+        || !coalescent::isFinite(state[2])) return false;
     for (int i = 0; i < 3; ++i)
         state[i] = std::fmax(std::fmin(state[i], STATE_MAX), POS_FLOOR);
     return true;

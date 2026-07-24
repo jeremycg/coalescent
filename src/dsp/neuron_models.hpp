@@ -2,6 +2,7 @@
 
 #include "ode_policy.hpp"
 #include "rk4.hpp"
+#include "finite.hpp"
 
 #include <cmath>
 
@@ -249,7 +250,7 @@ struct SomaCore {
 
     static inline float sanitizeBurstBase(float exponent) {
         const float fallback = std::log2(R_DEFAULT);
-        if (!std::isfinite(exponent))
+        if (!coalescent::isFinite(exponent))
             return fallback;
         return ScalarClamp()(exponent, BURST_EXP_MIN, BURST_EXP_MAX);
     }
@@ -263,7 +264,7 @@ struct SomaCore {
 
     static inline float sanitizeBurstExponent(float exponent, float fallback) {
         struct ScalarFinite {
-            bool operator()(float value) const { return std::isfinite(value); }
+            bool operator()(float value) const { return coalescent::isFinite(value); }
         };
         return sanitizeBurstExponent(exponent, fallback, ScalarFinite(), ScalarSelect(), ScalarClamp());
     }

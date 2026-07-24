@@ -197,6 +197,15 @@ hysteresis around shallow valleys.
   fixed 500 Hz control cadence and the display receives lock-free snapshots; it
   is not an audio-rate waveshaper. RATE is bounded so a control tick cannot ask
   the field core to advance more than 0.32 `τ` at once.
+- **RATE changes CPU cost, not just speed.** Each 500 Hz control tick subdivides
+  its requested `τ` advance into substeps of at most `0.02 τ`, so a tick costs
+  one substep at RATE ≤ 0 and sixteen at the `+4.25` ceiling. Measured on a
+  modern x86-64 core, one instance costs roughly 0.15 % of a core at or below
+  the default RATE and about 2.5 % at maximum — a ~16× span driven by one knob.
+  This matters when a *performance gesture* sweeps RATE upward in an already
+  heavy patch: the load arrives during the sweep. If a patch runs several fast
+  Finches, prefer raising RATE with the knob rather than slamming it with CV,
+  or run the instances at staggered rates.
 - The fixed trait interval is finite. An environment driven hard against its
   allowed edge has less room on one side and can produce visibly asymmetric
   clusters. The central ENV range is limited to reduce this boundary effect.

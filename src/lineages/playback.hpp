@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../dsp/finite.hpp"
 #include "kingman.hpp"
 
 #include <array>
@@ -117,7 +118,7 @@ public:
     // Use for NEW/RESET while TIME is patched, cable transitions, and load.
     // Non-finite TIME holds the previous valid cursor and emits no history.
     void synchronize(const Tree& tree, double targetCursor) {
-        if (std::isfinite(targetCursor))
+        if (coalescent::isFinite(targetCursor))
             cursor_ = clampCursor(targetCursor);
         running_ = canAdvanceFromCursor();
         rebuildMutationSuffixes(tree);
@@ -130,7 +131,7 @@ public:
                  bool savedLoop, bool savedRunning) {
         direction_ = savedDirection;
         loop_ = savedLoop;
-        cursor_ = std::isfinite(savedCursor)
+        cursor_ = coalescent::isFinite(savedCursor)
             ? clampCursor(savedCursor)
             : sourceCursor();
         running_ = savedRunning;
@@ -143,7 +144,7 @@ public:
     // as canonicalValues() without rescanning every mutation for a slow LFO.
     EventFacts scrub(const Tree& tree, double targetCursor) {
         EventFacts facts;
-        if (!std::isfinite(targetCursor))
+        if (!coalescent::isFinite(targetCursor))
             return facts;
 
         const double target = clampCursor(targetCursor);
@@ -160,7 +161,7 @@ public:
     EventFacts advance(const Tree& tree, double normalizedDistance) {
         EventFacts facts;
         if (!running_ || !(normalizedDistance > 0.0) ||
-            !std::isfinite(normalizedDistance))
+            !coalescent::isFinite(normalizedDistance))
             return facts;
 
         if (direction_ == Direction::Ancestry) {
@@ -211,7 +212,7 @@ public:
     static EventFacts crossingFacts(const Tree& tree, double oldCursor,
                                     double newCursor) {
         EventFacts facts;
-        if (!std::isfinite(oldCursor) || !std::isfinite(newCursor))
+        if (!coalescent::isFinite(oldCursor) || !coalescent::isFinite(newCursor))
             return facts;
 
         const double oldValue = clampCursor(oldCursor);
@@ -256,7 +257,7 @@ public:
     // been removed and a node at equality has already merged its descendants.
     static PlaybackValues canonicalValues(const Tree& tree, double cursor) {
         PlaybackValues result;
-        const double age = std::isfinite(cursor) ? clampCursor(cursor) : 0.0;
+        const double age = coalescent::isFinite(cursor) ? clampCursor(cursor) : 0.0;
         const int n = safeLeafCount(tree);
         result.sampleCount = n;
         if (n == 0)
@@ -316,7 +317,7 @@ private:
     }
 
     static bool validEventTime(double time) {
-        return std::isfinite(time) && time >= 0.0 && time <= 1.0;
+        return coalescent::isFinite(time) && time >= 0.0 && time <= 1.0;
     }
 
     static bool crossed(double eventTime, double oldCursor,

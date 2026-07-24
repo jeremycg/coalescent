@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "dsp/archipelago_field.hpp"
 #include "dsp/display_snapshot.hpp"
+#include "dsp/finite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -21,7 +22,7 @@ float archipelagoClamp(float value, float low, float high) {
 }
 
 float archipelagoSafe(float value, float fallback = 0.f) {
-    return std::isfinite(value) ? value : fallback;
+    return coalescent::isFinite(value) ? value : fallback;
 }
 
 struct ArchipelagoSelectionQuantity : ParamQuantity {
@@ -36,7 +37,7 @@ struct ArchipelagoSelectionQuantity : ParamQuantity {
     }
 
     void setDisplayValue(float displayValue) override {
-        if (!std::isfinite(displayValue))
+        if (!coalescent::isFinite(displayValue))
             return;
         displayValue = archipelagoClamp(displayValue, 0.f, 8.f);
         setImmediateValue(std::sqrt(displayValue / 8.f));
@@ -57,7 +58,7 @@ struct ArchipelagoMutationQuantity : ParamQuantity {
     }
 
     void setDisplayValue(float displayValue) override {
-        if (!std::isfinite(displayValue))
+        if (!coalescent::isFinite(displayValue))
             return;
         if (!(displayValue > 0.f)) {
             setImmediateValue(0.f);
@@ -82,7 +83,7 @@ struct ArchipelagoMigrationQuantity : ParamQuantity {
     }
 
     void setDisplayValue(float displayValue) override {
-        if (!std::isfinite(displayValue))
+        if (!coalescent::isFinite(displayValue))
             return;
         if (!(displayValue > 0.f)) {
             setImmediateValue(0.f);

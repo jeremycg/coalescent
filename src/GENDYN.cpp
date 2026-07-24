@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "dsp/display_snapshot.hpp"
 #include "dsp/gendyn_core.hpp"
+#include "dsp/finite.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -224,10 +225,10 @@ struct GENDYN : Module {
             Dr[i] = (float) json_number_value(json_array_get(jd,  i));
             SA[i] = (float) json_number_value(json_array_get(jsa, i));
             SD[i] = (float) json_number_value(json_array_get(jsd, i));
-            if (!std::isfinite(A[i]) || std::fabs(A[i]) > AMP_MAX
-                || !std::isfinite(Dr[i]) || Dr[i] < 1.f || Dr[i] > DUR_MAX
-                || !std::isfinite(SA[i]) || std::fabs(SA[i]) > STEP_MAX
-                || !std::isfinite(SD[i]) || std::fabs(SD[i]) > STEP_MAX) return;   // malformed → reseed
+            if (!coalescent::isFinite(A[i]) || std::fabs(A[i]) > AMP_MAX
+                || !coalescent::isFinite(Dr[i]) || Dr[i] < 1.f || Dr[i] > DUR_MAX
+                || !coalescent::isFinite(SA[i]) || std::fabs(SA[i]) > STEP_MAX
+                || !coalescent::isFinite(SD[i]) || std::fabs(SD[i]) > STEP_MAX) return;   // malformed → reseed
         }
         float s = 0.f;
         for (int i = 0; i < n; i++) { amp[i] = A[i]; dur[i] = Dr[i]; step_amp[i] = SA[i]; step_dur[i] = SD[i]; s += Dr[i]; }
@@ -244,15 +245,15 @@ struct GENDYN : Module {
         lockCorr = 1.f; restoredDurErr = 0.f; restoredFs = 0.f;
         if (json_t* jc = json_object_get(root, "lockCorr")) {
             float lc = (float) json_number_value(jc);
-            if (std::isfinite(lc)) lockCorr = clamp(lc, 0.25f, 4.f);
+            if (coalescent::isFinite(lc)) lockCorr = clamp(lc, 0.25f, 4.f);
         }
         if (json_t* je = json_object_get(root, "durErr")) {
             float de = (float) json_number_value(je);
-            if (std::isfinite(de)) restoredDurErr = clamp(de, -4.f, 4.f);
+            if (coalescent::isFinite(de)) restoredDurErr = clamp(de, -4.f, 4.f);
         }
         if (json_t* jf = json_object_get(root, "saveFs")) {
             float sf = (float) json_number_value(jf);
-            if (std::isfinite(sf)) restoredFs = sf;
+            if (coalescent::isFinite(sf)) restoredFs = sf;
         }
         last_N = n; lastInitShape = initShape; reseedPending = false;   // suppress the reinit reseed
         restoredPending = true;   // first process() recomputes norm_k / freq_cv / current_dur (needs sampleRate)

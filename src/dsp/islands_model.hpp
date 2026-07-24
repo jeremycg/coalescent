@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pcg32.hpp"
+#include "finite.hpp"
 
 #include <algorithm>
 #include <array>
@@ -188,7 +189,7 @@ private:
     Metrics metrics_;
 
     static double finiteOr(double value, double fallback) {
-        return std::isfinite(value) ? value : fallback;
+        return coalescent::isFinite(value) ? value : fallback;
     }
 
     static double clamp(double value, double low, double high) {

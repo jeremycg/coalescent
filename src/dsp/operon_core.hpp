@@ -3,6 +3,7 @@
 #include "fast_tanh.hpp"
 #include "ode_policy.hpp"
 #include "rk4.hpp"
+#include "finite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -198,7 +199,7 @@ struct StateRepair {
 inline StateRepair repairStateDetailed(float (&state)[6]) {
     StateRepair result = {true, false, false};
     for (int i = 0; i < 6; ++i) {
-        if (!std::isfinite(state[i]))
+        if (!coalescent::isFinite(state[i]))
             result.finite = false;
         else if (std::fabs(state[i]) > STATE_MAX)
             result.exceededRange = true;

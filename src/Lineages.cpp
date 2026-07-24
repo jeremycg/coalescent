@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "dsp/display_snapshot.hpp"
 #include "lineages/state.hpp"
+#include "dsp/finite.hpp"
 
 #include <algorithm>
 #include <array>
@@ -42,7 +43,7 @@ constexpr float SAVE_HZ = 500.f;
 constexpr float TRAIT_LIMIT = 10.f;
 
 float finiteOr(float value, float fallback = 0.f) {
-    return std::isfinite(value) ? value : fallback;
+    return coalescent::isFinite(value) ? value : fallback;
 }
 
 float clampFloat(float value, float low, float high) {
@@ -62,7 +63,7 @@ double clampDouble(double value, double low, double high) {
 }
 
 bool nearlyEqual(double a, double b) {
-    if (!std::isfinite(a) || !std::isfinite(b))
+    if (!coalescent::isFinite(a) || !coalescent::isFinite(b))
         return false;
     const double scale = std::max(1.0, std::max(std::fabs(a), std::fabs(b)));
     return std::fabs(a - b) <= 1e-12 * scale;
@@ -107,7 +108,7 @@ bool readFinite(json_t* object, const char* key, double& destination) {
     if (!item || !json_is_number(item))
         return false;
     const double value = json_number_value(item);
-    if (!std::isfinite(value))
+    if (!coalescent::isFinite(value))
         return false;
     destination = value;
     return true;
@@ -449,7 +450,7 @@ struct LineagesMutationQuantity : ParamQuantity {
     }
 
     void setDisplayValue(float displayValue) override {
-        if (!std::isfinite(displayValue))
+        if (!coalescent::isFinite(displayValue))
             return;
         const float expected = clampFloat(displayValue, 0.f, 64.f);
         setImmediateValue(std::sqrt(expected / 64.f));
@@ -762,7 +763,7 @@ struct Lineages : Module {
 
     double timeTarget() {
         const float voltage = inputs[TIME_INPUT].getVoltage();
-        if (!std::isfinite(voltage))
+        if (!coalescent::isFinite(voltage))
             return playback.cursor();
         return clampDouble(static_cast<double>(voltage) * 0.1, 0.0, 1.0);
     }
@@ -772,7 +773,7 @@ struct Lineages : Module {
         octave += finiteOr(inputs[RATE_INPUT].getVoltage(), 0.f);
         octave = clampFloat(octave, RATE_TOTAL_MIN, RATE_TOTAL_MAX);
         const float rate = RATE_BASE_HZ * std::exp2(octave);
-        return std::isfinite(rate) && rate >= 0.f ? rate : 0.f;
+        return coalescent::isFinite(rate) && rate >= 0.f ? rate : 0.f;
     }
 
     void publishSaveFrame() {

@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "dsp/display_snapshot.hpp"
 #include "dsp/operon_core.hpp"
+#include "dsp/finite.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -177,7 +178,7 @@ struct Operon : Module {
         float perturb = 0.f;
         if (inputs[PERTURB_INPUT].isConnected()) {
             float v = inputs[PERTURB_INPUT].getVoltage();
-            if (std::isfinite(v)) perturb = clamp(v, -10.f, 10.f) * PERTURB_GAIN;
+            if (coalescent::isFinite(v)) perturb = clamp(v, -10.f, 10.f) * PERTURB_GAIN;
         }
 
         // ── symmetric fixed point for centering (cached on alpha/n/alpha0) ──

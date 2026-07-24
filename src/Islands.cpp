@@ -2,6 +2,7 @@
 #include "dsp/display_snapshot.hpp"
 #include "dsp/hex64.hpp"
 #include "dsp/islands_model.hpp"
+#include "dsp/finite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -29,7 +30,7 @@ struct IslandsSizeQuantity : ParamQuantity {
     }
 
     void setDisplayValue(float displayValue) override {
-        if (!std::isfinite(displayValue))
+        if (!coalescent::isFinite(displayValue))
             return;
         displayValue = clamp(displayValue, 8.f, 4096.f);
         setImmediateValue(std::log2(displayValue));
@@ -52,7 +53,7 @@ struct IslandsMutationQuantity : ParamQuantity {
     }
 
     void setDisplayValue(float displayValue) override {
-        if (!std::isfinite(displayValue))
+        if (!coalescent::isFinite(displayValue))
             return;
         if (!(displayValue > 0.f)) {
             setImmediateValue(0.f);
@@ -272,7 +273,7 @@ struct Islands : Module {
     }
 
     static float safe(float value, float fallback = 0.f) {
-        return std::isfinite(value) ? value : fallback;
+        return coalescent::isFinite(value) ? value : fallback;
     }
 
     static float clampf(float value, float low, float high) {
@@ -505,7 +506,7 @@ struct Islands : Module {
             if (!item || !json_is_number(item))
                 return false;
             float value = static_cast<float>(json_number_value(item));
-            if (!std::isfinite(value) || value < low || value > high)
+            if (!coalescent::isFinite(value) || value < low || value > high)
                 return false;
             values[i] = value;
         }
@@ -560,7 +561,7 @@ struct Islands : Module {
         if (!item || !json_is_number(item))
             return false;
         float parsed = static_cast<float>(json_number_value(item));
-        if (!std::isfinite(parsed) || parsed < low || parsed > high)
+        if (!coalescent::isFinite(parsed) || parsed < low || parsed > high)
             return false;
         value = parsed;
         return true;
@@ -572,7 +573,7 @@ struct Islands : Module {
         if (!item || !json_is_number(item))
             return false;
         double parsed = json_number_value(item);
-        if (!std::isfinite(parsed) || parsed < low || parsed > high)
+        if (!coalescent::isFinite(parsed) || parsed < low || parsed > high)
             return false;
         value = parsed;
         return true;

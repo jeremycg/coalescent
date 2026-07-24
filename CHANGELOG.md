@@ -74,6 +74,23 @@
 
 ### Fixes and polish
 
+- **Finches costs ~1.8× less CPU at high RATE**: the `O(64²)` competition
+  convolution now reads its mirrored neighbour pair from a zero-padded copy of
+  the density instead of bounds-checking both sides in the innermost loop, which
+  lets that loop vectorize. An out-of-domain neighbour contributes an exact
+  `0.f`, so the paired summation order — and therefore the mirror symmetry it
+  protects at the branching point — is unchanged, and the whole field is
+  bit-identical across 960 parameter regimes. One instance at the RATE ceiling
+  measures about 2.5 % of a modern core, down from about 4.4 %. `docs/finches.md`
+  now documents that RATE scales substep count, and so CPU cost, roughly 16×.
+- **Non-finite guards no longer depend on compiler flags**: `coalescent::isFinite`
+  (`src/dsp/finite.hpp`) inspects IEEE-754 exponent bits for both `float` and
+  `double`, and every previous `std::isfinite` call across the cores, fields,
+  and Rack wrappers now uses it. Rack's own `-funsafe-math-optimizations` was
+  verified not to fold the standard predicate, but `-ffast-math` does fold it to
+  a constant `true` — which would silently disable every hostile-CV and
+  state-repair check while still reading correctly. The guard is a drop-in for
+  all inputs, so behaviour is unchanged and no measurable cost was added.
 - **Single-source DSP tests**: GENDYN, Haptik, Axon, Soma, Operon, Bunnies,
   and Foxes now expose SDK-free production cores used directly by their Rack
   wrappers, stability suites, SIMD checks, profilers, and offline renderers.
