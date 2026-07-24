@@ -8,6 +8,7 @@
 using namespace rack;              // so `simd::` resolves as it does inside the plugin
 #include "../src/dsp/neuron_models.hpp"
 #include "../src/dsp/haptik_core.hpp"
+#include "../src/rack_simd_finite.hpp"
 #include "../src/tanh_approx.hpp"
 #include <cstdio>
 #include <cmath>
@@ -47,6 +48,7 @@ static float_4 stepSimd(float_4& v, float_4& w, float_4 pitchHz, float_4 I, floa
     AxonCore::advanceObservation(s, h, K, I, eps, a);
     AxonCore::repair(
         s,
+        [](float_4 value) { return coalescent::simdFiniteMask(value); },
         [](float_4 value) { return simd::abs(value); },
         [](float_4 mask, float_4 yes, float_4 no) { return simd::ifelse(mask, yes, no); },
         [](float_4 value, float low, float high) { return simd::clamp(value, low, high); });
@@ -77,6 +79,7 @@ static float_4 stepSimdHR(float_4& x, float_4& y, float_4& z, float_4 pitchHz, f
     SomaCore::advanceObservation(st, h, K, I, r, s);
     SomaCore::repair(
         st,
+        [](float_4 value) { return coalescent::simdFiniteMask(value); },
         [](float_4 value) { return simd::abs(value); },
         [](float_4 mask, float_4 yes, float_4 no) { return simd::ifelse(mask, yes, no); },
         [](float_4 value, float low, float high) { return simd::clamp(value, low, high); });
@@ -200,14 +203,13 @@ int main() {
     // cable lanes. It must preserve finite lanes and neutralize hostile lanes
     // even under this tool's -funsafe-math-optimizations build.
     {
-        const float floatMax = std::numeric_limits<float>::max();
         const float inf = std::numeric_limits<float>::infinity();
         const float nan = std::numeric_limits<float>::quiet_NaN();
         const float_4 raw(2.5f, nan, inf, -inf);
         const float_4 guarded = coalescent::finiteOr(
             raw, float_4(0.f),
-            [floatMax](float_4 value) {
-                return (value >= -floatMax) & (value <= floatMax);
+            [](float_4 value) {
+                return coalescent::simdFiniteMask(value);
             },
             [](float_4 mask, float_4 yes, float_4 no) {
                 return simd::ifelse(mask, yes, no);
@@ -217,6 +219,59 @@ int main() {
         printf("Neuron CURRENT SIMD finite-lane guard: %s\n",
                finiteGuardOk ? "PASS" : "FAIL");
         if (!finiteGuardOk)
+            return 1;
+    }
+
+    {
+        const float inf = std::numeric_limits<float>::infinity();
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const float_4 raw(2.5f, nan, inf, -inf);
+        const float_4 guarded = coalescent::neuron::sanitizePitchExponent(
+            raw,
+            [](float_4 value) {
+                return coalescent::simdNaNMask(value);
+            },
+            [](float_4 mask, float_4 yes, float_4 no) {
+                return simd::ifelse(mask, yes, no);
+            },
+            [](float_4 value, float low, float high) {
+                return simd::clamp(value, low, high);
+            });
+        const bool pitchGuardOk = guarded[0] == 2.5f && guarded[1] == 0.f
+            && guarded[2] == 30.f && guarded[3] == -30.f;
+        printf("Neuron pitch SIMD NaN/infinity guard: %s\n",
+               pitchGuardOk ? "PASS" : "FAIL");
+        if (!pitchGuardOk)
+            return 1;
+    }
+
+    {
+        const float inf = std::numeric_limits<float>::infinity();
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        float_4 state[AxonCore::STATE_COUNT] = {
+            float_4(nan, inf, 12.f, -12.f),
+            float_4(0.f)
+        };
+        const float_4 retained = AxonCore::repair(
+            state,
+            [](float_4 value) { return coalescent::simdFiniteMask(value); },
+            [](float_4 value) { return simd::abs(value); },
+            [](float_4 mask, float_4 yes, float_4 no) {
+                return simd::ifelse(mask, yes, no);
+            },
+            [](float_4 value, float low, float high) {
+                return simd::clamp(value, low, high);
+            });
+        const bool repairGuardOk = simd::movemask(retained) == 0xc
+            && state[0][0] == AxonCore::REST_V
+            && state[1][0] == AxonCore::REST_W
+            && state[0][1] == AxonCore::REST_V
+            && state[1][1] == AxonCore::REST_W
+            && state[0][2] == AxonCore::STATE_MAX
+            && state[0][3] == -AxonCore::STATE_MAX;
+        printf("Neuron state-repair SIMD finite guard: %s\n",
+               repairGuardOk ? "PASS" : "FAIL");
+        if (!repairGuardOk)
             return 1;
     }
 

@@ -2,12 +2,12 @@
 #include "../dsp/neuron_models.hpp"
 #include "../dsp/display_snapshot.hpp"
 #include "../dsp/completed_path.hpp"
+#include "../rack_simd_finite.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
-#include <limits>
 
 // AXON — a spiking-neuron oscillator on the FitzHugh-Nagumo (FHN) system.
 //
@@ -251,7 +251,6 @@ struct Axon : Module {
         const float Ibase     = params[CURRENT_PARAM].getValue();
         const float Iatt      = params[CURRENT_ATT_PARAM].getValue();
         const float pitchKnob = params[PITCH_PARAM].getValue();
-        const float floatMax  = std::numeric_limits<float>::max();
 
         // Alternating sub-LSB dither (anti-denormal), toggled once per sample;
         // applied to every voice's DC blocker so a parked rest can't denormalise.
@@ -282,8 +281,8 @@ struct Axon : Module {
                 inputs[CURRENT_INPUT].getPolyVoltageSimd<simd::float_4>(base);
             currentCv = coalescent::finiteOr(
                 currentCv, simd::float_4(0.f),
-                [floatMax](simd::float_4 value) {
-                    return (value >= -floatMax) & (value <= floatMax);
+                [](simd::float_4 value) {
+                    return coalescent::simdFiniteMask(value);
                 },
                 [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
                     return simd::ifelse(mask, yes, no);
@@ -318,6 +317,9 @@ struct Axon : Module {
             simd::float_4 pexp = pitchKnob + inputs[VOCT_INPUT].getPolyVoltageSimd<simd::float_4>(base);
             pexp = coalescent::neuron::sanitizePitchExponent(
                 pexp,
+                [](simd::float_4 value) {
+                    return coalescent::simdNaNMask(value);
+                },
                 [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
                     return simd::ifelse(mask, yes, no);
                 },
@@ -353,6 +355,9 @@ struct Axon : Module {
                 // Backstop: reset any non-finite / runaway lane to rest, then clamp.
                 simd::float_4 finite = Core::repair(
                     s,
+                    [](simd::float_4 value) {
+                        return coalescent::simdFiniteMask(value);
+                    },
                     [](simd::float_4 value) { return simd::abs(value); },
                     [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
                         return simd::ifelse(mask, yes, no);

@@ -145,9 +145,10 @@ the test targets, the Rack SDK is needed only for `check-simd` and `check-rack`.
 `make check` validates the manifest, documentation links, screenshots, and demo
 patch archives/layouts, proves isolated patch regeneration parity, then runs
 stability/calibration contracts against the shared SDK-free production cores
-plus an independent analytic RK4 contract — no Rack SDK needed. The architecture
-check requires every wrapper, stability suite, and mapped auxiliary tool to
-include and call its shared core. It is the same guardrail CI gates releases on.
+plus an independent analytic RK4 contract and finite-classification checks under
+aggressive compiler math flags — no Rack SDK needed. The architecture check
+requires every wrapper, stability suite, and mapped auxiliary tool to include
+and call its shared core. It is the same guardrail CI gates releases on.
 A second target, `make check-simd`, proves the float_4 (poly-SIMD) path matches
 the scalar kernel.
 On Linux, `make check-rack` compiles all eleven production Rack wrappers. It

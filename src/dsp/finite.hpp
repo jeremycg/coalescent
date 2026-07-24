@@ -24,20 +24,47 @@ namespace coalescent {
 // uniformly keeps the plugin's numerical trust boundaries independent of which
 // compiler and flag set produced the binary.
 
-inline bool isFinite(float value) {
+namespace finite_detail {
+
+inline std::uint32_t bitsOf(float value) {
     static_assert(sizeof(float) == sizeof(std::uint32_t), "32-bit float required");
     static_assert(std::numeric_limits<float>::is_iec559, "IEEE-754 float required");
     std::uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
-    return (bits & UINT32_C(0x7f800000)) != UINT32_C(0x7f800000);
+    return bits;
 }
 
-inline bool isFinite(double value) {
+inline std::uint64_t bitsOf(double value) {
     static_assert(sizeof(double) == sizeof(std::uint64_t), "64-bit double required");
     static_assert(std::numeric_limits<double>::is_iec559, "IEEE-754 double required");
     std::uint64_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
-    return (bits & UINT64_C(0x7ff0000000000000)) != UINT64_C(0x7ff0000000000000);
+    return bits;
+}
+
+} // namespace finite_detail
+
+inline bool isFinite(float value) {
+    return (finite_detail::bitsOf(value) & UINT32_C(0x7f800000))
+        != UINT32_C(0x7f800000);
+}
+
+inline bool isFinite(double value) {
+    return (finite_detail::bitsOf(value) & UINT64_C(0x7ff0000000000000))
+        != UINT64_C(0x7ff0000000000000);
+}
+
+// Pitch sanitizers distinguish NaN (neutral) from infinity (saturate by sign).
+// Compare the sign-stripped representation with positive infinity so the test
+// remains valid when the compiler assumes floating-point values are finite.
+inline bool isNaN(float value) {
+    return (finite_detail::bitsOf(value) & UINT32_C(0x7fffffff))
+        > UINT32_C(0x7f800000);
+}
+
+inline bool isNaN(double value) {
+    return (finite_detail::bitsOf(value) & UINT64_C(0x7fffffffffffffff))
+        > UINT64_C(0x7ff0000000000000);
 }
 
 } // namespace coalescent

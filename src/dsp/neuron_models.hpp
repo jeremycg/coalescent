@@ -40,6 +40,14 @@ struct ScalarAbs {
     float operator()(float value) const { return std::fabs(value); }
 };
 
+struct ScalarFinite {
+    bool operator()(float value) const { return coalescent::isFinite(value); }
+};
+
+struct ScalarIsNaN {
+    bool operator()(float value) const { return coalescent::isNaN(value); }
+};
+
 struct ScalarSelect {
     float operator()(bool condition, float yes, float no) const {
         return condition ? yes : no;
@@ -60,14 +68,16 @@ struct IgnoreObservation {
 // Pitch is an exponent before Rack's approximate exp2. NaN is neutral (C4),
 // while infinities and huge finite values saturate at the same safe bounds as
 // the production wrappers.
-template <typename T, typename Select, typename Clamp>
-inline T sanitizePitchExponent(T exponent, Select select, Clamp clampValue) {
-    exponent = select(exponent == exponent, exponent, T(0.f));
+template <typename T, typename IsNaN, typename Select, typename Clamp>
+inline T sanitizePitchExponent(T exponent, IsNaN isNaN, Select select,
+                               Clamp clampValue) {
+    exponent = select(isNaN(exponent), T(0.f), exponent);
     return clampValue(exponent, -30.f, 30.f);
 }
 
 inline float sanitizePitchExponent(float exponent) {
-    return sanitizePitchExponent(exponent, ScalarSelect(), ScalarClamp());
+    return sanitizePitchExponent(
+        exponent, ScalarIsNaN(), ScalarSelect(), ScalarClamp());
 }
 
 // Return the bounded amount of dimensionless model time represented by one
@@ -158,10 +168,12 @@ struct AxonCore {
         }
     }
 
-    template <typename T, typename Abs, typename Select, typename Clamp>
-    static inline auto repair(T (&state)[STATE_COUNT], Abs absValue, Select select,
-                              Clamp clampValue) -> decltype(state[0] == state[0]) {
-        const auto finite = (state[0] == state[0]) & (state[1] == state[1])
+    template <typename T, typename Finite, typename Abs, typename Select,
+              typename Clamp>
+    static inline auto repair(T (&state)[STATE_COUNT], Finite finiteValue,
+                              Abs absValue, Select select, Clamp clampValue)
+        -> decltype(finiteValue(state[0])) {
+        const auto finite = finiteValue(state[0]) & finiteValue(state[1])
             & (absValue(state[0]) < RUNAWAY_MAX) & (absValue(state[1]) < RUNAWAY_MAX);
         state[0] = select(finite, state[0], T(REST_V));
         state[1] = select(finite, state[1], T(REST_W));
@@ -171,7 +183,8 @@ struct AxonCore {
     }
 
     static inline bool repair(float (&state)[STATE_COUNT]) {
-        return repair(state, ScalarAbs(), ScalarSelect(), ScalarClamp());
+        return repair(
+            state, ScalarFinite(), ScalarAbs(), ScalarSelect(), ScalarClamp());
     }
 };
 
@@ -229,10 +242,13 @@ struct SomaCore {
             state, h, substeps, current, r, adapt, IgnoreObservation());
     }
 
-    template <typename T, typename Abs, typename Select, typename Clamp>
-    static inline auto repair(T (&state)[STATE_COUNT], Abs absValue, Select select,
-                              Clamp clampValue) -> decltype(state[0] == state[0]) {
-        const auto finite = (state[0] == state[0]) & (state[1] == state[1]) & (state[2] == state[2])
+    template <typename T, typename Finite, typename Abs, typename Select,
+              typename Clamp>
+    static inline auto repair(T (&state)[STATE_COUNT], Finite finiteValue,
+                              Abs absValue, Select select, Clamp clampValue)
+        -> decltype(finiteValue(state[0])) {
+        const auto finite = finiteValue(state[0]) & finiteValue(state[1])
+            & finiteValue(state[2])
             & (absValue(state[0]) < RUNAWAY_MAX) & (absValue(state[1]) < RUNAWAY_MAX)
             & (absValue(state[2]) < RUNAWAY_MAX);
         state[0] = select(finite, state[0], T(REST_X));
@@ -245,7 +261,8 @@ struct SomaCore {
     }
 
     static inline bool repair(float (&state)[STATE_COUNT]) {
-        return repair(state, ScalarAbs(), ScalarSelect(), ScalarClamp());
+        return repair(
+            state, ScalarFinite(), ScalarAbs(), ScalarSelect(), ScalarClamp());
     }
 
     static inline float sanitizeBurstBase(float exponent) {
@@ -263,9 +280,6 @@ struct SomaCore {
     }
 
     static inline float sanitizeBurstExponent(float exponent, float fallback) {
-        struct ScalarFinite {
-            bool operator()(float value) const { return coalescent::isFinite(value); }
-        };
         return sanitizeBurstExponent(exponent, fallback, ScalarFinite(), ScalarSelect(), ScalarClamp());
     }
 };

@@ -47,6 +47,9 @@ check:
 	python3 tools/check_patch_reproducibility.py
 	python3 tools/check_shared_core_usage.py
 	$(CHECK_CXX) tools/completed_path_test.cpp -o /tmp/coalescent_check_path && /tmp/coalescent_check_path
+	$(CHECK_CXX) -std=c++11 tools/stability/finite.cpp -o /tmp/coalescent_check_finite && /tmp/coalescent_check_finite
+	$(CHECK_CXX) -std=c++11 -O3 -ffinite-math-only tools/stability/finite.cpp -o /tmp/coalescent_check_finite_math && /tmp/coalescent_check_finite_math
+	$(CHECK_CXX) -std=c++11 -O3 -ffast-math tools/stability/finite.cpp -o /tmp/coalescent_check_finite_fast && /tmp/coalescent_check_finite_fast
 	$(CHECK_CXX) tools/stability/gendyn.cpp -o /tmp/coalescent_check_gendyn && /tmp/coalescent_check_gendyn
 	$(CHECK_CXX) tools/stability/axon.cpp   -o /tmp/coalescent_check_axon   && /tmp/coalescent_check_axon
 	$(CHECK_CXX) tools/stability/soma.cpp   -o /tmp/coalescent_check_soma   && /tmp/coalescent_check_soma

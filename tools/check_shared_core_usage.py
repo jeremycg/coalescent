@@ -92,6 +92,10 @@ AUXILIARY_CONTRACTS = (
      ("Core::advanceObservation", "Core::repair")),
     ("RK4 analytic contract", "tools/integrator_equiv.cpp", "src/dsp/rk4.hpp",
      ("coalescent::rk4<",)),
+    ("Finite classification", "tools/stability/finite.cpp", "src/dsp/finite.hpp",
+     ("coalescent::isFinite", "coalescent::isNaN")),
+    ("Finite neuron guards", "tools/stability/finite.cpp", "src/dsp/neuron_models.hpp",
+     ("sanitizePitchExponent", "AxonCore::repair", "SomaCore::repair")),
 )
 
 KNOWN_COPY_PATTERNS = (
@@ -218,7 +222,8 @@ def main() -> int:
 
     print(
         "Shared-core architecture: all 11 Rack wrappers and stability suites "
-        "plus 6 auxiliary contracts use SDK-free production cores"
+        f"plus {len(AUXILIARY_CONTRACTS)} auxiliary contracts use SDK-free "
+        "production cores"
     )
     return 0
 

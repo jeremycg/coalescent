@@ -183,7 +183,9 @@ int main() {
     // generic shared policy is instantiated here with scalar predicates; Rack
     // supplies SIMD predicates/selectors around the same entry point.
     {
-        const auto finite = [](float value) { return std::isfinite(value); };
+        const auto finite = [](float value) {
+            return coalescent::isFinite(value);
+        };
         const auto select = [](bool condition, float yes, float no) {
             return condition ? yes : no;
         };

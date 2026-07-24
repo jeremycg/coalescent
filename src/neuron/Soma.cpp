@@ -3,12 +3,12 @@
 #include "../dsp/display_snapshot.hpp"
 #include "../dsp/completed_path.hpp"
 #include "../dsp/finite.hpp"
+#include "../rack_simd_finite.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
-#include <limits>
 
 // SOMA — a bursting/chaotic neuron oscillator on the Hindmarsh-Rose (HR) system.
 //
@@ -268,7 +268,6 @@ struct Soma : Module {
         const float rAtt = coalescent::isFinite(rAttRaw) ? rAttRaw : 0.f;
         const float s         = params[ADAPT_PARAM].getValue();
         const float pitchKnob = params[PITCH_PARAM].getValue();
-        const float floatMax  = std::numeric_limits<float>::max();
 
         // Alternating sub-LSB dither (anti-denormal), toggled once per sample.
         antiDenorm = -antiDenorm;
@@ -292,8 +291,8 @@ struct Soma : Module {
                 inputs[CURRENT_INPUT].getPolyVoltageSimd<simd::float_4>(base);
             currentCv = coalescent::finiteOr(
                 currentCv, simd::float_4(0.f),
-                [floatMax](simd::float_4 value) {
-                    return (value >= -floatMax) & (value <= floatMax);
+                [](simd::float_4 value) {
+                    return coalescent::simdFiniteMask(value);
                 },
                 [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
                     return simd::ifelse(mask, yes, no);
@@ -307,8 +306,8 @@ struct Soma : Module {
             // bounded; a hostile lane falls back to the knob-only exponent.
             rExp = Core::sanitizeBurstExponent(
                 rExp, simd::float_4(rLogBase),
-                [floatMax](simd::float_4 value) {
-                    return (value >= -floatMax) & (value <= floatMax);
+                [](simd::float_4 value) {
+                    return coalescent::simdFiniteMask(value);
                 },
                 [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
                     return simd::ifelse(mask, yes, no);
@@ -346,6 +345,9 @@ struct Soma : Module {
             simd::float_4 pexp = pitchKnob + inputs[VOCT_INPUT].getPolyVoltageSimd<simd::float_4>(base);
             pexp = coalescent::neuron::sanitizePitchExponent(
                 pexp,
+                [](simd::float_4 value) {
+                    return coalescent::simdNaNMask(value);
+                },
                 [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
                     return simd::ifelse(mask, yes, no);
                 },
@@ -394,6 +396,9 @@ struct Soma : Module {
                 // Backstop: reset any non-finite / runaway lane to rest, then clamp.
                 simd::float_4 finite = Core::repair(
                     st,
+                    [](simd::float_4 value) {
+                        return coalescent::simdFiniteMask(value);
+                    },
                     [](simd::float_4 value) { return simd::abs(value); },
                     [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
                         return simd::ifelse(mask, yes, no);

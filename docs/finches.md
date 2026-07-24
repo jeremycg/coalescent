@@ -199,13 +199,9 @@ hysteresis around shallow valleys.
   the field core to advance more than 0.32 `τ` at once.
 - **RATE changes CPU cost, not just speed.** Each 500 Hz control tick subdivides
   its requested `τ` advance into substeps of at most `0.02 τ`, so a tick costs
-  one substep at RATE ≤ 0 and sixteen at the `+4.25` ceiling. Measured on a
-  modern x86-64 core, one instance costs roughly 0.15 % of a core at or below
-  the default RATE and about 2.5 % at maximum — a ~16× span driven by one knob.
-  This matters when a *performance gesture* sweeps RATE upward in an already
-  heavy patch: the load arrives during the sweep. If a patch runs several fast
-  Finches, prefer raising RATE with the knob rather than slamming it with CV,
-  or run the instances at staggered rates.
+  one substep at RATE ≤ 0 and sixteen at the `+4.25` ceiling. High RATE
+  modulation can therefore add CPU load abruptly when a patch runs several
+  Finches instances; slew or limit RATE when CPU headroom is tight.
 - The fixed trait interval is finite. An environment driven hard against its
   allowed edge has less room on one side and can produce visibly asymmetric
   clusters. The central ENV range is limited to reduce this boundary effect.
@@ -215,11 +211,14 @@ hysteresis around shallow valleys.
 - The discretized replicator–mutator field is a musically controllable rendering
   of evolutionary branching. It should not be used as a quantitative population
   genetics simulator.
-- On the development i5-9600K, the standalone `-O2` field benchmark uses about
-  0.3% of one core at the default RATE and 5% at the maximum bounded RATE
-  request, assuming 500 updates/s. These are diagnostic hardware-dependent
-  figures, not real-time deadlines; the stability suite uses a deliberately loose
-  ceiling and separately verifies that reachable states contain no subnormals.
+- On the development i5-9600K, a production-like optimized, core-only benchmark
+  measured about 0.16% of one core at the default RATE and 2.5% at the maximum
+  bounded RATE request. The standalone `-O2` field benchmark run by `make check`
+  reports about 0.25% and 4%, respectively. Both assume 500 field updates/s and
+  exclude Rack wrapper and display overhead. These are diagnostic,
+  hardware-dependent figures, not real-time deadlines; the stability suite uses
+  a deliberately loose ceiling and separately verifies that reachable states
+  contain no subnormals.
 - Saved values are portable and reload exactly as finite IEEE-754 floats. Future
   evolution is deterministic for the same build and controls, but different
   compilers, `libm` implementations, or fast-math choices can eventually diverge
