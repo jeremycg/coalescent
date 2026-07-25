@@ -9,22 +9,19 @@ Finches positional IDs (must match enum order in src/Finches.cpp):
             5 SPLIT, 6 MERGE
 
 Fundamental v2 IDs used here:
-  LFO   : FREQ_PARAM=2; TRI_OUTPUT=1; SQR_OUTPUT=3 (6 HP)
+  LFO   : FREQ_PARAM=2; TRI_OUTPUT=1; SQR_OUTPUT=3 (9 HP)
   8vert : LEVEL_PARAM=0; IN_INPUT=0; OUT_OUTPUT=0 (8 HP; first channel)
-  VCO   : FREQ_PARAM=2; PITCH_INPUT=0; SIN_OUTPUT=0 (10 HP)
+  VCO   : FREQ_PARAM=2; PITCH_INPUT=0; SIN_OUTPUT=0 (9 HP)
   VCA-1 : LEVEL_PARAM=0; EXP_PARAM=1; CV_INPUT=0; IN_INPUT=1; OUT_OUTPUT=0
 """
 
-import glob
-import io
 import json
 import os
 import random
 import shutil
-import subprocess
 import sys
-import tarfile
-import tempfile
+
+from patch_utils import windows_patch_directories, write_patch_archive
 
 
 random.seed(23)
@@ -147,25 +144,10 @@ def write_patch(name, modules, cables, master_id):
     out_dir = os.path.join(ROOT, "..", "patches")
     os.makedirs(out_dir, exist_ok=True)
     out_file = os.path.join(out_dir, name)
-    with tempfile.TemporaryDirectory() as tmp:
-        json_path = os.path.join(tmp, "patch.json")
-        with open(json_path, "w", encoding="utf-8") as handle:
-            json.dump(patch, handle, indent=2)
-        archive = io.BytesIO()
-        with tarfile.open(fileobj=archive, mode="w:") as tar:
-            tar.add(json_path, arcname="patch.json")
-        result = subprocess.run(
-            ["zstd", "-19", "-o", out_file, "-f"],
-            input=archive.getvalue(),
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode:
-            print("zstd error:", result.stderr.decode(), file=sys.stderr)
-            sys.exit(1)
+    write_patch_archive(out_file, patch)
 
     print(f"  {name}: {len(modules)} modules, {len(cables)} cables")
-    for windows_dir in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"):
+    for windows_dir in windows_patch_directories():
         try:
             shutil.copy2(out_file, os.path.join(windows_dir, name))
         except OSError as error:
@@ -174,10 +156,10 @@ def write_patch(name, modules, cables, master_id):
 
 def add_two_voice_instrument(modules, cables, finches_module, first_x):
     left_vco = vco((first_x, 0))
-    right_vco = vco((first_x + 10, 0))
-    left_vca = vca((first_x + 20, 0))
-    right_vca = vca((first_x + 25, 0))
-    interface = audio((first_x + 30, 0))
+    right_vco = vco((first_x + 9, 0))
+    left_vca = vca((first_x + 18, 0))
+    right_vca = vca((first_x + 21, 0))
+    interface = audio((first_x + 24, 0))
     modules.extend([left_vco, right_vco, left_vca, right_vca, interface])
     cables.extend(
         [
@@ -208,14 +190,14 @@ def patch_branching():
 # both clusters follow it while retaining their ecological spacing.
 def patch_moving_niche():
     modulator = lfo(-5.0, (0, 0))
-    environment_depth = eightvert(0.273, (6, 0))
-    fn = finches([1.0, 0.28, 0.90, 0.62, 0.72], (14, 0))
+    environment_depth = eightvert(0.273, (9, 0))
+    fn = finches([1.0, 0.28, 0.90, 0.62, 0.72], (17, 0))
     modules = [modulator, environment_depth, fn]
     cables = [
         cable(modulator["id"], 1, environment_depth["id"], 0, 0),
         cable(environment_depth["id"], 0, fn["id"], 3, 1),
     ]
-    master = add_two_voice_instrument(modules, cables, fn, 28)
+    master = add_two_voice_instrument(modules, cables, fn, 31)
     write_patch("finches_2_moving_niche.vcv", modules, cables, master)
 
 
@@ -223,10 +205,10 @@ def patch_moving_niche():
 # nearby mutant cohort. The aggregate field does not retain lineage labels.
 def patch_mutant_invasion():
     seeder = lfo(-4.0, (0, 0))
-    fn = finches([1.0, 0.20, 0.78, 0.58, 0.20], (6, 0))
+    fn = finches([1.0, 0.20, 0.78, 0.58, 0.20], (9, 0))
     modules = [seeder, fn]
     cables = [cable(seeder["id"], 3, fn["id"], 4, 0)]
-    master = add_two_voice_instrument(modules, cables, fn, 20)
+    master = add_two_voice_instrument(modules, cables, fn, 23)
     write_patch("finches_3_mutant_invasion.vcv", modules, cables, master)
 
 
@@ -235,9 +217,9 @@ def patch_mutant_invasion():
 def patch_events():
     modulator = lfo(-5.0, (0, 0))
     fn = finches(
-        [1.0, 0.38, 0.52, 0.60, 0.72], (6, 0), compete_att=1.0
+        [1.0, 0.38, 0.52, 0.60, 0.72], (9, 0), compete_att=1.0
     )
-    interface = audio((20, 0))
+    interface = audio((23, 0))
     modules = [modulator, fn, interface]
     cables = [
         cable(modulator["id"], 1, fn["id"], 2, 0),

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### New module
+### New modules
 
 - **Lineages** — a 16 HP generative genealogy sequencer built on a finite Kingman
   coalescent tree with 2–16 sampled leaves and signed neutral mutations. Play from
@@ -50,10 +50,13 @@
   mutation, environmental selection, and frequency-dependent competition. Two
   cluster positions drive paired pitch CVs, their basin masses drive paired
   abundance CVs, SPREAD follows trait variance, and SPLIT/MERGE mark accepted
-  transitions with persistence and hysteresis. The evolved density is saved with
-  the patch. Four Core/Fundamental demo patches and a standalone stability suite
-  cover the one-to-two-to-one gesture, parameter extremes, symmetry, no-flux
-  boundaries, deterministic restore, and timestep convergence.
+  transitions with persistence and hysteresis. The complete ecological and
+  event-detector state is saved with the patch: density, accepted split latch,
+  and pending split/merge timers. Four Core/Fundamental demo patches and a
+  standalone stability suite cover the one-to-two-to-one gesture, parameter
+  extremes, symmetry, no-flux boundaries, exact detector-state continuation,
+  numerical-extinction handling, performance, deterministic restore, and
+  timestep convergence.
 - **Foxes** — a three-species food chain (grass → bunnies → foxes) on the
   nondimensional **Hastings–Powell** model, the chaotic sibling of Bunnies. WILD
   moves it from a resting coexistence, through a regular three-population chase and
@@ -62,10 +65,89 @@
   windows. Three equilibrium-centered population outputs (GRASS/BUNNY/FOX) and three
   peak-event gates, a continuous KICK force into grass, and a projected phase-trail
   display that draws the actual attractor. Monophonic, 12 HP. Deterministic chaos —
-  no random source; the same knobs and seed always sound the same. `make check`
-  gains a standalone kernel replica asserting the analytic equilibrium, Hopf
-  location, default-period calibration (within 5 cents), a positive Lyapunov
-  estimate at canonical chaos, and finite/bounded behavior across the control box.
+  no random source; the same controls and initial state sound the same on the
+  same build and platform. `make check` includes a shared-production-core
+  contract asserting the analytic
+  equilibrium, Hopf location, default-period calibration (within 5 cents), a
+  positive Lyapunov estimate at canonical chaos, and finite/bounded behavior
+  across the control box.
+
+### Fixes and polish
+
+- **Finches costs ~1.8× less CPU at high RATE**: the `O(64²)` competition
+  convolution now reads its mirrored neighbour pair from a zero-padded copy of
+  the density instead of bounds-checking both sides in the innermost loop, which
+  lets that loop vectorize. An out-of-domain neighbour contributes an exact
+  `0.f`, preserving the paired summation order and its mirror symmetry at the
+  branching point. An old/new comparison was bit-identical across 960 parameter
+  regimes. On the development i5-9600K, a production-like core-only benchmark
+  measured about 2.5 % of one core at the RATE ceiling, down from about 4.4 %.
+  `docs/finches.md` now documents that RATE scales substep count, and so CPU
+  cost, roughly 16×.
+- **Non-finite guards no longer depend on compiler flags**:
+  `coalescent::isFinite` and `coalescent::isNaN` (`src/dsp/finite.hpp`) inspect
+  IEEE-754 bits for both `float` and `double`, and every previous
+  `std::isfinite` call across the cores, fields, and Rack wrappers now uses the
+  shared classification. Axon and Soma use the same policy for scalar and Rack
+  SIMD pitch, modulation, and state-repair paths. Rack's own
+  `-funsafe-math-optimizations` was verified not to fold the standard predicate,
+  but `-ffast-math` does fold it to a constant `true`. The replacement
+  predicates preserve existing behavior without measurable cost, and
+  `make check` exercises them explicitly under both `-ffinite-math-only` and
+  `-ffast-math`.
+- **Single-source DSP tests**: GENDYN, Haptik, Axon, Soma, Operon, Bunnies,
+  and Foxes now expose SDK-free production cores used directly by their Rack
+  wrappers, stability suites, SIMD checks, profilers, and offline renderers.
+  The old copied kernels and handwritten RK4 comparator are gone; `make check`
+  enforces the mapped core entry points and uses independent analytic oracles
+  or explicitly labelled regression mutants for comparison.
+- **Rack wrapper coverage**: `make check-rack` now compiles and executes all
+  eleven production wrappers. The harnesses cover construction, ordinary and
+  hostile-CV finiteness, context-menu Initialize, persistence, event routing,
+  polyphony, transport, and deterministic reset contracts as applicable to each
+  module.
+- **Soma SPIKE events** now observe every accepted RK4 substep, so a narrow
+  high-rate spike cannot rise and fall between oversampled output observations
+  without reaching the trigger detector.
+- **Finches SPLIT/MERGE persistence** now advances at the field's bounded
+  internal substep cadence and latches events across each public advance. This
+  removes the former coarse-call overcount, which credited the final morphology
+  with the whole requested interval.
+- **Field RESET cadence** is consistent between Finches and Archipelago: the
+  scheduled reset tick installs the deterministic initial field without also
+  advancing it, and evolution resumes on the following 500 Hz tick.
+- **Islands LOSS/SWEEP persistence** now treats the 1 ms output pulses as
+  transient presentation signals. Schema-2 saves write zero-valued compatibility
+  placeholders, loads clear any in-flight pulse, and obsolete pulse values are
+  accepted but ignored.
+- **Operon gates** now use armed hysteresis, so gradual center crossings produce
+  one balanced event per phase instead of being missed unless a single RK4 step
+  crossed the entire deadband. Modulation and PERTURB inputs are sanitized before
+  entering the solver and lookup table.
+- **Bunnies peak events** are observed at accepted RK4 substeps, preserving the
+  prey/predator clock order at the fastest rates. Hostile CV and extreme KICK
+  values are bounded before integration.
+- **Haptik MOTION** follows the same inter-frame interpolation as OUT in Slow mode
+  instead of stepping every 256 samples. The manual now identifies Continuous as
+  a low-level noise drive and documents snapshot age and RNG continuation limits.
+- **Soma BURST** modulation is sanitized before the fast exponential map, closing
+  the remaining non-finite-CV path into an integer conversion.
+- **Initialize consistency**: every module uses Rack 2's `ResetEvent` API and calls
+  the base reset so parameters return to defaults. Stateful scopes, trails, event
+  generators, and save/display snapshots are cleared or republished immediately.
+- **Shared deterministic state**: Islands and Lineages now use one exact PCG32
+  implementation and one lossless fixed-width hexadecimal codec without changing
+  their golden streams or serialized bits. Lineages rejects unreachable restored
+  transport combinations before installation.
+- **Finches persistence and numerics** now preserve detector hysteresis and pending
+  transition timers exactly, remain compatible with older density-only patches,
+  flush masses below `1e-30`, and snap presentation smoothers to their settled targets.
+- **Demo and documentation validation**: all 49 generated patches now use canonical,
+  reproducible tar+zstd archives and corrected Fundamental 2.6.4 panel widths.
+  `make check` validates manifest/manual registration, local links and screenshots,
+  archive metadata, module placement, cable endpoints, known port ranges, and all
+  49 generators in an isolated temporary tree. CI runs this coverage on every
+  branch push, and the README gallery shows all eleven current modules.
 
 ## 2.2.1
 
@@ -117,9 +199,17 @@ audible effect.
 
 ### Tests, manifest & docs
 
-- New **GENDYN** stability test (barriers + walk catches the DUR WID regression; LOCK servo near/below floor; target-change / LOCK-toggle / restore) and **Haptik FREEZE**-continuity test; `check` (SDK-free) and `check-simd` (Rack headers) are separate targets; offline WAV renderers use production constants and mirror the `subTau` cap.
+- New **GENDYN** stability test (barriers + walk catches the DUR WID regression;
+  LOCK servo near/below floor; target-change / LOCK-toggle / restore) and
+  **Haptik FREEZE**-continuity test; `check` (SDK-free) and `check-simd` (Rack
+  headers) are separate targets; offline WAV renderers call the shared
+  production neuron core.
 - **Manifest**: `keywords` are spec-compliant space-separated strings; Operon/Bunnies tagged `Low-frequency oscillator` + `Clock generator`. Patch generators derive their Coalescent version from `plugin.json`.
-- **Docs**: corrected CPU budgets (i5-9600K lower bounds; +6 oct via CV can saturate a core) incl. Operon's moving-HILL corner; manual install path (`plugins-<os>-<cpu>/`); GENDYN scope-sampling, `fs/N` ceiling, and state-recall wording; `Help → Open user folder`; poly-CV normalling; genetic/ecological taxonomy.
+- **Docs**: corrected CPU budgets (i5-9600K lower bounds; the bounded Axon/Soma
+  speed ceiling can approach a full core at high polyphony) incl. Operon's
+  moving-HILL corner; manual install path (`plugins-<os>-<cpu>/`); GENDYN
+  scope-sampling, `fs/N` ceiling, and state-recall wording; `Help → Open user
+  folder`; poly-CV normalling; genetic/ecological taxonomy.
 
 ## 2.2.0
 

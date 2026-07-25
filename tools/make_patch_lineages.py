@@ -23,15 +23,13 @@ valid, clean tree; this generator deliberately does not duplicate or freeze the
 genealogy mathematics in Python.
 """
 
-import glob
-import io
 import json
 import os
 import random
 import shutil
-import subprocess
 import sys
-import tarfile
+
+from patch_utils import windows_patch_directories, write_patch_archive
 
 
 random.seed(73)
@@ -187,31 +185,10 @@ def write_patch(name, modules, cables, master_id):
     out_dir = os.path.join(ROOT, "..", "patches")
     os.makedirs(out_dir, exist_ok=True)
     out_file = os.path.join(out_dir, name)
-    patch_json = json.dumps(patch, indent=2).encode("utf-8")
-    archive = io.BytesIO()
-    with tarfile.open(fileobj=archive, mode="w:") as tar:
-        info = tarfile.TarInfo("patch.json")
-        info.size = len(patch_json)
-        info.mtime = 0
-        info.mode = 0o644
-        info.uid = 0
-        info.gid = 0
-        info.uname = ""
-        info.gname = ""
-        tar.addfile(info, io.BytesIO(patch_json))
-
-    result = subprocess.run(
-        ["zstd", "-19", "-o", out_file, "-f"],
-        input=archive.getvalue(),
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode:
-        print("zstd error:", result.stderr.decode(), file=sys.stderr)
-        sys.exit(1)
+    write_patch_archive(out_file, patch)
 
     print(f"  {name}: {len(modules)} modules, {len(cables)} cables")
-    for windows_dir in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"):
+    for windows_dir in windows_patch_directories():
         try:
             shutil.copy2(out_file, os.path.join(windows_dir, name))
         except OSError as error:

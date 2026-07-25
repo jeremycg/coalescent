@@ -1538,6 +1538,52 @@ static void testSnapshotState() {
     invalid.direction = static_cast<Direction>(2);
     expectInvalidSnapshot(invalid, "unknown direction");
 
+    // The running bit is authoritative on restore, but only states reachable
+    // through Playback may be persisted. Stopped transport can only sit at the
+    // selected direction's destination, and a non-looping transport cannot
+    // remain running once it has reached that destination.
+    invalid = snapshot;
+    invalid.cursor = 0.5;
+    invalid.direction = Direction::Ancestry;
+    invalid.loop = false;
+    invalid.running = false;
+    expectInvalidSnapshot(invalid, "stopped ancestry away from destination");
+    invalid = snapshot;
+    invalid.cursor = 0.5;
+    invalid.direction = Direction::Descent;
+    invalid.loop = true;
+    invalid.running = false;
+    expectInvalidSnapshot(invalid, "stopped descent away from destination");
+    invalid = snapshot;
+    invalid.cursor = 1.0;
+    invalid.direction = Direction::Ancestry;
+    invalid.loop = false;
+    invalid.running = true;
+    expectInvalidSnapshot(invalid, "running non-loop ancestry destination");
+    invalid = snapshot;
+    invalid.cursor = 0.0;
+    invalid.direction = Direction::Descent;
+    invalid.loop = false;
+    invalid.running = true;
+    expectInvalidSnapshot(invalid, "running non-loop descent destination");
+
+    // These endpoint states are reachable: transport can stop with LOOP off,
+    // then LOOP can be enabled without implicitly restarting it.
+    Snapshot stoppedEndpoint = snapshot;
+    stoppedEndpoint.cursor = 1.0;
+    stoppedEndpoint.direction = Direction::Ancestry;
+    stoppedEndpoint.loop = true;
+    stoppedEndpoint.running = false;
+    if (!stoppedEndpoint.validateAndDerive())
+        fail("reachable stopped ancestry endpoint was rejected");
+    stoppedEndpoint = snapshot;
+    stoppedEndpoint.cursor = 0.0;
+    stoppedEndpoint.direction = Direction::Descent;
+    stoppedEndpoint.loop = true;
+    stoppedEndpoint.running = false;
+    if (!stoppedEndpoint.validateAndDerive())
+        fail("reachable stopped descent endpoint was rejected");
+
     const float invalidPulses[] = {
         -std::numeric_limits<float>::epsilon(),
         std::nextafter(Snapshot::maximumPulseRemaining(),

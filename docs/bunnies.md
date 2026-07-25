@@ -118,8 +118,10 @@ threshold with a clock → KICK for kick-and-settle wobbles.
   downstream if you need perfectly DC-free audio.
 - **State is not saved.** Populations re-seed on load; params (including MODE) persist.
 
-`tools/stability/bunnies.cpp` sweeps BALANCE × WILD in both modes at several pitches
-and asserts x,y stay finite, positive, and bounded (it runs in `make check`).
+`tools/stability/bunnies.cpp` sweeps BALANCE × WILD in both modes at several pitches,
+asserts x,y stay finite, positive, and bounded, and checks that the two peak lanes
+remain ordered at fast rates where multiple RK4 substeps fall inside one audio
+sample (it runs in `make check`).
 
 ## References
 

@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main, 'feat/**', foxes, finches, islands, archipelago]
+    branches: ['**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -16,16 +16,16 @@ env:
   RACK_SDK_VERSION: "2.6.6"
 
 jobs:
-  # Fast, SDK-free guardrail: validate the manifest and run the standalone DSP
-  # stability replicas + the RK4 equivalence proof (`make check`). Gates the
+  # Fast, SDK-free guardrail: validate the manifest and run shared production-core
+  # stability contracts + the independent RK4 proof (`make check`). Gates the
   # release so a DSP regression can't ship even if it still compiles.
   tests:
     name: tests
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq zstd
       - name: Run stability + equivalence checks
         run: make check
 
@@ -48,7 +48,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential jq zstd unzip libgl-dev
+          sudo apt-get install -y build-essential jq zstd unzip libgl-dev \
+            libasound2 libjack-jackd2-0 libpulse0
 
       - name: Install build deps (macOS)
         if: runner.os == 'macOS'
@@ -67,6 +68,10 @@ jobs:
       - name: SIMD equivalence check (Linux)
         if: runner.os == 'Linux'
         run: make check-simd RACK_DIR="$PWD/Rack-SDK"
+
+      - name: Rack wrapper integration checks (Linux)
+        if: runner.os == 'Linux'
+        run: make check-rack RACK_DIR="$PWD/Rack-SDK"
 
       - name: Build
         run: make -j"$(getconf _NPROCESSORS_ONLN)" RACK_DIR="$PWD/Rack-SDK" dist

@@ -3,7 +3,9 @@
 Bunnies params: 0 RATE, 1 BALANCE, 2 WILD, 3 MODE(0=LV,1=RM), 4 BAL_ATT, 5 WILD_ATT
 Bunnies outputs: 0 PREY, 1 PRED, 2 PREY_POP, 3 PRED_POP
 """
-import json, os, io, glob, shutil, subprocess, sys, tarfile, tempfile, random
+import json, os, shutil, random
+
+from patch_utils import windows_patch_directories, write_patch_archive
 random.seed(7)
 def uid(): return random.randint(1_000_000_000_000_000, 9_007_199_254_740_991)
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -26,14 +28,11 @@ def cable(om, oid, im, iid, ci):
 def write(name, mods, cables, master):
     patch = {"version": "2.6.6", "zoom": 0.5, "gridOffset": [0.0, 0.0], "modules": mods, "cables": cables, "masterModuleId": master}
     out = os.path.join(ROOT, "..", "patches", name)
-    with tempfile.TemporaryDirectory() as tmp:
-        jp = os.path.join(tmp, "patch.json"); json.dump(patch, open(jp, "w"), indent=2)
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w:") as tf: tf.add(jp, arcname="patch.json")
-        r = subprocess.run(["zstd", "-19", "-o", out, "-f"], input=buf.getvalue(), capture_output=True)
-        if r.returncode: print("zstd error:", r.stderr.decode(), file=sys.stderr); sys.exit(1)
+    write_patch_archive(out, patch)
     print(f"  {name}: {len(mods)} modules, {len(cables)} cables")
-    for w in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"): shutil.copy2(out, os.path.join(w, name))
+    for w in windows_patch_directories():
+        try: shutil.copy2(out, os.path.join(w, name))
+        except OSError as error: print(f"    (skipped Windows copy: {error})")
 
 # 1. LV predator-prey pair: PREY/PRED hard-panned — the quarter-cycle chase in stereo.
 def p_lv():

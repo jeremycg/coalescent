@@ -1,7 +1,9 @@
 #include "plugin.hpp"
-#include "../dsp/rk4.hpp"
+#include "../dsp/neuron_models.hpp"
 #include "../dsp/display_snapshot.hpp"
 #include "../dsp/completed_path.hpp"
+#include "../dsp/finite.hpp"
+#include "../rack_simd_finite.hpp"
 #include "tanh_approx.hpp"
 #include <algorithm>
 #include <atomic>
@@ -36,6 +38,8 @@ static const int   ORBIT_N    = 192;
 static const float ORBIT_SECS = 7.f;   // wall-clock seconds per lap / round trip
 
 struct Soma : Module {
+
+    using Core = coalescent::neuron::SomaCore;
 
     enum ParamId {
         PITCH_PARAM,
@@ -118,23 +122,14 @@ struct Soma : Module {
     int   dispClock = 0;
     int   dispPeriod = 980;           // samples between snapshots (~45 Hz; refreshed on SR change)
 
-    // ─── Fixed HR parameters ────────────────────────────────────────────────
-    static constexpr float A = 1.f, B = 3.f, C = 1.f, D = 5.f, XR = -1.6f;
-
-    // ─── Tunable constants (RATE_CAL from tools/stability/soma.cpp) ──────────
-    static constexpr float RATE_CAL    = 55.364003f; // tonic spike period (I=2.0, r=0.03) → C4 at 0 V
-    static constexpr float HSUB_MAX    = 0.05f;
-    static constexpr int   MIN_SUB     = 2;   // substep floor: 2 holds 0-cent accuracy at default (half the RK4 cost of a 4-floor)
-    static constexpr int   MAX_SUB     = 64;
+    // Model/rate/substep/safety constants live in the SDK-free Core shared by
+    // this SIMD wrapper and tools/stability/soma.cpp.
     static constexpr float TRIG_AMP    = 1.0f;        // injected current pulse (kicks a burst from rest)
     static constexpr float TRIG_TAU_MS = 5.f;
-    static constexpr float SPIKE_THRESH = 1.0f;
     static constexpr float OUT_GAIN    = 1.5f;
     static constexpr float Z_CENTER    = 2.0f;        // z midpoint, so Z_OUT is bipolar around a burst
     static constexpr float Z_GAIN      = 2.5f;
     static constexpr float CV_DEPTH    = 0.2f;        // ±5V CV × att → ±1.0 (linear I; log₂ for r)
-    static constexpr float STATE_MAX   = 25.f;        // backstop; normal |y| peaks ~12, max observed ~21
-    static constexpr float R_MIN       = 0.001f, R_MAX = 0.05f;
 
     Soma() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -142,7 +137,8 @@ struct Soma : Module {
         configParam(PITCH_PARAM, -4.f, 4.f, 0.f, "Pitch", " Hz", 2.f, dsp::FREQ_C4);
         configParam(CURRENT_PARAM, 0.4f, 4.0f, 2.0f, "Current (excitability)");
         // BURST stores log₂(r); display base 2 shows the adaptation rate r directly.
-        configParam(BURST_PARAM, std::log2(R_MIN), std::log2(R_MAX), std::log2(0.03f),
+        configParam(BURST_PARAM, std::log2(Core::R_MIN), std::log2(Core::R_MAX),
+                    std::log2(Core::R_DEFAULT),
                     "Burst / adaptation rate r", "", 2.f);
         configParam(ADAPT_PARAM, 1.0f, 5.0f, 4.0f, "Adaptation strength s");
         configParam(CURRENT_ATT_PARAM, -1.f, 1.f, 0.f, "Current CV");
@@ -158,7 +154,11 @@ struct Soma : Module {
         configOutput(SPIKE_OUTPUT, "Spike (trigger on each spike)");
         configOutput(Z_OUTPUT, "Adaptation z (burst-envelope CV)");
 
-        for (int g = 0; g < GROUPS; g++) { xx4[g] = -1.6f; yy4[g] = -11.8f; zz4[g] = 2.f; }
+        for (int g = 0; g < GROUPS; g++) {
+            xx4[g] = Core::REST_X;
+            yy4[g] = Core::REST_Y;
+            zz4[g] = Core::REST_Z;
+        }
         // A sub-pixel spacing stagger keeps identical poly voices from running
         // their bounded guide simplification on the same audio callback.
         for (int c = 0; c < MAX_POLY; ++c) {
@@ -169,10 +169,14 @@ struct Soma : Module {
         }
     }
 
-    void onReset() override {
+    void onReset(const ResetEvent& event) override {
+        Module::onReset(event);
         oversampleMode = 2;   // restore default anti-aliasing (×4) on Initialize
         for (int g = 0; g < GROUPS; g++) {
-            xx4[g] = -1.6f; yy4[g] = -11.8f; zz4[g] = 2.f; trigPulse4[g] = 0.f;
+            xx4[g] = Core::REST_X;
+            yy4[g] = Core::REST_Y;
+            zz4[g] = Core::REST_Z;
+            trigPulse4[g] = 0.f;
             trigIn4[g].reset(); syncIn4[g].reset(); spikeDet4[g].reset();
             dcBlock4[g].reset(); decim2_4[g].reset(); decim4_4[g].reset(); decim8_4[g].reset();
         }
@@ -182,7 +186,16 @@ struct Soma : Module {
             zFast[c] = zSlow[c] = 0.f;
             zFilterInit[c] = false;
             orbitCommitClock[c] = 1 << 24;
+            std::fill(trailX[c], trailX[c] + TRAIL, 0.f);
+            std::fill(trailZ[c], trailZ[c] + TRAIL, 0.f);
         }
+        trailIdx = trailDecim = 0;
+        channels = 1;
+        dispClock = 0;
+        displaySnapshot.writable() = DisplayFrame{};
+        displaySnapshot.publish();
+        lastFs = 0.f;
+        lastOs = -1;
     }
 
     json_t* dataToJson() override {
@@ -210,16 +223,6 @@ struct Soma : Module {
             int v = (int) json_integer_value(j);
             oversampleMode = v <= 0 ? 0 : (v == 1 ? 2 : 3);
         }
-    }
-
-    // HR derivatives — the FHN f() with one extra (slow) line. Generic over the
-    // scalar type T so one expression serves scalar float and simd::float_4 (four
-    // poly voices at once); the shared coalescent::rk4 step is likewise templated.
-    template <typename T>
-    static inline void f(T x, T y, T z, T Itot, T r, T s, T& dx, T& dy, T& dz) {
-        dx = y - A*x*x*x + B*x*x - z + Itot;
-        dy = C - D*x*x - y;
-        dz = r * (s * (x - XR) - z);
     }
 
     // One-pole coefficient for a model-time step. This [2/2] Padé form closely
@@ -260,8 +263,9 @@ struct Soma : Module {
         // Shared knob values; per-voice CV is added inside the loop.
         const float Ibase     = params[CURRENT_PARAM].getValue();
         const float Iatt      = params[CURRENT_ATT_PARAM].getValue();
-        const float rLogBase  = params[BURST_PARAM].getValue();
-        const float rAtt      = params[BURST_ATT_PARAM].getValue();
+        const float rLogBase = Core::sanitizeBurstBase(params[BURST_PARAM].getValue());
+        const float rAttRaw = params[BURST_ATT_PARAM].getValue();
+        const float rAtt = coalescent::isFinite(rAttRaw) ? rAttRaw : 0.f;
         const float s         = params[ADAPT_PARAM].getValue();
         const float pitchKnob = params[PITCH_PARAM].getValue();
 
@@ -281,11 +285,38 @@ struct Soma : Module {
                 simd::float_4(0.f, 1.f, 2.f, 3.f) < (float) (channels - base);
 
             // ── params → physics (4 lanes) ──
-            simd::float_4 I = Ibase
-                + inputs[CURRENT_INPUT].getPolyVoltageSimd<simd::float_4>(base) * Iatt * CV_DEPTH;
+            // A hostile cable lane is neutral modulation, leaving its knob
+            // current intact without disturbing finite lanes in the SIMD group.
+            simd::float_4 currentCv =
+                inputs[CURRENT_INPUT].getPolyVoltageSimd<simd::float_4>(base);
+            currentCv = coalescent::finiteOr(
+                currentCv, simd::float_4(0.f),
+                [](simd::float_4 value) {
+                    return coalescent::simdFiniteMask(value);
+                },
+                [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
+                    return simd::ifelse(mask, yes, no);
+                });
+            simd::float_4 I = Ibase + currentCv * Iatt * CV_DEPTH;
             // BURST is log₂(r); CV adds in the log domain (a multiplicative nudge on r).
-            simd::float_4 r = simd::clamp(dsp::approxExp2_taylor5(rLogBase
-                + inputs[BURST_INPUT].getPolyVoltageSimd<simd::float_4>(base) * rAtt * CV_DEPTH), R_MIN, R_MAX);
+            simd::float_4 rExp = rLogBase
+                + inputs[BURST_INPUT].getPolyVoltageSimd<simd::float_4>(base) * rAtt * CV_DEPTH;
+            // approxExp2 converts part of its exponent to an integer, so NaN/inf
+            // must be neutralized before it is called. Finite extremes are simply
+            // bounded; a hostile lane falls back to the knob-only exponent.
+            rExp = Core::sanitizeBurstExponent(
+                rExp, simd::float_4(rLogBase),
+                [](simd::float_4 value) {
+                    return coalescent::simdFiniteMask(value);
+                },
+                [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
+                    return simd::ifelse(mask, yes, no);
+                },
+                [](simd::float_4 value, float low, float high) {
+                    return simd::clamp(value, low, high);
+                });
+            simd::float_4 r = simd::clamp(
+                dsp::approxExp2_taylor5(rExp), Core::R_MIN, Core::R_MAX);
 
             simd::float_4 x = xx4[g], y = yy4[g], z = zz4[g];
 
@@ -293,9 +324,9 @@ struct Soma : Module {
             simd::float_4 syncMask = syncIn4[g].process(
                 inputs[SYNC_INPUT].getPolyVoltageSimd<simd::float_4>(base), 0.1f, 1.f);
             const int syncBits = simd::movemask(syncMask);
-            x = simd::ifelse(syncMask, -1.6f, x);
-            y = simd::ifelse(syncMask, -11.8f, y);
-            z = simd::ifelse(syncMask, 2.f, z);
+            x = simd::ifelse(syncMask, Core::REST_X, x);
+            y = simd::ifelse(syncMask, Core::REST_Y, y);
+            z = simd::ifelse(syncMask, Core::REST_Z, z);
 
             // ── excitable trigger: rising edge injects a decaying current pulse ──
             simd::float_4 trigMask = trigIn4[g].process(
@@ -312,18 +343,31 @@ struct Soma : Module {
             // shift is UB on a non-finite or absurd CV (NaN->0=C4; clamp bounds ±inf
             // and huge-finite). The subTau cap below then bounds the resulting step.
             simd::float_4 pexp = pitchKnob + inputs[VOCT_INPUT].getPolyVoltageSimd<simd::float_4>(base);
-            pexp = simd::clamp(simd::ifelse(pexp == pexp, pexp, 0.f), -30.f, 30.f);
-            simd::float_4 pitchHz = dsp::FREQ_C4 * dsp::approxExp2_taylor5(pexp);
-            simd::float_4 subTau = RATE_CAL * pitchHz / fs / (float) os;
+            pexp = coalescent::neuron::sanitizePitchExponent(
+                pexp,
+                [](simd::float_4 value) {
+                    return coalescent::simdNaNMask(value);
+                },
+                [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
+                    return simd::ifelse(mask, yes, no);
+                },
+                [](simd::float_4 value, float low, float high) {
+                    return simd::clamp(value, low, high);
+                });
+            simd::float_4 pitchHz = coalescent::neuron::PITCH_REFERENCE_HZ
+                * dsp::approxExp2_taylor5(pexp);
+            simd::float_4 subTau = coalescent::neuron::boundedSubTau<Core>(
+                pitchHz, fs, os,
+                [](simd::float_4 a, simd::float_4 b) { return simd::fmin(a, b); });
             // Hard guard (matches Operon/Bunnies): cap the per-sample sim-time so
             // h = subTau/K stays <= HSUB_MAX and Kf stays in range, even at extreme
             // V/OCT (an uncapped Kf can overflow the float->int below = UB). The
-            // trade is that pitch goes flat above the cap with oversampling Off.
-            subTau = simd::fmin(subTau, simd::float_4(HSUB_MAX * MAX_SUB));
-            simd::float_4 Kf = simd::ceil(subTau / HSUB_MAX);
-            int K = MIN_SUB;
-            for (int l = 0; l < 4; l++) K = std::max(K, (int) Kf[l]);
-            K = std::min(K, MAX_SUB);
+            // trade is an oversampling-dependent speed plateau; Off reaches it
+            // within the top of the panel range.
+            const int K = coalescent::neuron::groupSubsteps<Core>(
+                subTau, 4,
+                [](simd::float_4 value) { return simd::ceil(value); },
+                [](simd::float_4 value, int lane) { return value[lane]; });
             simd::float_4 h = subTau / (float) K;
 
             // ── render os oversampled samples (full output chain each), decimate ──
@@ -340,27 +384,41 @@ struct Soma : Module {
                 zSlowCoef[l] = modelOnePole(subTau[l], 300.f);
             }
             for (int o = 0; o < os; o++) {
-                for (int k = 0; k < K; k++)
-                    coalescent::rk4<3>(st, h, [&](const simd::float_4* Y, simd::float_4* d) {
-                        f(Y[0], Y[1], Y[2], Itot, r, sVec, d[0], d[1], d[2]);
+                int spikeBits = 0;
+                Core::advanceObservation(
+                    st, h, K, Itot, r, sVec,
+                    [&](const simd::float_4& membrane) {
+                        const simd::float_4 spikeMask = spikeDet4[g].process(
+                            membrane, 0.f, Core::SPIKE_THRESH);
+                        spikeBits |= simd::movemask(spikeMask);
                     });
 
                 // Backstop: reset any non-finite / runaway lane to rest, then clamp.
-                simd::float_4 finite = (st[0] == st[0]) & (st[1] == st[1]) & (st[2] == st[2])
-                    & (simd::abs(st[0]) < 1e6f) & (simd::abs(st[1]) < 1e6f) & (simd::abs(st[2]) < 1e6f);
+                simd::float_4 finite = Core::repair(
+                    st,
+                    [](simd::float_4 value) {
+                        return coalescent::simdFiniteMask(value);
+                    },
+                    [](simd::float_4 value) { return simd::abs(value); },
+                    [](simd::float_4 mask, simd::float_4 yes, simd::float_4 no) {
+                        return simd::ifelse(mask, yes, no);
+                    },
+                    [](simd::float_4 value, float low, float high) {
+                        return simd::clamp(value, low, high);
+                    });
+                const int finiteBits = simd::movemask(finite);
+                spikeBits &= finiteBits;
+                if (finiteBits != 0xf) {
+                    // A failed lane was reset to rest after its last observed
+                    // substep. Present that discontinuity so the Schmitt state
+                    // cannot remain armed above threshold across the repair.
+                    spikeDet4[g].process(st[0], 0.f, Core::SPIKE_THRESH);
+                }
                 const int orbitResetBits = (o == 0 ? syncBits : 0)
-                    | ((~simd::movemask(finite)) & 0xf);
-                st[0] = simd::ifelse(finite, st[0], -1.6f);
-                st[1] = simd::ifelse(finite, st[1], -11.8f);
-                st[2] = simd::ifelse(finite, st[2], 2.f);
-                st[0] = simd::clamp(st[0], -STATE_MAX, STATE_MAX);
-                st[1] = simd::clamp(st[1], -STATE_MAX, STATE_MAX);
-                st[2] = simd::clamp(st[2], -STATE_MAX, STATE_MAX);
+                    | ((~finiteBits) & 0xf);
 
-                simd::float_4 spikeMask = spikeDet4[g].process(st[0], 0.f, SPIKE_THRESH);
-                int sm = simd::movemask(spikeMask);
                 for (int l = 0; l < 4 && base + l < channels; l++)
-                    if (sm & (1 << l)) spikeGen[base + l].trigger(1e-3f);
+                    if (spikeBits & (1 << l)) spikeGen[base + l].trigger(1e-3f);
 
                 dcBlock4[g].process(st[0] + antiDenorm);
                 osBuf[o] = 5.f * coalescent::fastTanh(dcBlock4[g].highpass() * OUT_GAIN);
@@ -501,8 +559,8 @@ struct SomaDisplay : Widget {
 
             // z-nullcline: z = s·(x − x_R).
             nvgBeginPath(args.vg);
-            nvgMoveTo(args.vg, X(XMIN), Y(s * (XMIN - Soma::XR)));
-            nvgLineTo(args.vg, X(XMAX), Y(s * (XMAX - Soma::XR)));
+            nvgMoveTo(args.vg, X(XMIN), Y(s * (XMIN - Soma::Core::XR)));
+            nvgLineTo(args.vg, X(XMAX), Y(s * (XMAX - Soma::Core::XR)));
             nvgStrokeColor(args.vg, nvgRGBA(0x90, 0x50, 0x70, 0x55));
             nvgStrokeWidth(args.vg, 1.f);
             nvgStroke(args.vg);

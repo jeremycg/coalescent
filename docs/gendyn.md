@@ -76,7 +76,14 @@ All CV inputs are ±5V with attenuverter knobs (±5V × attenuverter × 0.1 = ±
 |--------|-------------|
 | OUT | Audio output, ±5V |
 | TRIG | 10V / 1ms trigger on each complete waveform cycle |
-| FREQ | Current frequency as 1V/oct CV (0V = C4 = 261.626 Hz) |
+| FREQ | Most recently completed cycle as 1 V/oct CV (0 V = C4 = 261.626 Hz); schedule estimate before the first completion; clamped to ±5 V |
+
+After the first cycle completes, FREQ is a measured-cycle output: it describes
+the waveform cycle that just finished, not the newly installed breakpoint walk
+or the requested centre frequency. On creation, reset, or restore, it reports
+the current schedule estimate until that first measurement arrives. Its ±5 V
+output clamp saturates at about 8.37 kHz on the positive side; this voltage clamp
+does not limit the oscillator itself.
 
 ## Display
 
@@ -115,6 +122,9 @@ evolving from there — not re-seeded from scratch. Playback resumes from a clea
 cycle boundary (breakpoint 0) rather than the exact mid-segment sample it was at,
 so the timbre and pitch are preserved but the phase restarts. (OUT is also
 DC-blocked internally at ~5 Hz, so the walk's mean drift can't offset the signal.)
+Rack's process-global random stream is not serialized, so reloading preserves the
+authored waveform and walk state but does not promise the identical sequence of
+future random draws.
 
 ## Tuning notes
 
@@ -144,7 +154,8 @@ DC-blocked internally at ~5 Hz, so the walk's mean drift can't offset the signal
   least one sample, so a cycle can't be shorter than N samples — e.g. at 44.1 kHz
   with N = 64 the ceiling is ~689 Hz even though B DUR CTR reaches 5 kHz. For high
   pitches use a small N (N = 8 → ~5.5 kHz), or raise the sample rate. Under LOCK
-  the FREQ output reports the *actual* (floored) pitch, not the requested one.
+  the FREQ output reports the *actual* (floored) pitch of the last completed
+  cycle, not the requested one, subject to its ±5 V output clamp.
 - Logistic distribution (DIST = Logistic) is the closest match to Xenakis's original and is the default.
 - **SuperCollider Gendy mode:** PERSIST 0%, SCALE ≈ 0.1, DIST Cauchy,
   B DUR CTR ≈ 520 Hz with B DUR WID ≈ 0.2 lands close to `Gendy1.ar()`

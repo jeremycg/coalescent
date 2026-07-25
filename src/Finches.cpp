@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "dsp/display_snapshot.hpp"
 #include "dsp/finches_field.hpp"
+#include "dsp/finite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -100,8 +101,8 @@ struct Finches : Module {
     coalescent::DisplaySnapshot<DisplayFrame> displaySnapshot;
 
     struct SaveFrame {
-        float mass[BINS] = {};
-        int n = 0;
+        coalescent::FinchesField::State state;
+        bool valid = false;
     };
     coalescent::DisplaySnapshot<SaveFrame> saveSnapshot;
 
@@ -116,6 +117,7 @@ struct Finches : Module {
     static constexpr float TRAIT_VOLTS = 2.f;     // trait position -> V/oct output
     static constexpr float SPREAD_FULL_SCALE = 0.50f;
     static constexpr float OUTPUT_TAU = 0.02f;
+    static constexpr float OUTPUT_SNAP_EPSILON = 1e-9f;
     static constexpr float GATE_LEVEL = 10.f;
     static constexpr float GATE_TIME = 1e-3f;
 
@@ -158,7 +160,7 @@ struct Finches : Module {
     }
 
     static float safe(float x, float fallback = 0.f) {
-        return std::isfinite(x) ? x : fallback;
+        return coalescent::isFinite(x) ? x : fallback;
     }
 
     static float clampf(float x, float lo, float hi) {
@@ -224,7 +226,8 @@ struct Finches : Module {
         mergePulse.reset();
     }
 
-    void onReset() override {
+    void onReset(const ResetEvent& event) override {
+        Module::onReset(event);
         currentParameters = readParameters();
         field.reset(currentParameters.environment);
         pendingSeed = pendingReset = false;
@@ -251,20 +254,26 @@ struct Finches : Module {
 
     void publishSaveFrame() {
         SaveFrame& s = saveSnapshot.writable();
-        field.copyMasses(s.mass, BINS);
-        s.n = BINS;
+        s.state = field.state();
+        s.valid = true;
         saveSnapshot.publish();
     }
 
     json_t* dataToJson() override {
         json_t* root = json_object();
         const SaveFrame& s = saveSnapshot.consume();
-        if (s.n == BINS) {
-            json_t* density = json_array();
-            for (int i = 0; i < BINS; ++i)
-                json_array_append_new(density, json_real(s.mass[i]));
-            json_object_set_new(root, "density", density);
-        }
+        if (!s.valid)
+            return root;
+
+        json_object_set_new(root, "finchesVersion",
+                            json_integer(coalescent::FinchesField::stateVersion()));
+        json_t* density = json_array();
+        for (int i = 0; i < BINS; ++i)
+            json_array_append_new(density, json_real(s.state.mass[i]));
+        json_object_set_new(root, "density", density);
+        json_object_set_new(root, "split", json_boolean(s.state.split));
+        json_object_set_new(root, "splitTimer", json_real(s.state.splitTimer));
+        json_object_set_new(root, "mergeTimer", json_real(s.state.mergeTimer));
         return root;
     }
 
@@ -272,21 +281,48 @@ struct Finches : Module {
         json_t* density = json_object_get(root, "density");
         if (!density || !json_is_array(density) || json_array_size(density) != BINS)
             return;
-        float restored[BINS];
+
+        coalescent::FinchesField::State restored;
         for (int i = 0; i < BINS; ++i) {
             json_t* value = json_array_get(density, i);
             if (!value || !json_is_number(value))
                 return;
-            restored[i] = static_cast<float>(json_number_value(value));
+            restored.mass[i] = static_cast<float>(json_number_value(value));
         }
-        if (field.restoreMasses(restored, BINS)) {
-            currentParameters = readParameters();
-            pendingSeed = pendingReset = false;
-            clearEventState();
-            setOutputTargets(true);
-            publishSaveFrame();
-            publishDisplayFrame(currentParameters);
+
+        coalescent::FinchesField candidate;
+        json_t* version = json_object_get(root, "finchesVersion");
+        if (!version) {
+            // Density-only patches predate persistence of the split latch and
+            // detector timers. Preserve their historical strong-threshold load.
+            if (!candidate.restoreMasses(restored.mass.data(), BINS))
+                return;
         }
+        else {
+            json_t* split = json_object_get(root, "split");
+            json_t* splitTimer = json_object_get(root, "splitTimer");
+            json_t* mergeTimer = json_object_get(root, "mergeTimer");
+            if (!json_is_integer(version)
+                || json_integer_value(version) != coalescent::FinchesField::stateVersion()
+                || !split || !json_is_boolean(split)
+                || !splitTimer || !json_is_number(splitTimer)
+                || !mergeTimer || !json_is_number(mergeTimer))
+                return;
+            restored.version = static_cast<int>(json_integer_value(version));
+            restored.split = json_is_true(split);
+            restored.splitTimer = static_cast<float>(json_number_value(splitTimer));
+            restored.mergeTimer = static_cast<float>(json_number_value(mergeTimer));
+            if (!candidate.restore(restored))
+                return;
+        }
+
+        field = candidate;
+        currentParameters = readParameters();
+        pendingSeed = pendingReset = false;
+        clearEventState();
+        setOutputTargets(true);
+        publishSaveFrame();
+        publishDisplayFrame(currentParameters);
     }
 
     void process(const ProcessArgs& args) override {
@@ -313,9 +349,12 @@ struct Finches : Module {
 
         if (fieldDiv.process()) {
             currentParameters = readParameters();
+            bool resetThisTick = false;
             if (pendingReset) {
                 field.reset(currentParameters.environment);
                 pendingReset = false;
+                pendingSeed = false;
+                resetThisTick = true;
                 clearEventState();
             }
             if (pendingSeed) {
@@ -323,19 +362,27 @@ struct Finches : Module {
                 pendingSeed = false;
             }
 
-            float rateOct = clampf(safe(params[RATE_PARAM].getValue()) + inputVoltage(RATE_INPUT),
-                                   RATE_TOTAL_MIN, RATE_TOTAL_MAX);
-            float deltaTau = RATE_BASE * std::exp2(rateOct) * fieldWallStep;
-            field.advance(deltaTau, currentParameters);
-            const coalescent::FinchesField::Metrics& metrics = field.metrics();
-            if (metrics.splitEvent) splitPulse.trigger(GATE_TIME);
-            if (metrics.mergeEvent) mergePulse.trigger(GATE_TIME);
+            if (!resetThisTick) {
+                float rateOct = clampf(
+                    safe(params[RATE_PARAM].getValue()) + inputVoltage(RATE_INPUT),
+                    RATE_TOTAL_MIN, RATE_TOTAL_MAX);
+                float deltaTau = RATE_BASE * std::exp2(rateOct) * fieldWallStep;
+                field.advance(deltaTau, currentParameters);
+                const coalescent::FinchesField::Metrics& metrics = field.metrics();
+                if (metrics.splitEvent) splitPulse.trigger(GATE_TIME);
+                if (metrics.mergeEvent) mergePulse.trigger(GATE_TIME);
+            }
             setOutputTargets();
             publishSaveFrame();
         }
 
-        for (int i = 0; i < SMOOTH_LEN; ++i)
-            smooth[i] += (target[i] - smooth[i]) * outputAlpha;
+        for (int i = 0; i < SMOOTH_LEN; ++i) {
+            const float delta = target[i] - smooth[i];
+            if (std::fabs(delta) <= OUTPUT_SNAP_EPSILON)
+                smooth[i] = target[i];
+            else
+                smooth[i] += delta * outputAlpha;
+        }
         outputs[MASS_L_OUTPUT].setVoltage(smooth[MASS_L_SMOOTH]);
         outputs[MASS_R_OUTPUT].setVoltage(smooth[MASS_R_SMOOTH]);
         outputs[PITCH_L_OUTPUT].setVoltage(smooth[PITCH_L_SMOOTH]);

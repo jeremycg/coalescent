@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate GENDY3_16voice.vcv patch file for VCV Rack 2."""
 
-import json, random, struct, subprocess, os, sys
+import json, random, os
+from patch_utils import windows_patch_directories, write_patch_archive
 VER = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "plugin.json")))["version"]  # Coalescent version from the manifest
 
 random.seed(42)
@@ -74,7 +75,7 @@ for i, (N, center_hz) in enumerate(VOICES):
         "pos": [col, row],
     })
 
-# ── 4 × Fundamental::VCMixer  (groups of 4 voices, 7HP each) ─────────────────
+# ── 4 × Fundamental::VCMixer  (groups of 4 voices, 9 HP each) ────────────────
 # Inputs: 0=MIX_CV, 1-4=CH1-CH4 audio  Outputs: 0=MIX
 # Params: 0=master, 1-4=channel levels
 vcmixer_ids = []
@@ -93,10 +94,10 @@ for g in range(4):
             {"id": 3, "value": 0.7},
             {"id": 4, "value": 0.7},
         ],
-        "pos": [98 + g * 8, 0],
+        "pos": [98 + g * 9, 0],
     })
 
-# ── Fundamental::Mixer  (sums the 4 group outputs, 13HP) ─────────────────────
+# ── Fundamental::Mixer  (sums the 4 group outputs, 3 HP) ─────────────────────
 # Inputs: 0-5=channels  Outputs: 0=MIX
 # Params: 0=level (its only param — it sums all inputs through one level knob)
 mixer_id = uid()
@@ -108,7 +109,7 @@ modules.append({
     "params": [
         {"id": 0, "value": 0.25},
     ],
-    "pos": [132, 0],
+    "pos": [135, 0],
 })
 
 # ── Core::AudioInterface ──────────────────────────────────────────────────────
@@ -131,7 +132,7 @@ modules.append({
         },
         "dcFilter": True
     },
-    "pos": [148, 0],
+    "pos": [140, 0],
 })
 
 # ── Cables ────────────────────────────────────────────────────────────────────
@@ -191,44 +192,23 @@ patch = {
     "masterModuleId": audio_id,
 }
 
-patch_json = json.dumps(patch, indent=2)
-
 # ── Write as tar+zstd .vcv ────────────────────────────────────────────────────
 out_dir  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "patches")
 out_file = os.path.join(out_dir, "GENDY3_16voice.vcv")
 
-# Write patch.json to temp, then tar | zstd
-import tempfile, tarfile, io
-
-with tempfile.TemporaryDirectory() as tmp:
-    json_path = os.path.join(tmp, "patch.json")
-    with open(json_path, "w") as f:
-        f.write(patch_json)
-
-    tar_buf = io.BytesIO()
-    with tarfile.open(fileobj=tar_buf, mode="w:") as tf:
-        tf.add(json_path, arcname="patch.json")
-    tar_data = tar_buf.getvalue()
-
-    # pipe through zstd -19
-    result = subprocess.run(
-        ["zstd", "-19", "-o", out_file, "-f"],
-        input=tar_data,
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        print("zstd error:", result.stderr.decode(), file=sys.stderr)
-        sys.exit(1)
+write_patch_archive(out_file, patch)
 
 print(f"Written: {out_file}")
 print(f"  {len(modules)} modules, {len(cables)} cables")
 print(f"  Size: {os.path.getsize(out_file)} bytes")
 
 # Also copy to Windows Rack patches folder
-import glob
-_win = glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches")
+_win = windows_patch_directories()
 if _win:
     import shutil
     dst = os.path.join(_win[0], "GENDY3_16voice.vcv")
-    shutil.copy2(out_file, dst)
-    print(f"  Installed to Windows Rack: {dst}")
+    try:
+        shutil.copy2(out_file, dst)
+        print(f"  Installed to Windows Rack: {dst}")
+    except OSError as error:
+        print(f"  (skipped Windows copy: {error})")

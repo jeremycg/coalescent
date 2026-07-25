@@ -36,29 +36,35 @@ smoother, near-sinusoidal swing. **a** (SHAPE) shifts the asymmetry / threshold.
 `b` is fixed at 0.8.
 
 The system is **stiff** (a fast variable riding a slow one), so the integrator is
-the real work: each sample takes a number of **RK4 substeps**, and that number
-adapts to pitch to hold the substep size near `0.05` — up to a cap of 64 substeps,
-above which the step grows and pitch trades some integration accuracy for bounded
-CPU. That cap isn't reached until well past the PITCH knob — around +6 octaves via
-V/OCT CV at default conditions (see the CPU section), not the top of the knob. A finiteness reset + state clamp are the
-backstop if forcing ever pushes it to run away. The `f()` derivative and the RK4
-step are written so the **Hindmarsh–Rose** sibling (Soma) uses the same integration
-strategy with one extra equation.
+the real work: each oversampled output takes a pitch-adaptive number of **RK4
+substeps** to hold the substep size at or below `0.05`. The count is bounded at
+64. When a requested speed would need more, Axon clamps the dimensionless time
+advanced instead of enlarging the integration step, so both CPU and effective
+pitch plateau safely.
+
+At 44.1 kHz, the approximate ceiling relative to C4 is +3.83 oct with
+anti-aliasing Off, +4.83 at ×2, +5.83 at ×4 (default), and +6.83 at ×8. Add about
+0.12 oct at 48 kHz. This means Off flattens slightly before the top of the PITCH
+knob; ×2, ×4, and ×8 cover the complete panel range. A finiteness reset and state
+clamp remain the backstop if forcing ever pushes the trajectory to run away. The
+`f()` derivative and RK4 step are written so the **Hindmarsh-Rose** sibling
+(Soma) uses the same strategy with one extra equation.
 
 ### Pitch is the simulation *speed*
 
 The limit-cycle period is **emergent** — it depends on CURRENT, EPS and SHAPE —
 so pitch is **open-loop calibrated, not phase-locked.** V/OCT maps to how fast
 dimensionless time advances, calibrated (`RATE_CAL`) so the default voicing reads
-C4 at 0 V. Tracking is within ~1 cent across the useful range at default params,
-but **changing CURRENT / EPS / SHAPE detunes the pitch somewhat** — that coupling
-is deliberate and part of the instrument's character, not a bug.
+C4 at 0 V. Below the bounded speed ceiling, tracking is within ~1 cent across the
+useful range at default params. **Changing CURRENT / EPS / SHAPE detunes the
+pitch somewhat** — that coupling is deliberate and part of the instrument's
+character, not a bug.
 
 ## Controls
 
 | Control | Range | Purpose |
 | --- | --- | --- |
-| **PITCH** | ±4 oct | simulation speed (audio pitch); 0 = C4 |
+| **PITCH** | ±4 oct | requested simulation speed (audio pitch); 0 = C4; the effective speed has the oversampling-dependent ceiling above |
 | **CURRENT** | −0.2 … 1.6 | injected current `I`; the excitability / bifurcation control. Rests at both ends, oscillates in a middle band (~0.33–1.42 at default shape) |
 | **EPS** | 0.01 … 0.30 | timescale ratio `ε`; small = sharp spike, large = smoother/near-sine |
 | **SHAPE** | 0.4 … 1.0 | waveform asymmetry `a` (threshold position) |
@@ -120,11 +126,11 @@ the SYNC input.
 ## CPU
 
 The integrator is the cost: per voice, Axon runs `oversample × K` RK4 substeps
-per audio sample, where `K` (2…64) rises with pitch. So the worst case scales as
-**voices × oversample × substeps** — at 16 voices, ×8 anti-aliasing, and the top
-octave that's `16 × 8 × 64 ≈ 8000` steps/sample. That's a ceiling, not the normal
-case (at moderate pitch `K` sits near its floor of 2), but it means a big
-polyphonic patch at ×8 is genuinely heavy.
+per audio sample, where `K` (2…64) rises with requested pitch. So the worst case
+scales as **voices × oversample × substeps** — at 16 voices, ×8 anti-aliasing,
+and the speed ceiling, that is `16 × 8 × 64 = 8192` steps/sample. That is the
+bounded ceiling, not the normal case (at moderate pitch `K` sits near its floor
+of 2), but it means a large polyphonic patch at ×8 is genuinely heavy.
 
 | Voices | Anti-aliasing | Cost |
 | --- | --- | --- |
@@ -132,9 +138,10 @@ polyphonic patch at ×8 is genuinely heavy.
 | 8–16 | ×4 (default) | moderate |
 | 16 | ×8 | heavy, patch-dependent |
 
-Rule of thumb: leave anti-aliasing at ×4 (or drop to ×2 / Off), and only reach for ×8 if you
-hear aliasing on high notes. [Soma](soma.md) is a touch heavier still (a
-three-variable system vs Axon's two).
+Rule of thumb: leave anti-aliasing at ×4, or drop to ×2 / Off when CPU matters,
+and only reach for ×8 if you hear aliasing on high notes. Lower settings also
+lower the effective speed ceiling described above. [Soma](soma.md) is a touch
+heavier still (a three-variable system vs Axon's two).
 
 Internally, voices are processed in **groups of four SIMD lanes**, so the
 integrator cost is amortised across each four-voice group (measured ~4x on the
@@ -149,11 +156,12 @@ One consequence of the four-lane grouping: the whole group runs at the substep
 count of its **fastest** lane, so a single very-high-pitched voice pulls its three
 groupmates up to the same integration rate. As a rough budget (44.1 kHz, ×4, 16
 voices, integration-chain lower bounds on one i5-9600K — percentages aren't
-portable): ~3–4% of one core at moderate pitch, rising to ~30–50% at the top of the
-PITCH knob (+4 oct). Pushing higher still with V/OCT CV keeps climbing — around
-+6 oct a full 16-voice patch can saturate a core (~100%+). If you sequence a poly
-patch into the extreme high register and CPU matters, drop anti-aliasing to ×2 /
-Off, or move the fast voices to a separate instance so they stop dragging their
+portable): ~3–4% of one core at moderate pitch, rising to ~30–50% at the top of
+the PITCH knob (+4 oct). At default ×4, further V/OCT raises cost only until the
+speed clamp near +5.83 oct; a full 16-voice patch can approach or saturate a core
+there, then both speed and integration cost plateau. If you sequence a poly patch
+into the extreme high register and CPU matters, drop anti-aliasing to ×2 / Off,
+or move the fast voices to a separate instance so they stop dragging their
 groupmates up — though note that splitting voices across instances rounds each
 side up to whole four-lane groups, so an unlucky split can add a group rather than
 save one; isolate the fast voices specifically.
@@ -189,9 +197,10 @@ save one; isolate the fast voices specifically.
 
 ## Notes / known limits
 
-- **Pitch is emergent / approximate.** CURRENT, EPS and SHAPE pull the pitch a
-  little (see above) — deliberate, not a bug. Calibration targets C4 at the
-  default voicing.
+- **Pitch is emergent / approximate and CPU-bounded.** CURRENT, EPS and SHAPE pull
+  the pitch a little (see above), and requests above the oversampling-dependent
+  ceiling flatten rather than increasing integrator cost without bound.
+  Calibration targets C4 at the default voicing.
 - **Aliasing.** Spikes are sharp and the `tanh` soft-clip adds harmonics, so high
   notes can alias. The right-click **Anti-aliasing** option (Off / ×2 / ×4 / ×8,
   default ×4) oversamples the whole output chain — DC-block + tanh — and decimates
@@ -206,9 +215,10 @@ save one; isolate the fast voices specifically.
   cutoff) is refreshed when the sample rate changes; everything else recomputes
   per sample.
 
-`tools/stability/axon.cpp` is a standalone replica of the kernel: it measures the
-dimensionless period to set `RATE_CAL`, sweeps CURRENT × EPS × SHAPE × pitch and
-asserts `v`,`w` stay finite/bounded, and checks V/OCT tracking.
+`tools/stability/axon.cpp` exercises the shared SDK-free production core: it
+measures the dimensionless period to set `RATE_CAL`, sweeps CURRENT × EPS × SHAPE
+× pitch, asserts `v`,`w` stay finite/bounded, and checks V/OCT tracking including
+the bounded-speed schedule.
 `tools/render_wav_axon.cpp` auditions voicings offline (writes WAVs).
 
 ```bash

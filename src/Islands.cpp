@@ -1,6 +1,8 @@
 #include "plugin.hpp"
 #include "dsp/display_snapshot.hpp"
+#include "dsp/hex64.hpp"
 #include "dsp/islands_model.hpp"
+#include "dsp/finite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -28,7 +30,7 @@ struct IslandsSizeQuantity : ParamQuantity {
     }
 
     void setDisplayValue(float displayValue) override {
-        if (!std::isfinite(displayValue))
+        if (!coalescent::isFinite(displayValue))
             return;
         displayValue = clamp(displayValue, 8.f, 4096.f);
         setImmediateValue(std::log2(displayValue));
@@ -51,7 +53,7 @@ struct IslandsMutationQuantity : ParamQuantity {
     }
 
     void setDisplayValue(float displayValue) override {
-        if (!std::isfinite(displayValue))
+        if (!coalescent::isFinite(displayValue))
             return;
         if (!(displayValue > 0.f)) {
             setImmediateValue(0.f);
@@ -211,8 +213,6 @@ struct Islands : Module {
         float rampCurrent[CONTINUOUS_LEN] = {};
         int lastFounder = -1;
         float founderGlow = 0.f;
-        float lossPulseRemaining = 0.f;
-        float sweepPulseRemaining = 0.f;
         bool valid = false;
     };
     coalescent::DisplaySnapshot<SaveFrame> saveSnapshot;
@@ -273,7 +273,7 @@ struct Islands : Module {
     }
 
     static float safe(float value, float fallback = 0.f) {
-        return std::isfinite(value) ? value : fallback;
+        return coalescent::isFinite(value) ? value : fallback;
     }
 
     static float clampf(float value, float low, float high) {
@@ -383,8 +383,6 @@ struct Islands : Module {
         std::copy(rampCurrent, rampCurrent + CONTINUOUS_LEN, saved.rampCurrent);
         saved.lastFounder = lastFounder;
         saved.founderGlow = founderGlow;
-        saved.lossPulseRemaining = clampf(lossPulse.remaining, 0.f, PULSE_TIME);
-        saved.sweepPulseRemaining = clampf(sweepPulse.remaining, 0.f, PULSE_TIME);
         saved.valid = true;
         saveSnapshot.publish();
     }
@@ -508,7 +506,7 @@ struct Islands : Module {
             if (!item || !json_is_number(item))
                 return false;
             float value = static_cast<float>(json_number_value(item));
-            if (!std::isfinite(value) || value < low || value > high)
+            if (!coalescent::isFinite(value) || value < low || value > high)
                 return false;
             values[i] = value;
         }
@@ -540,34 +538,13 @@ struct Islands : Module {
         return true;
     }
 
-    static void uint64ToHex(std::uint64_t value, char text[17]) {
-        static const char digits[] = "0123456789abcdef";
-        for (int i = 15; i >= 0; --i) {
-            text[i] = digits[value & 0xfu];
-            value >>= 4u;
-        }
-        text[16] = '\0';
-    }
-
     static bool readHex64(json_t* root, const char* key, std::uint64_t& value) {
         json_t* item = json_object_get(root, key);
         if (!item || !json_is_string(item))
             return false;
         const char* source = json_string_value(item);
-        if (!source || std::strlen(source) != 16u)
-            return false;
-        std::uint64_t parsed = 0u;
-        for (int i = 0; i < 16; ++i) {
-            char c = source[i];
-            unsigned digit;
-            if (c >= '0' && c <= '9') digit = static_cast<unsigned>(c - '0');
-            else if (c >= 'a' && c <= 'f') digit = static_cast<unsigned>(c - 'a' + 10);
-            else if (c >= 'A' && c <= 'F') digit = static_cast<unsigned>(c - 'A' + 10);
-            else return false;
-            parsed = (parsed << 4u) | digit;
-        }
-        value = parsed;
-        return true;
+        return source && coalescent::Hex64Codec::parse(
+            source, json_string_length(item), value);
     }
 
     static bool readBoolean(json_t* root, const char* key, bool& value) {
@@ -584,7 +561,7 @@ struct Islands : Module {
         if (!item || !json_is_number(item))
             return false;
         float parsed = static_cast<float>(json_number_value(item));
-        if (!std::isfinite(parsed) || parsed < low || parsed > high)
+        if (!coalescent::isFinite(parsed) || parsed < low || parsed > high)
             return false;
         value = parsed;
         return true;
@@ -596,7 +573,7 @@ struct Islands : Module {
         if (!item || !json_is_number(item))
             return false;
         double parsed = json_number_value(item);
-        if (!std::isfinite(parsed) || parsed < low || parsed > high)
+        if (!coalescent::isFinite(parsed) || parsed < low || parsed > high)
             return false;
         value = parsed;
         return true;
@@ -611,14 +588,14 @@ struct Islands : Module {
         json_object_set_new(root, "islandsVersion", json_integer(2));
         appendUintArray(root, "counts", saved.modelState.counts);
         appendUintArray(root, "denominators", saved.modelState.denominators);
-        char rngState[17];
-        char rngIncrement[17];
-        char resetSeedText[17];
-        char resetStreamText[17];
-        uint64ToHex(saved.modelState.rngState, rngState);
-        uint64ToHex(saved.modelState.rngIncrement, rngIncrement);
-        uint64ToHex(saved.resetSeed, resetSeedText);
-        uint64ToHex(saved.resetStream, resetStreamText);
+        char rngState[coalescent::Hex64Codec::TEXT_SIZE];
+        char rngIncrement[coalescent::Hex64Codec::TEXT_SIZE];
+        char resetSeedText[coalescent::Hex64Codec::TEXT_SIZE];
+        char resetStreamText[coalescent::Hex64Codec::TEXT_SIZE];
+        coalescent::Hex64Codec::format(saved.modelState.rngState, rngState);
+        coalescent::Hex64Codec::format(saved.modelState.rngIncrement, rngIncrement);
+        coalescent::Hex64Codec::format(saved.resetSeed, resetSeedText);
+        coalescent::Hex64Codec::format(saved.resetStream, resetStreamText);
         json_object_set_new(root, "rngState", json_string(rngState));
         json_object_set_new(root, "rngIncrement", json_string(rngIncrement));
         json_object_set_new(root, "resetSeed", json_string(resetSeedText));
@@ -636,8 +613,10 @@ struct Islands : Module {
         appendFloatArray(root, "rampCurrent", saved.rampCurrent, CONTINUOUS_LEN);
         json_object_set_new(root, "lastFounder", json_integer(saved.lastFounder));
         json_object_set_new(root, "founderGlow", json_real(saved.founderGlow));
-        json_object_set_new(root, "lossPulseRemaining", json_real(saved.lossPulseRemaining));
-        json_object_set_new(root, "sweepPulseRemaining", json_real(saved.sweepPulseRemaining));
+        // Keep the schema-2 shape readable by the immediately preceding build,
+        // but never serialize an in-flight presentation pulse.
+        json_object_set_new(root, "lossPulseRemaining", json_real(0.0));
+        json_object_set_new(root, "sweepPulseRemaining", json_real(0.0));
         return root;
     }
 
@@ -701,18 +680,9 @@ struct Islands : Module {
         if (restoredLastFounder < -1 || restoredLastFounder >= 4)
             return;
         float restoredFounderGlow;
-        float restoredLossPulse = 0.f;
-        float restoredSweepPulse = 0.f;
         if (!readFinite(root, "founderGlow", restoredFounderGlow, 0.f, 1.f)
             || restoredGenerationPhase >= 1.0)
             return;
-        json_t* lossPulseItem = json_object_get(root, "lossPulseRemaining");
-        json_t* sweepPulseItem = json_object_get(root, "sweepPulseRemaining");
-        if (versionValue >= 2 || lossPulseItem || sweepPulseItem) {
-            if (!readFinite(root, "lossPulseRemaining", restoredLossPulse, 0.f, PULSE_TIME)
-                || !readFinite(root, "sweepPulseRemaining", restoredSweepPulse, 0.f, PULSE_TIME))
-                return;
-        }
 
         // Validate both biological and presentation state before changing the
         // running module. A corrupt patch cannot manufacture an arbitrary CV
@@ -747,8 +717,11 @@ struct Islands : Module {
         std::copy(restoredCurrent, restoredCurrent + CONTINUOUS_LEN, rampCurrent);
         lastFounder = static_cast<int>(restoredLastFounder);
         founderGlow = restoredFounderGlow;
-        lossPulse.remaining = restoredLossPulse;
-        sweepPulse.remaining = restoredSweepPulse;
+        // LOSS and SWEEP are one-shot presentation signals, not authored state.
+        // Schema-2 patches written by older versions may still contain their
+        // former remainder fields; unknown JSON keys are deliberately ignored.
+        lossPulse.reset();
+        sweepPulse.reset();
         stepTrigger.reset();
         founderInputTrigger.reset();
         founderButtonTrigger.reset();

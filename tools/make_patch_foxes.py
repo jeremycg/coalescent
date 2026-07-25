@@ -5,7 +5,9 @@ Foxes outputs: 0 GRASS, 1 BUNNY, 2 FOX, 3 GRASS_PEAK, 4 BUNNY_PEAK, 5 FOX_PEAK
 WILD → b1 = 1 + 5.2·wild²:  0.50→b1=2.3 (periodic default), 0.62→b1≈3.0 (canonical
 chaos), 0.57→b1≈2.7 (period-doubling/transition). BALANCE 0.5 → b2=2.0 (canonical).
 """
-import json, os, io, glob, shutil, subprocess, sys, tarfile, tempfile, random
+import json, os, shutil, sys, random
+
+from patch_utils import windows_patch_directories, write_patch_archive
 random.seed(11)
 def uid(): return random.randint(1_000_000_000_000_000, 9_007_199_254_740_991)
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -30,14 +32,9 @@ def cable(om, oid, im, iid, ci):
 def write(name, mods, cables, master):
     patch = {"version": "2.6.6", "zoom": 0.5, "gridOffset": [0.0, 0.0], "modules": mods, "cables": cables, "masterModuleId": master}
     out = os.path.join(ROOT, "..", "patches", name)
-    with tempfile.TemporaryDirectory() as tmp:
-        jp = os.path.join(tmp, "patch.json"); json.dump(patch, open(jp, "w"), indent=2)
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w:") as tf: tf.add(jp, arcname="patch.json")
-        r = subprocess.run(["zstd", "-19", "-o", out, "-f"], input=buf.getvalue(), capture_output=True)
-        if r.returncode: print("zstd error:", r.stderr.decode(), file=sys.stderr); sys.exit(1)
+    write_patch_archive(out, patch)
     print(f"  {name}: {len(mods)} modules, {len(cables)} cables")
-    for w in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"):
+    for w in windows_patch_directories():
         try: shutil.copy2(out, os.path.join(w, name))   # optional convenience copy — never fail generation on it
         except OSError as e: print(f"    (skipped Windows copy: {e})", file=sys.stderr)
 

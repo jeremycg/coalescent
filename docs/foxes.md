@@ -57,9 +57,11 @@ numerical backstop only, never a limiter in normal use.
 
 Above the chaos threshold the trajectory never exactly repeats and is exquisitely
 sensitive to initial conditions — two runs started a hair apart diverge. But it is
-fully **deterministic**: no random number is drawn anywhere. The same knobs and the
-same seed always produce the same sound. The irregularity is the geometry of a
-strange attractor, not a noise source.
+fully **deterministic**: no random number is drawn anywhere. The same controls and
+initial state reproduce the same sound on the same build and platform. Chaotic
+trajectories are not promised bit-identical across different compiler/platform
+floating-point implementations. The irregularity is the geometry of a strange
+attractor, not a noise source.
 
 ### Pitch is the simulation speed
 
@@ -161,6 +163,19 @@ moving-Hill path, and being mono it is far cheaper than a 16-voice
 period (≈ 61 τ) is long, so each audio cycle needs many τ of simulation and hence
 many substeps.
 
+Optimized production-wrapper measurements at 48 kHz, excluding UI drawing, were:
+
+| Setting | Approximate load on one core |
+| --- | ---: |
+| RATE 0 | 1.19% |
+| RATE +4 | 12.87% |
+| RATE +4 plus V/OCT +4 V | 15.26% |
+
+These are measurements from the development i5-9600K, not portable guarantees.
+Rack overhead, compiler flags, host settings, and CPU model all change the
+result; the last row demonstrates the bounded extreme rather than a recommended
+musical setting.
+
 ## Notes / known limits
 
 - **WILD is not a monotonic chaos knob.** It (and BALANCE) cross regular and
@@ -198,14 +213,14 @@ many substeps.
 - **State is not saved.** Populations re-seed to a deterministic point on the
   default attractor on load; params persist through Rack as usual.
 
-`tools/stability/foxes.cpp` mirrors this kernel exactly and (in `make check`)
-asserts the analytic equilibrium, the Hopf location, the default period → RATE_CAL
-(within 5 cents), a positive Lyapunov estimate with a broad fox-maxima return map
-at `b1 = 3` versus ≈ 0 at the default, and finite/positive/bounded behavior across
-the whole BALANCE × WILD × KICK box. Unforced (KICK = 0) operation never touches the
-positivity floor; a sustained *negative* KICK legitimately pushes grass onto it
-(negative forcing breaks positivity by design), which is why the floor is a clamp,
-not a limiter.
+`tools/stability/foxes.cpp` exercises the shared SDK-free production core in
+`make check`. It asserts the analytic equilibrium, the Hopf location, the default
+period → RATE_CAL (within 5 cents), a positive Lyapunov estimate with a broad
+fox-maxima return map at `b1 = 3` versus ≈ 0 at the default, and
+finite/positive/bounded behavior across the whole BALANCE × WILD × KICK box.
+Unforced (KICK = 0) operation never touches the positivity floor; a sustained
+*negative* KICK legitimately pushes grass onto it (negative forcing breaks
+positivity by design), which is why the floor is a clamp, not a limiter.
 
 ## References
 

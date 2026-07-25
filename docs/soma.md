@@ -32,8 +32,12 @@ bursting → chaos. **BURST** (`r`) is how slow that adaptation is: small `r` = 
 slow bursts, large `r` → tonic spiking. **ADAPT** (`s`) is the adaptation strength
 (burst depth/shape). `a, b, c, d, x_R` are fixed at the standard HR values.
 
-It uses the **same RK4 integration strategy as Axon** — pitch-adaptive substepping —
-just with the third equation added.
+It uses the **same RK4 integration strategy as Axon** — pitch-adaptive substepping
+with a bounded 64-substep CPU/speed ceiling — just with the third equation added.
+At 44.1 kHz, the approximate ceiling relative to C4 is +3.28 oct with
+anti-aliasing Off, +4.28 at ×2, +5.28 at ×4 (default), and +6.28 at ×8. Add about
+0.12 oct at 48 kHz. Requests above that ceiling flatten rather than increasing
+the integration step or consuming unbounded CPU.
 
 ### Pitch tracks the spike rate
 
@@ -41,14 +45,15 @@ HR's period varies enormously between regimes, so pitch is calibrated to the
 spike rate at the **default voicing**, which is now **tonic spiking** (CURRENT 2.0,
 BURST rate r ≈ 0.03): `RATE_CAL` makes that tonic buzz read C4 at 0 V. Turning
 **BURST down** into the bursting/chaotic regimes changes the emergent rate, so the
-pitch shifts — CURRENT/BURST/ADAPT all pull it. That coupling is open-loop and
-deliberate, like Axon: Soma is a voice you tune by ear, not a precision VCO.
+pitch shifts — CURRENT/BURST/ADAPT all pull it. Below the bounded speed ceiling,
+that coupling is open-loop and deliberate, like Axon: Soma is a voice you tune
+by ear, not a precision VCO.
 
 ## Controls
 
 | Control | Range | Purpose |
 | --- | --- | --- |
-| **PITCH** | ±4 oct | simulation speed (audio pitch); 0 = C4 at default voicing |
+| **PITCH** | ±4 oct | requested simulation speed (audio pitch); 0 = C4 at default voicing; the effective speed has the oversampling-dependent ceiling above |
 | **CURRENT** | 0.4 … 4.0 | injected current `I`; regime control (quiescent / tonic / bursting / chaos). Chaos sits near 3.25 |
 | **BURST** | r ≈ 0.001 … 0.05 | adaptation rate (log-mapped); small = long bursts, large = tonic |
 | **ADAPT** | 1.0 … 5.0 | adaptation strength `s` (burst depth) |
@@ -85,8 +90,9 @@ and rises — silent voices resume rather than restarting from rest (gate SYNC i
 you want each note clean).
 
 The integrator dominates CPU: per voice, `oversample × K` RK4 substeps per sample
-(`K` 2…64, rising with pitch), so the worst case scales as **voices × oversample
-× substeps**. Soma is a touch heavier than Axon — Hindmarsh–Rose is a
+(`K` 2…64, rising with requested pitch), so the worst case scales as **voices ×
+oversample × substeps**. At the ceiling, additional pitch CV increases neither
+the model speed nor `K`. Soma is a touch heavier than Axon — Hindmarsh–Rose is a
 three-variable system vs FHN's two.
 
 | Voices | Anti-aliasing | Cost |
@@ -95,8 +101,9 @@ three-variable system vs FHN's two.
 | 8–16 | ×4 (default) | moderate |
 | 16 | ×8 | very heavy, patch-dependent |
 
-Leave anti-aliasing at ×4, or drop to ×2 / Off for large polyphonic patches; reach for ×8
-only when aliasing is audible on high notes.
+Leave anti-aliasing at ×4, or drop to ×2 / Off for large polyphonic patches;
+reach for ×8 only when aliasing is audible on high notes. Lower settings also
+lower the effective speed ceiling described above.
 
 As in [Axon](axon.md#cpu), voices are processed in **groups of four SIMD lanes**
 (measured ~4x on the integration chain at 16 voices; CPU steps at 1->5->9->13
@@ -105,11 +112,12 @@ voices; inactive lanes are masked so a silent voice's oscillator state is frozen
 its **fastest** lane's substep count, so one very-high-pitched voice pulls its
 groupmates up with it. Rough budget (44.1 kHz, ×4, 16 voices, integration-chain
 lower bounds on one i5-9600K — percentages aren't portable): ~4% of a core at
-moderate pitch, ~50% at the top of the PITCH knob (+4 oct), and — pushed higher
-with V/OCT CV, around +6 oct — a full patch can saturate a core (Soma is a little
-heavier than Axon). Drop anti-aliasing, or move the fast voices to another
-instance if it matters; note splitting rounds each side up to whole four-lane
-groups, so isolate the fast voices rather than splitting arbitrarily.
+moderate pitch and ~50% at the top of the PITCH knob (+4 oct). At default ×4,
+further V/OCT raises cost only until the speed clamp near +5.28 oct; a full patch
+can approach or saturate a core there, then both speed and integration cost
+plateau. Drop anti-aliasing, or move the fast voices to another instance if it
+matters; note splitting rounds each side up to whole four-lane groups, so isolate
+the fast voices rather than splitting arbitrarily.
 
 ## Patches
 

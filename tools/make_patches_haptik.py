@@ -13,7 +13,9 @@ Haptik positional ids (must match enum order in src/Haptik.cpp):
 Fundamental VCO (from source): FREQ_PARAM=2, PITCH_INPUT=0, SAW_OUTPUT=2.
 """
 
-import json, math, os, io, glob, shutil, subprocess, sys, tarfile, tempfile, random
+import json, math, os, shutil, random
+
+from patch_utils import windows_patch_directories, write_patch_archive
 ROOT = os.path.dirname(os.path.abspath(__file__))
 VER = json.load(open(os.path.join(ROOT, "..", "plugin.json")))["version"]  # Coalescent version from the manifest
 
@@ -64,21 +66,14 @@ def write_patch(name, modules, cables, master_id):
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "patches")
     os.makedirs(out_dir, exist_ok=True)
     out_file = os.path.join(out_dir, name)
-    with tempfile.TemporaryDirectory() as tmp:
-        jp = os.path.join(tmp, "patch.json")
-        with open(jp, "w") as f:
-            json.dump(patch, f, indent=2)
-        tar_buf = io.BytesIO()
-        with tarfile.open(fileobj=tar_buf, mode="w:") as tf:
-            tf.add(jp, arcname="patch.json")
-        r = subprocess.run(["zstd", "-19", "-o", out_file, "-f"],
-                           input=tar_buf.getvalue(), capture_output=True)
-        if r.returncode != 0:
-            print("zstd error:", r.stderr.decode(), file=sys.stderr); sys.exit(1)
+    write_patch_archive(out_file, patch)
     print(f"  {name}: {len(modules)} modules, {len(cables)} cables, {os.path.getsize(out_file)} bytes")
-    for win in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"):
-        shutil.copy2(out_file, os.path.join(win, name))
-        print(f"    installed -> {win}/{name}")
+    for win in windows_patch_directories():
+        try:
+            shutil.copy2(out_file, os.path.join(win, name))
+            print(f"    installed -> {win}/{name}")
+        except OSError as error:
+            print(f"    (skipped Windows copy: {error})")
 
 # ── 1. Plucked, settling ──────────────────────────────────────────────────────
 def patch_plucked():
@@ -105,8 +100,8 @@ def patch_frozen():
 def patch_driven():
     vco = {"id": uid(), "plugin": "Fundamental", "model": "VCO", "version": "2.6.4",
            "params": [{"id": 2, "value": 0.0}], "pos": [0, 0]}
-    h = haptik(hp(excite=1, damp=0.4, couple=0.3, inject=0.6), [10, 0])  # VCO is 10 HP
-    a = audio([28, 0])   # Haptik spans 10..28
+    h = haptik(hp(excite=1, damp=0.4, couple=0.3, inject=0.6), [9, 0])  # VCO is 9 HP
+    a = audio([27, 0])   # Haptik spans 9..27
     cs = [
         cable(vco["id"], 2, h["id"], 6, 0),   # VCO SAW -> Haptik EXT IN
         cable(h["id"], 0, a["id"], 0, 1),     # Haptik OUT -> L

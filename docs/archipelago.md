@@ -18,6 +18,8 @@ Archipelago is part of the **Coalescent** plugin's *Fluctuations* series. It is
 a deterministic spatial trait-density instrument, not an individual-based or
 finite-population genetics simulator.
 
+![Archipelago](img/archipelago.png)
+
 ## How it works
 
 The state is a fixed `8 x 32` field. Habitat `i = 0 ... 7` contains non-negative
@@ -65,7 +67,7 @@ be re-established by growth or migrants.
 The module evaluates the field at the nearest integer sample-divider cadence to
 500 Hz (exactly 500 Hz at 48 and 96 kHz). Each requested advance uses the exact
 wall duration of that divider, divides model time into substeps `h <= 0.02 tau`,
-and applies this symmetric positive split to every substep:
+and applies this palindromically ordered positive splitting to every substep:
 
 1. Apply an exact half-step of pairwise migration to active spatial edges in
    forward order.
@@ -342,7 +344,8 @@ speciation claim, and Archipelago does not detect branches.
 - RESET is deterministic. It uses the current sanitized GRADIENT and CLIMATE,
   places mass `0.75` in each habitat as a narrow Gaussian around that local
   optimum, and clips only the reset centre to the representable trait domain.
-  It is a new initial condition, not a random redraw.
+  It is a new initial condition, not a random redraw. RESET is applied on the
+  next 500 Hz field tick; that tick installs the field without also evolving it.
 - The model owns no RNG. Matching state, controls, CV, topology, and event timing
   produce the same deterministic evolution, subject to ordinary floating-point
   differences between builds and platforms.

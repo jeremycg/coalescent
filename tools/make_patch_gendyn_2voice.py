@@ -12,7 +12,9 @@ old first-order walk at equal scale, so the old diffusion formula gains a
 Wide barriers (0.5) so drift is audible when it happens.
 """
 
-import json, os, sys, io, tempfile, tarfile, subprocess, random
+import json, os, random
+
+from patch_utils import windows_patch_directories, write_patch_archive
 VER = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "plugin.json")))["version"]  # Coalescent version from the manifest
 
 random.seed(99)
@@ -134,31 +136,17 @@ patch = {
 out_dir  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "patches")
 out_file = os.path.join(out_dir, "GENDY3_2voice.vcv")
 
-with tempfile.TemporaryDirectory() as tmp:
-    json_path = os.path.join(tmp, "patch.json")
-    with open(json_path, "w") as f:
-        json.dump(patch, f, indent=2)
-
-    tar_buf = io.BytesIO()
-    with tarfile.open(fileobj=tar_buf, mode="w:") as tf:
-        tf.add(json_path, arcname="patch.json")
-
-    result = subprocess.run(
-        ["zstd", "-19", "-o", out_file, "-f"],
-        input=tar_buf.getvalue(),
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        print("zstd error:", result.stderr.decode(), file=sys.stderr)
-        sys.exit(1)
+write_patch_archive(out_file, patch)
 
 print(f"Written: {out_file}")
 print(f"  {len(modules)} modules, {len(cables)} cables")
 
-import glob
-_win = glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches")
+_win = windows_patch_directories()
 if _win:
     import shutil
     dst = os.path.join(_win[0], "GENDY3_2voice.vcv")
-    shutil.copy2(out_file, dst)
-    print(f"  Installed to Windows Rack: {dst}")
+    try:
+        shutil.copy2(out_file, dst)
+        print(f"  Installed to Windows Rack: {dst}")
+    except OSError as error:
+        print(f"  (skipped Windows copy: {error})")

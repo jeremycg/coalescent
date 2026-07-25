@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Operon — placeholder panel, 14 HP (71.12 x 128.5 mm). Violet accent (gene
+<!-- Operon — base panel, 14 HP (71.12 x 128.5 mm). Violet accent (gene
      circuit; distinct from GENDYN green). House style: bg + rails + screw holes
      only; the display screen, title, and control labels are drawn by the widget. -->
 <svg xmlns="http://www.w3.org/2000/svg"

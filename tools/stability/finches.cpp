@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -16,7 +17,8 @@ static bool valid(const FinchesField& field, float tolerance = 3e-6f) {
     double sum = 0.0;
     const std::array<float, FinchesField::kBins>& m = field.masses();
     for (int i = 0; i < FinchesField::kBins; ++i) {
-        if (!std::isfinite(m[i]) || m[i] < 0.f || m[i] > 1.f)
+        if (!std::isfinite(m[i]) || m[i] < 0.f || m[i] > 1.f
+            || (m[i] > 0.f && m[i] < FinchesField::numericalExtinctionFloor()))
             return false;
         sum += m[i];
     }
@@ -28,6 +30,16 @@ static bool valid(const FinchesField& field, float tolerance = 3e-6f) {
            x.spread >= 0.f && x.spread <= 1.f &&
            x.lowMass >= 0.f && x.lowMass <= 1.f &&
            x.highMass >= 0.f && x.highMass <= 1.f;
+}
+
+static bool sameState(const FinchesField::State& a,
+                      const FinchesField::State& b) {
+    return a.version == b.version
+        && std::memcmp(a.mass.data(), b.mass.data(),
+                       sizeof(float) * FinchesField::kBins) == 0
+        && a.split == b.split
+        && a.splitTimer == b.splitTimer
+        && a.mergeTimer == b.mergeTimer;
 }
 
 static bool evolve(FinchesField& field, const FinchesField::Parameters& p,
@@ -236,6 +248,142 @@ int main() {
         std::printf("FAIL: timestep convergence\n"); failures++;
     }
 
+    // Event persistence is measured at the field's internal integration
+    // cadence. One bounded outer call and the equivalent sequence of 0.02-tau
+    // calls must therefore agree even when a qualifying morphology appears
+    // partway through the interval. These fixtures begin eight internal steps
+    // before the strong/weak detector boundary, leaving only 0.16 tau of the
+    // 0.32-tau interval eligible for either event.
+    FinchesField splitApproach;
+    p = FinchesField::Parameters(); p.mutation = 0.00002f; p.branching = 2.8f;
+    std::array<FinchesField::State, 9> splitHistory;
+    int splitHistoryCount = 0;
+    FinchesField::State beforeSplitCandidate;
+    bool foundSplitCandidate = false;
+    for (int step = 0; step < 20000 && !foundSplitCandidate; ++step) {
+        const FinchesField::State before = splitApproach.state();
+        if (splitHistoryCount < static_cast<int>(splitHistory.size()))
+            splitHistory[splitHistoryCount++] = before;
+        else {
+            for (std::size_t i = 1; i < splitHistory.size(); ++i)
+                splitHistory[i - 1] = splitHistory[i];
+            splitHistory.back() = before;
+        }
+        splitApproach.advance(0.02f, p);
+        if (splitApproach.state().splitTimer > 0.f
+            && splitHistoryCount == static_cast<int>(splitHistory.size())) {
+            beforeSplitCandidate = splitHistory.front();
+            foundSplitCandidate = true;
+        }
+    }
+
+    FinchesField coarseSplitCandidate, fineSplitCandidate;
+    bool fineSplitEvent = false;
+    bool splitGranularityOk = foundSplitCandidate
+        && coarseSplitCandidate.restore(beforeSplitCandidate)
+        && fineSplitCandidate.restore(beforeSplitCandidate);
+    if (splitGranularityOk) {
+        coarseSplitCandidate.advance(0.32f, p);
+        for (int step = 0; step < 16; ++step) {
+            fineSplitCandidate.advance(0.02f, p);
+            fineSplitEvent = fineSplitEvent || fineSplitCandidate.metrics().splitEvent;
+        }
+        splitGranularityOk = !coarseSplitCandidate.metrics().splitEvent
+            && !fineSplitEvent
+            && sameState(coarseSplitCandidate.state(), fineSplitCandidate.state());
+    }
+    if (!splitGranularityOk) {
+        std::printf("FAIL: coarse advance spuriously qualified SPLIT\n"); failures++;
+    }
+    else {
+        // Continue from the identical pending state until the event occurs.
+        // The coarse call must retain an event raised before its final substep.
+        FinchesField coarseSplitEvent, fineSplitEventField;
+        const FinchesField::State pending = coarseSplitCandidate.state();
+        bool positiveFineSplitEvent = false;
+        bool splitLatchOk = coarseSplitEvent.restore(pending)
+            && fineSplitEventField.restore(pending);
+        if (splitLatchOk) {
+            coarseSplitEvent.advance(0.32f, p);
+            for (int step = 0; step < 16; ++step) {
+                fineSplitEventField.advance(0.02f, p);
+                positiveFineSplitEvent = positiveFineSplitEvent
+                    || fineSplitEventField.metrics().splitEvent;
+            }
+            splitLatchOk = coarseSplitEvent.metrics().splitEvent
+                && positiveFineSplitEvent
+                && sameState(coarseSplitEvent.state(), fineSplitEventField.state());
+        }
+        if (!splitLatchOk) {
+            std::printf("FAIL: coarse advance did not latch SPLIT\n"); failures++;
+        }
+    }
+
+    FinchesField mergeApproach;
+    p = FinchesField::Parameters(); p.mutation = 0.00002f; p.branching = 2.8f;
+    evolve(mergeApproach, p, 90.f, 0.13f);
+    p.branching = 0.65f;
+    std::array<FinchesField::State, 9> mergeHistory;
+    int mergeHistoryCount = 0;
+    FinchesField::State beforeMergeCandidate;
+    bool foundMergeCandidate = false;
+    for (int step = 0; step < 20000 && !foundMergeCandidate; ++step) {
+        const FinchesField::State before = mergeApproach.state();
+        if (mergeHistoryCount < static_cast<int>(mergeHistory.size()))
+            mergeHistory[mergeHistoryCount++] = before;
+        else {
+            for (std::size_t i = 1; i < mergeHistory.size(); ++i)
+                mergeHistory[i - 1] = mergeHistory[i];
+            mergeHistory.back() = before;
+        }
+        mergeApproach.advance(0.02f, p);
+        if (mergeApproach.state().mergeTimer > 0.f
+            && mergeHistoryCount == static_cast<int>(mergeHistory.size())) {
+            beforeMergeCandidate = mergeHistory.front();
+            foundMergeCandidate = true;
+        }
+    }
+
+    FinchesField coarseMergeCandidate, fineMergeCandidate;
+    bool fineMergeEvent = false;
+    bool mergeGranularityOk = foundMergeCandidate
+        && coarseMergeCandidate.restore(beforeMergeCandidate)
+        && fineMergeCandidate.restore(beforeMergeCandidate);
+    if (mergeGranularityOk) {
+        coarseMergeCandidate.advance(0.32f, p);
+        for (int step = 0; step < 16; ++step) {
+            fineMergeCandidate.advance(0.02f, p);
+            fineMergeEvent = fineMergeEvent || fineMergeCandidate.metrics().mergeEvent;
+        }
+        mergeGranularityOk = !coarseMergeCandidate.metrics().mergeEvent
+            && !fineMergeEvent
+            && sameState(coarseMergeCandidate.state(), fineMergeCandidate.state());
+    }
+    if (!mergeGranularityOk) {
+        std::printf("FAIL: coarse advance spuriously qualified MERGE\n"); failures++;
+    }
+    else {
+        FinchesField coarseMergeEvent, fineMergeEventField;
+        const FinchesField::State pending = coarseMergeCandidate.state();
+        bool positiveFineMergeEvent = false;
+        bool mergeLatchOk = coarseMergeEvent.restore(pending)
+            && fineMergeEventField.restore(pending);
+        if (mergeLatchOk) {
+            coarseMergeEvent.advance(0.32f, p);
+            for (int step = 0; step < 16; ++step) {
+                fineMergeEventField.advance(0.02f, p);
+                positiveFineMergeEvent = positiveFineMergeEvent
+                    || fineMergeEventField.metrics().mergeEvent;
+            }
+            mergeLatchOk = coarseMergeEvent.metrics().mergeEvent
+                && positiveFineMergeEvent
+                && sameState(coarseMergeEvent.state(), fineMergeEventField.state());
+        }
+        if (!mergeLatchOk) {
+            std::printf("FAIL: coarse advance did not latch MERGE\n"); failures++;
+        }
+    }
+
     // Reset and identical commands are deterministic bin-for-bin.
     FinchesField deterministicA, deterministicB;
     p = FinchesField::Parameters(); p.environment = 0.17f; p.branching = 2.3f;
@@ -248,8 +396,8 @@ int main() {
         std::printf("FAIL: deterministic replay differs\n"); failures++;
     }
 
-    // Valid restore is normalized, preserves a split baseline without an event,
-    // and invalid payloads fail atomically.
+    // The compatibility loader for pre-v1 density-only patches normalizes and
+    // derives a strong split baseline without manufacturing an event.
     FinchesField savedSplit;
     p = FinchesField::Parameters(); p.mutation = 0.00002f; p.branching = 2.8f;
     evolve(savedSplit, p, 90.f, 0.13f);
@@ -270,6 +418,133 @@ int main() {
     if (restored.restoreMasses(saved, FinchesField::kBins) ||
         std::memcmp(beforeBad, restored.masses().data(), sizeof(beforeBad)) != 0) {
         std::printf("FAIL: invalid restore was not rejected atomically\n"); failures++;
+    }
+
+    // A complete state round-trip preserves an accepted split while its peaks
+    // are only in the weak hysteresis band. The old density-only inference is
+    // deliberately used to discover that reachable band without duplicating
+    // the detector thresholds in this test.
+    FinchesField hysteresis;
+    p = FinchesField::Parameters(); p.mutation = 0.00002f; p.branching = 2.8f;
+    evolve(hysteresis, p, 90.f, 0.13f);
+    p.branching = 0.65f;
+    bool foundWeakBand = false;
+    for (int step = 0; step < 2000 && hysteresis.metrics().split; ++step) {
+        hysteresis.advance(0.01f, p);
+        const FinchesField::State held = hysteresis.state();
+        FinchesField densityOnly;
+        if (densityOnly.restoreMasses(held.mass.data(), FinchesField::kBins)
+            && !densityOnly.metrics().split && hysteresis.metrics().split) {
+            FinchesField resumed;
+            if (!resumed.restore(held) || !sameState(resumed.state(), held)
+                || !resumed.metrics().split
+                || resumed.metrics().splitEvent || resumed.metrics().mergeEvent
+                || resumed.metrics().lowMass != hysteresis.metrics().lowMass
+                || resumed.metrics().highMass != hysteresis.metrics().highMass
+                || resumed.metrics().lowTrait != hysteresis.metrics().lowTrait
+                || resumed.metrics().highTrait != hysteresis.metrics().highTrait) {
+                std::printf("FAIL: weak-band split state round-trip\n"); failures++;
+            }
+            foundWeakBand = true;
+            break;
+        }
+    }
+    if (!foundWeakBand) {
+        std::printf("FAIL: no reachable accepted weak-band split fixture\n"); failures++;
+    }
+
+    // Pending split and merge timers are musical state: a restored field must
+    // emit the next event on the same future call as the uninterrupted field.
+    FinchesField pendingSplit;
+    p = FinchesField::Parameters(); p.mutation = 0.00002f; p.branching = 2.8f;
+    FinchesField::State pendingSplitState;
+    bool foundPendingSplit = false;
+    for (int step = 0; step < 20000 && !pendingSplit.metrics().split; ++step) {
+        pendingSplit.advance(0.01f, p);
+        if (pendingSplit.state().splitTimer > 0.f) {
+            pendingSplitState = pendingSplit.state();
+            foundPendingSplit = true;
+            break;
+        }
+    }
+    FinchesField resumedSplit;
+    if (!foundPendingSplit || !resumedSplit.restore(pendingSplitState)
+        || !sameState(resumedSplit.state(), pendingSplitState)
+        || resumedSplit.metrics().splitEvent || resumedSplit.metrics().mergeEvent) {
+        std::printf("FAIL: pending split timer state round-trip\n"); failures++;
+    }
+    else {
+        bool sawSplit = false;
+        for (int step = 0; step < 100 && !sawSplit; ++step) {
+            pendingSplit.advance(0.01f, p);
+            resumedSplit.advance(0.01f, p);
+            if (!sameState(pendingSplit.state(), resumedSplit.state())
+                || pendingSplit.metrics().splitEvent != resumedSplit.metrics().splitEvent) {
+                std::printf("FAIL: pending split future diverged\n"); failures++;
+                break;
+            }
+            sawSplit = pendingSplit.metrics().splitEvent;
+        }
+        if (!sawSplit) {
+            std::printf("FAIL: pending split fixture never emitted\n"); failures++;
+        }
+    }
+
+    FinchesField pendingMerge;
+    p = FinchesField::Parameters(); p.mutation = 0.00002f; p.branching = 2.8f;
+    evolve(pendingMerge, p, 90.f, 0.13f);
+    p.branching = 0.65f;
+    FinchesField::State pendingMergeState;
+    bool foundPendingMerge = false;
+    for (int step = 0; step < 20000 && pendingMerge.metrics().split; ++step) {
+        pendingMerge.advance(0.01f, p);
+        if (pendingMerge.state().mergeTimer > 0.f) {
+            pendingMergeState = pendingMerge.state();
+            foundPendingMerge = true;
+            break;
+        }
+    }
+    FinchesField resumedMerge;
+    if (!foundPendingMerge || !resumedMerge.restore(pendingMergeState)
+        || !sameState(resumedMerge.state(), pendingMergeState)
+        || resumedMerge.metrics().splitEvent || resumedMerge.metrics().mergeEvent) {
+        std::printf("FAIL: pending merge timer state round-trip\n"); failures++;
+    }
+    else {
+        bool sawMerge = false;
+        for (int step = 0; step < 100 && !sawMerge; ++step) {
+            pendingMerge.advance(0.01f, p);
+            resumedMerge.advance(0.01f, p);
+            if (!sameState(pendingMerge.state(), resumedMerge.state())
+                || pendingMerge.metrics().mergeEvent != resumedMerge.metrics().mergeEvent) {
+                std::printf("FAIL: pending merge future diverged\n"); failures++;
+                break;
+            }
+            sawMerge = pendingMerge.metrics().mergeEvent;
+        }
+        if (!sawMerge) {
+            std::printf("FAIL: pending merge fixture never emitted\n"); failures++;
+        }
+    }
+
+    // Complete-state validation is transactional.
+    const FinchesField::State beforeBadState = restored.state();
+    FinchesField::State badState = beforeBadState;
+    badState.version++;
+    if (restored.restore(badState) || !sameState(restored.state(), beforeBadState)) {
+        std::printf("FAIL: bad state version was not rejected atomically\n"); failures++;
+    }
+    badState = beforeBadState;
+    badState.splitTimer = std::numeric_limits<float>::quiet_NaN();
+    if (restored.restore(badState) || !sameState(restored.state(), beforeBadState)) {
+        std::printf("FAIL: bad detector timer was not rejected atomically\n"); failures++;
+    }
+    badState = beforeBadState;
+    const float displaced = badState.mass[0];
+    badState.mass[0] = 1e-35f;
+    badState.mass[FinchesField::kBins / 2] += displaced - 1e-35f;
+    if (restored.restore(badState) || !sameState(restored.state(), beforeBadState)) {
+        std::printf("FAIL: below-floor state was not rejected atomically\n"); failures++;
     }
 
     // An event is one-call state: seed and a zero-time advance cannot replay it.
@@ -300,6 +575,72 @@ int main() {
     hostile.advance(-1.f, p);
     if (!valid(hostile)) {
         std::printf("FAIL: hostile input sanitization\n"); failures++;
+    }
+
+    // Edge-adapted populations used to retain float subnormals indefinitely.
+    // This is reachable from reset alone and remains clean after a long run.
+    FinchesField noSubnormal;
+    p = FinchesField::Parameters();
+    p.mutation = FinchesField::mutationMin();
+    p.branching = FinchesField::branchingMax();
+    p.niche = FinchesField::nicheMin();
+    p.environment = FinchesField::environmentMax();
+    noSubnormal.reset(p.environment);
+    const bool resetHadNoTinyMass = valid(noSubnormal);
+    evolve(noSubnormal, p, 300.f, 0.16f);
+    int zeroBins = 0;
+    float smallestPositive = 1.f;
+    for (float value : noSubnormal.masses()) {
+        if (value == 0.f)
+            ++zeroBins;
+        else
+            smallestPositive = std::min(smallestPositive, value);
+    }
+    std::printf("numerics: %d extinct bins, smallest positive mass %.3g\n",
+                zeroBins, smallestPositive);
+    if (!resetHadNoTinyMass || !valid(noSubnormal) || zeroBins == 0
+        || smallestPositive < std::numeric_limits<float>::min()) {
+        std::printf("FAIL: numerical extinction floor / no-subnormal contract\n"); failures++;
+    }
+
+    // Diagnostic core-only cost at the default RATE and maximum bounded field
+    // request. Hardware varies, so the threshold only catches gross regressions.
+    const int defaultCalls = 2000;
+    FinchesField defaultBenchmark;
+    p = FinchesField::Parameters();
+    const std::chrono::steady_clock::time_point defaultStart =
+        std::chrono::steady_clock::now();
+    for (int call = 0; call < defaultCalls; ++call)
+        defaultBenchmark.advance(8.f / 500.f, p);
+    const std::chrono::steady_clock::time_point defaultStop =
+        std::chrono::steady_clock::now();
+    const double defaultMicroseconds =
+        std::chrono::duration<double, std::micro>(defaultStop - defaultStart).count()
+        / defaultCalls;
+
+    const int maximumCalls = 500;
+    FinchesField maximumBenchmark;
+    p.mutation = 0.00002f;
+    p.branching = FinchesField::branchingMax();
+    p.niche = FinchesField::nicheMin();
+    p.environment = FinchesField::environmentMax();
+    const float maximumAdvance = 8.f * std::exp2(4.25f) / 500.f;
+    const std::chrono::steady_clock::time_point maximumStart =
+        std::chrono::steady_clock::now();
+    for (int call = 0; call < maximumCalls; ++call)
+        maximumBenchmark.advance(maximumAdvance, p);
+    const std::chrono::steady_clock::time_point maximumStop =
+        std::chrono::steady_clock::now();
+    const double maximumMicroseconds =
+        std::chrono::duration<double, std::micro>(maximumStop - maximumStart).count()
+        / maximumCalls;
+    std::printf("benchmark: %.2f us default-rate / %.2f us maximum field advance "
+                "(%.2f%% / %.2f%% of one core at 500 Hz)\n",
+                defaultMicroseconds, maximumMicroseconds,
+                defaultMicroseconds / 20.0, maximumMicroseconds / 20.0);
+    if (!valid(defaultBenchmark) || !valid(maximumBenchmark)
+        || defaultMicroseconds > 100.0 || maximumMicroseconds > 1000.0) {
+        std::printf("FAIL: worst-case benchmark or terminal state\n"); failures++;
     }
 
     if (failures) {

@@ -7,7 +7,9 @@ easy to verify. Port maps checked against Fundamental source:
 Operon params: 0 PITCH, 1 ALPHA, 2 HILL, 3 BETA, 4 LEAK, 5-7 att
 Operon outputs: 0-2 OUT1/2/3, 3-5 GATE1/2/3
 """
-import json, os, io, glob, shutil, subprocess, sys, tarfile, tempfile, random
+import json, os, shutil, random
+
+from patch_utils import windows_patch_directories, write_patch_archive
 
 random.seed(12)
 def uid(): return random.randint(1_000_000_000_000_000, 9_007_199_254_740_991)
@@ -35,15 +37,11 @@ def write_patch(name, modules, cables, master):
     patch = {"version": "2.6.6", "zoom": 0.5, "gridOffset": [0.0, 0.0],
              "modules": modules, "cables": cables, "masterModuleId": master}
     out = os.path.join(ROOT, "..", "patches", name)
-    with tempfile.TemporaryDirectory() as tmp:
-        jp = os.path.join(tmp, "patch.json"); json.dump(patch, open(jp, "w"), indent=2)
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w:") as tf: tf.add(jp, arcname="patch.json")
-        r = subprocess.run(["zstd", "-19", "-o", out, "-f"], input=buf.getvalue(), capture_output=True)
-        if r.returncode: print("zstd error:", r.stderr.decode(), file=sys.stderr); sys.exit(1)
+    write_patch_archive(out, patch)
     print(f"  {name}: {len(modules)} modules, {len(cables)} cables")
-    for win in glob.glob("/mnt/c/Users/*/AppData/Local/Rack2/patches"):
-        shutil.copy2(out, os.path.join(win, name))
+    for win in windows_patch_directories():
+        try: shutil.copy2(out, os.path.join(win, name))
+        except OSError as error: print(f"    (skipped Windows copy: {error})")
 
 DEF = [(0, 0.0), (1, 12.0), (2, 2.5), (3, 1.0), (4, 0.05)]   # default voicing
 

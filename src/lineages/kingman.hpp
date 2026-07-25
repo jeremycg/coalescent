@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../dsp/finite.hpp"
 #include "random.hpp"
 
 #include <algorithm>
@@ -16,7 +17,7 @@ static const int MAX_NODES = 2 * MAX_LEAVES - 1;
 static const int MAX_MUTATIONS = 128;
 
 inline double mutationLambdaFor(double mutate) {
-    if (!std::isfinite(mutate) || mutate < 0.0 || mutate > 1.0)
+    if (!coalescent::isFinite(mutate) || mutate < 0.0 || mutate > 1.0)
         return std::numeric_limits<double>::quiet_NaN();
     return 64.0 * mutate * mutate;
 }
@@ -130,7 +131,7 @@ private:
         if (leafCount < 2 || leafCount > MAX_LEAVES ||
             nodeCount != 2 * leafCount - 1 || root != nodeCount - 1 ||
             mutationCount < 0 || mutationCount > MAX_MUTATIONS ||
-            !std::isfinite(generatedMutate) || generatedMutate < 0.0 || generatedMutate > 1.0)
+            !coalescent::isFinite(generatedMutate) || generatedMutate < 0.0 || generatedMutate > 1.0)
             return false;
 
         const double expectedLambda = mutationLambdaFor(generatedMutate);
@@ -146,7 +147,7 @@ private:
             node.descendantMask = 0u;
             node.displayX = 0.0;
 
-            if (!std::isfinite(node.rawTime))
+            if (!coalescent::isFinite(node.rawTime))
                 return false;
             if (index < leafCount) {
                 if (node.left != -1 || node.right != -1 || node.rawTime != 0.0)
@@ -167,7 +168,7 @@ private:
             }
         }
 
-        if (!(nodes[root].rawTime > 0.0) || !std::isfinite(nodes[root].rawTime) ||
+        if (!(nodes[root].rawTime > 0.0) || !coalescent::isFinite(nodes[root].rawTime) ||
             nodes[root].parent != -1)
             return false;
         for (int index = 0; index < nodeCount - 1; ++index)
@@ -177,7 +178,7 @@ private:
         const double rootRawTime = nodes[root].rawTime;
         for (int index = 0; index < nodeCount; ++index) {
             nodes[index].normTime = index < leafCount ? 0.0 : nodes[index].rawTime / rootRawTime;
-            if (!std::isfinite(nodes[index].normTime) || nodes[index].normTime < 0.0 ||
+            if (!coalescent::isFinite(nodes[index].normTime) || nodes[index].normTime < 0.0 ||
                 nodes[index].normTime > 1.0)
                 return false;
             if (index >= leafCount &&
@@ -199,17 +200,17 @@ private:
             if (index == root)
                 continue;
             const double length = nodes[nodes[index].parent].rawTime - nodes[index].rawTime;
-            if (!(length > 0.0) || !std::isfinite(length))
+            if (!(length > 0.0) || !coalescent::isFinite(length))
                 return false;
             totalRawBranchLength += length;
         }
-        if (!(totalRawBranchLength > 0.0) || !std::isfinite(totalRawBranchLength))
+        if (!(totalRawBranchLength > 0.0) || !coalescent::isFinite(totalRawBranchLength))
             return false;
 
         for (int index = 0; index < mutationCount; ++index) {
             Mutation& mutation = mutations[index];
             if (mutation.branchChild < 0 || mutation.branchChild >= nodeCount ||
-                mutation.branchChild == root || !std::isfinite(mutation.rawTime) ||
+                mutation.branchChild == root || !coalescent::isFinite(mutation.rawTime) ||
                 (mutation.sign != -1 && mutation.sign != 1))
                 return false;
             const Node& child = nodes[mutation.branchChild];
@@ -281,8 +282,8 @@ public:
                                 static_cast<double>(activeCount - 1);
             const double wait = trialRng.exponential(rate);
             const double nextTime = rawTime + wait;
-            if (!(wait > 0.0) || !std::isfinite(wait) ||
-                !(nextTime > rawTime) || !std::isfinite(nextTime))
+            if (!(wait > 0.0) || !coalescent::isFinite(wait) ||
+                !(nextTime > rawTime) || !coalescent::isFinite(nextTime))
                 return false;
 
             const int firstPosition = static_cast<int>(
@@ -314,7 +315,7 @@ public:
     }
 
     bool generateMutations(double mutate, Tree& destination) {
-        if (!std::isfinite(mutate) || mutate < 0.0 || mutate > 1.0)
+        if (!coalescent::isFinite(mutate) || mutate < 0.0 || mutate > 1.0)
             return false;
 
         Pcg32 trialRng = rng_;

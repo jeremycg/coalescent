@@ -1,5 +1,7 @@
 #pragma once
 
+#include "finite.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -41,6 +43,10 @@ public:
     static constexpr float environmentMax() { return 0.55f; }
     static constexpr float maxAdvance() { return 0.32f; }
     static constexpr float maxSubstep() { return 0.02f; }
+    static constexpr float numericalExtinctionFloor() { return 1e-30f; }
+    static constexpr float splitPersistence() { return 0.30f; }
+    static constexpr float mergePersistence() { return 0.20f; }
+    static constexpr int stateVersion() { return 1; }
 
     struct Parameters {
         float mutation;
@@ -70,6 +76,23 @@ public:
               split(false), splitEvent(false), mergeEvent(false) {}
     };
 
+    // Complete authoritative state. Detector timers are evolutionary time, not
+    // wall-clock time. Events themselves are intentionally one-call signals and
+    // are never persisted.
+    struct State {
+        int version;
+        std::array<float, kBins> mass;
+        bool split;
+        float splitTimer;
+        float mergeTimer;
+
+        State()
+            : version(stateVersion()), split(false), splitTimer(0.f),
+              mergeTimer(0.f) {
+            mass.fill(0.f);
+        }
+    };
+
     FinchesField() { reset(); }
 
     static float traitAt(int index) {
@@ -78,6 +101,15 @@ public:
 
     const std::array<float, kBins>& masses() const { return mass_; }
     const Metrics& metrics() const { return metrics_; }
+
+    State state() const {
+        State result;
+        result.mass = mass_;
+        result.split = split_;
+        result.splitTimer = splitTimer_;
+        result.mergeTimer = mergeTimer_;
+        return result;
+    }
 
     void copyMasses(float* destination, std::size_t count) const {
         if (!destination || count < static_cast<std::size_t>(kBins))
@@ -119,7 +151,7 @@ public:
             mutant[i] = std::exp(-0.5f * z * z);
             mutantSum += mutant[i];
         }
-        if (!(mutantSum > 0.f) || !std::isfinite(mutantSum))
+        if (!(mutantSum > 0.f) || !coalescent::isFinite(mutantSum))
             return;
         float inv = 1.f / mutantSum;
         for (int i = 0; i < kBins; ++i)
@@ -128,22 +160,57 @@ public:
         refreshMetrics(0.f, false);
     }
 
-    // Restores authored state without manufacturing a split/merge event. A bad
+    // Restores complete authored state without manufacturing an event. A bad
     // payload leaves the previous state untouched.
+    bool restore(const State& source) {
+        if (source.version != stateVersion()
+            || !coalescent::isFinite(source.splitTimer)
+            || !coalescent::isFinite(source.mergeTimer)
+            || source.splitTimer < 0.f || source.splitTimer >= splitPersistence()
+            || source.mergeTimer < 0.f || source.mergeTimer >= mergePersistence()
+            || (source.split && source.splitTimer != 0.f)
+            || (!source.split && source.mergeTimer != 0.f))
+            return false;
+
+        double sum = 0.0;
+        for (int i = 0; i < kBins; ++i) {
+            const float value = source.mass[i];
+            if (!coalescent::isFinite(value) || value < 0.f
+                || (value > 0.f && value < numericalExtinctionFloor()))
+                return false;
+            sum += value;
+        }
+        if (!coalescent::isFinite(sum) || std::fabs(sum - 1.0) > 1e-4)
+            return false;
+
+        mass_ = source.mass;
+        split_ = source.split;
+        splitTimer_ = source.splitTimer;
+        mergeTimer_ = source.mergeTimer;
+        metrics_.splitEvent = false;
+        metrics_.mergeEvent = false;
+        refreshMetrics(0.f, false, false);
+        return true;
+    }
+
+    // Compatibility path for density-only state written before State v1. The
+    // detector is initialized from the strong threshold because no historical
+    // latch or persistence timers were stored by that format.
     bool restoreMasses(const float* source, std::size_t count) {
         if (!source || count != static_cast<std::size_t>(kBins))
             return false;
+        std::array<float, kBins> restored;
         double sum = 0.0;
         for (int i = 0; i < kBins; ++i) {
-            if (!std::isfinite(source[i]) || source[i] < 0.f)
+            if (!coalescent::isFinite(source[i]) || source[i] < 0.f)
                 return false;
-            sum += source[i];
+            restored[i] = source[i] < numericalExtinctionFloor() ? 0.f : source[i];
+            sum += restored[i];
         }
-        if (!(sum > 1e-12) || !std::isfinite(sum))
+        if (!(sum > 1e-12) || !coalescent::isFinite(sum))
             return false;
-        float inv = static_cast<float>(1.0 / sum);
-        for (int i = 0; i < kBins; ++i)
-            mass_[i] = source[i] * inv;
+        mass_ = restored;
+        normalize();
         splitTimer_ = 0.f;
         mergeTimer_ = 0.f;
         refreshMetrics(0.f, true);
@@ -168,12 +235,20 @@ public:
 
         int steps = std::max(1, static_cast<int>(std::ceil(deltaTau / maxSubstep())));
         float h = deltaTau / static_cast<float>(steps);
+        // Detector persistence follows the same bounded cadence as the field;
+        // latch any crossing so later substeps cannot hide it from the caller.
+        bool splitEvent = false;
+        bool mergeEvent = false;
         for (int step = 0; step < steps; ++step) {
             reaction(h, p);
             diffuse(h * p.mutation / (binWidth() * binWidth()));
             normalize();
+            refreshMetrics(h, false);
+            splitEvent = splitEvent || metrics_.splitEvent;
+            mergeEvent = mergeEvent || metrics_.mergeEvent;
         }
-        refreshMetrics(deltaTau, false);
+        metrics_.splitEvent = splitEvent;
+        metrics_.mergeEvent = mergeEvent;
     }
 
 private:
@@ -197,6 +272,10 @@ private:
     };
 
     std::array<float, kBins> mass_;
+    // mass_ centred in a zero guard band on both sides, refreshed by reaction().
+    // The guard entries are zero-initialized and never written, so the
+    // competition loop can read a mirrored neighbour pair unconditionally.
+    std::array<float, 3 * kBins> padded_{};
     std::array<float, kBins> kernel_;
     Metrics metrics_;
     bool split_ = false;
@@ -209,7 +288,7 @@ private:
     }
 
     static float finiteOr(float x, float fallback) {
-        return std::isfinite(x) ? x : fallback;
+        return coalescent::isFinite(x) ? x : fallback;
     }
 
     static Parameters sanitized(const Parameters& requested) {
@@ -242,17 +321,23 @@ private:
         float fitness[kBins];
         double meanFitness = 0.0;
         float invNiche = 1.f / p.niche;
+        std::copy(mass_.begin(), mass_.end(), padded_.begin() + kBins);
         for (int i = 0; i < kBins; ++i) {
             // Accumulate equal-distance neighbours as a pair. Besides reducing
             // kernel lookups, this preserves exact mirror symmetry for a
             // symmetric population instead of selecting a side by summation
             // order at the unstable branching point.
+            //
+            // Reading the pair from the zero-padded copy retires the two
+            // bounds tests that used to sit in this innermost loop, which lets
+            // it vectorize. An out-of-domain neighbour contributes an exact
+            // 0.f, so every paired sum, its order, and the accumulation order
+            // are bit-identical to the bounds-checked form.
+            const float* center = padded_.data() + kBins + i;
             double competition = mass_[i];
             int maxDistance = std::max(i, kBins - 1 - i);
             for (int d = 1; d <= maxDistance; ++d) {
-                float neighbours = 0.f;
-                if (i - d >= 0) neighbours += mass_[i - d];
-                if (i + d < kBins) neighbours += mass_[i + d];
+                const float neighbours = center[-d] + center[d];
                 competition += static_cast<double>(neighbours) * kernel_[d];
             }
             float z = (traitAt(i) - p.environment) * invNiche;
@@ -272,7 +357,7 @@ private:
     // boundary diagonal 1+r, interior diagonal 1+2r. This symmetric matrix has
     // unit row sums, so its inverse conserves total mass up to roundoff.
     void diffuse(float r) {
-        if (!(r > 0.f) || !std::isfinite(r))
+        if (!(r > 0.f) || !coalescent::isFinite(r))
             return;
         double fromLeft[kBins];
         double fromRight[kBins];
@@ -314,19 +399,36 @@ private:
     void normalize() {
         double sum = 0.0;
         for (int i = 0; i < kBins; ++i) {
-            if (!std::isfinite(mass_[i]) || mass_[i] < 0.f)
+            if (!coalescent::isFinite(mass_[i])
+                || mass_[i] < numericalExtinctionFloor())
                 mass_[i] = 0.f;
             sum += mass_[i];
         }
-        if (!(sum > 1e-20) || !std::isfinite(sum)) {
+        if (!(sum > 1e-20) || !coalescent::isFinite(sum)) {
             mass_.fill(0.f);
             mass_[kBins / 2 - 1] = 0.5f;
             mass_[kBins / 2] = 0.5f;
             return;
         }
-        float inv = static_cast<float>(1.0 / sum);
-        for (int i = 0; i < kBins; ++i)
-            mass_[i] *= inv;
+        // Scaling can move a value that was just above the floor below it. Each
+        // repair pass removes at least one such bin, so kBins passes is a strict
+        // bound; the next rescale only increases the remaining meaningful mass.
+        for (int pass = 0; pass < kBins; ++pass) {
+            const float inv = static_cast<float>(1.0 / sum);
+            bool repaired = false;
+            for (int i = 0; i < kBins; ++i) {
+                mass_[i] *= inv;
+                if (mass_[i] > 0.f && mass_[i] < numericalExtinctionFloor()) {
+                    mass_[i] = 0.f;
+                    repaired = true;
+                }
+            }
+            if (!repaired)
+                return;
+            sum = 0.0;
+            for (int i = 0; i < kBins; ++i)
+                sum += mass_[i];
+        }
     }
 
     float refinedTrait(int index) const {
@@ -400,7 +502,8 @@ private:
         return result;
     }
 
-    void refreshMetrics(float elapsedTau, bool initializeDetector) {
+    void refreshMetrics(float elapsedTau, bool initializeDetector,
+                        bool updateDetector = true) {
         bool oldSplitEvent = metrics_.splitEvent;
         bool oldMergeEvent = metrics_.mergeEvent;
 
@@ -422,7 +525,11 @@ private:
         bool weakPair = peaks.pair && separation >= 3.5f * binWidth() &&
                         depth >= 0.08f && peaks.lowMass >= 0.07f && peaks.highMass >= 0.07f;
 
-        if (initializeDetector) {
+        if (!updateDetector) {
+            oldSplitEvent = false;
+            oldMergeEvent = false;
+        }
+        else if (initializeDetector) {
             split_ = strongPair;
             splitTimer_ = 0.f;
             mergeTimer_ = 0.f;
@@ -432,7 +539,7 @@ private:
         else if (!split_) {
             splitTimer_ = strongPair ? splitTimer_ + elapsedTau : 0.f;
             mergeTimer_ = 0.f;
-            if (splitTimer_ >= 0.30f) {
+            if (splitTimer_ >= splitPersistence()) {
                 split_ = true;
                 splitTimer_ = 0.f;
                 oldSplitEvent = true;
@@ -441,7 +548,7 @@ private:
         else {
             mergeTimer_ = weakPair ? 0.f : mergeTimer_ + elapsedTau;
             splitTimer_ = 0.f;
-            if (mergeTimer_ >= 0.20f) {
+            if (mergeTimer_ >= mergePersistence()) {
                 split_ = false;
                 mergeTimer_ = 0.f;
                 oldMergeEvent = true;
