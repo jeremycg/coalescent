@@ -9,6 +9,26 @@ form the **Fluctuations** series (a label used throughout the docs, not a separa
 brand). **Lineages** is the first generative genealogy module: it creates a
 persistent finite musical structure, then plays or scrubs through it.
 
+<p align="center">
+  <a href="docs/gendyn.md"><img src="docs/img/gendyn.png" alt="GENDYN" height="330"></a>
+  <a href="docs/haptik.md"><img src="docs/img/haptik.png" alt="Haptik" height="330"></a>
+  <a href="docs/axon.md"><img src="docs/img/axon.png" alt="Axon" height="330"></a>
+  <a href="docs/soma.md"><img src="docs/img/soma.png" alt="Soma" height="330"></a>
+</p>
+
+<p align="center">
+  <a href="docs/operon.md"><img src="docs/img/operon.png" alt="Operon" height="330"></a>
+  <a href="docs/bunnies.md"><img src="docs/img/bunnies.png" alt="Bunnies" height="330"></a>
+  <a href="docs/foxes.md"><img src="docs/img/foxes.png" alt="Foxes" height="330"></a>
+</p>
+
+<p align="center">
+  <a href="docs/finches.md"><img src="docs/img/finches.png" alt="Finches" height="330"></a>
+  <a href="docs/islands.md"><img src="docs/img/islands.png" alt="Islands" height="330"></a>
+  <a href="docs/archipelago.md"><img src="docs/img/archipelago.png" alt="Archipelago" height="330"></a>
+  <a href="docs/lineages.md"><img src="docs/img/lineages.png" alt="Lineages" height="330"></a>
+</p>
+
 | Module | System | Character |
 | --- | --- | --- |
 | **GENDYN** | Xenakis dynamic stochastic synthesis (GENDY3) | a piecewise-linear waveform whose breakpoints random-walk each cycle — directed glissandi and living timbres |
@@ -22,12 +42,6 @@ persistent finite musical structure, then plays or scrubs through it.
 | **Islands** | four-population Wright–Fisher drift | four bounded allele-frequency CVs shaped by population size, selection, mutation, migration, and founder bottlenecks |
 | **Archipelago** | eight-habitat spatial local adaptation | eight continuous trait distributions follow different environments while nearest-neighbor migration, a barrier, and climate shape a polyphonic geographic cline |
 | **Lineages** | finite Kingman coalescent genealogy | a persistent ancestral tree played backward into convergence or forward into a related polyphonic mutation cluster |
-
-| | | | |
-| --- | --- | --- | --- |
-| **GENDYN**<br>![GENDYN](docs/img/gendyn.png) | **Haptik**<br>![Haptik](docs/img/haptik.png) | **Axon**<br>![Axon](docs/img/axon.png) | **Soma**<br>![Soma](docs/img/soma.png) |
-| **Operon**<br>![Operon](docs/img/operon.png) | **Bunnies**<br>![Bunnies](docs/img/bunnies.png) | **Foxes**<br>![Foxes](docs/img/foxes.png) | **Finches**<br>![Finches](docs/img/finches.png) |
-| **Islands**<br>![Islands](docs/img/islands.png) | **Archipelago**<br>![Archipelago](docs/img/archipelago.png) | **Lineages**<br>![Lineages](docs/img/lineages.png) | |
 
 ## Which module should I use?
 

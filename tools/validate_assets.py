@@ -43,6 +43,7 @@ MODULES = {
 }
 
 LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+HTML_LINK_RE = re.compile(r"\b(?:href|src)\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
 HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
 MANUAL_RE = re.compile(
     r"^https://github\.com/jeremycg/coalescent/blob/main/(docs/[^?#]+\.md)$"
@@ -103,7 +104,8 @@ def validate_markdown():
     checked = 0
     for source in files:
         text = cache[source.resolve()]
-        for raw_target in LINK_RE.findall(text):
+        targets = [*LINK_RE.findall(text), *HTML_LINK_RE.findall(text)]
+        for raw_target in targets:
             target = raw_target.strip()
             if target.startswith("<") and target.endswith(">"):
                 target = target[1:-1]
